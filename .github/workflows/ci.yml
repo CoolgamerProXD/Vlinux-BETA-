@@ -10,6 +10,46 @@ permissions:
   contents: read
 
 jobs:
+  runtime:
+    name: Runtime crate tests (fast, no Tauri, no Windows)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Test vlinux-runtime (fake wsl.exe output, no distribution needed)
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          set +e
+          cargo test -p vlinux-runtime --locked 2>&1 | tee ../runtime-test.log
+          code=${PIPESTATUS[0]}
+          sum=$(grep -E '^test result|^error|^warning: unused|Running |Doc-tests' ../runtime-test.log | head -40 | sed ':a;N;$!ba;s/\n/%0A/g')
+          if [ "$code" -ne 0 ]; then
+            det=$(grep -E -A7 '^error|^---- |panicked at|FAILED|failed:' ../runtime-test.log | head -80 | cut -c1-300 | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=runtime tests FAILED::${sum}%0A${det}"
+            exit 1
+          fi
+          echo "::notice title=runtime tests::${sum}"
+
+      - name: Clippy on the runtime crate (informational)
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          cargo clippy -p vlinux-runtime --all-targets 2>&1 | tee ../clippy.log
+          n=$(grep -c '^warning' ../clippy.log || true)
+          det=$(grep -E -A4 '^warning|^error' ../clippy.log | head -60 | cut -c1-240 | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::notice title=clippy (runtime crate): ${n} warning lines::${det}"
+        continue-on-error: true
+
   windows:
     name: Build, test and smoke-launch on Windows
     runs-on: windows-latest
@@ -49,7 +89,7 @@ jobs:
         working-directory: src-tauri
         shell: pwsh
         run: |
-          $out = cargo test --locked --lib 2>&1 | Out-String
+          $out = cargo test --workspace --locked 2>&1 | Out-String
           Write-Host $out
           $sum = ($out -split "`n" | Where-Object { $_ -match '^test |test result' }) -join "`n"
           Write-Host ("::notice title=Rust tests::" + ($sum -replace "`r","" -replace "`n","%0A"))
