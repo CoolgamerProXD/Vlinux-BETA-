@@ -38,3 +38,7 @@ scripts/        headless-browser e2e test
 docs/           ARCHITECTURE.md
 ```
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Verification status (M0 + M1)
+Verified on a GitHub-hosted `windows-latest` runner (Windows Server 2025, build 26100, Rust 1.99.1): frontend check/tests/build, `cargo test` (7 passed), `tauri build` producing the NSIS installer, and a smoke launch of the real `vlinux.exe` (still running after 15 s, ~30 MiB working set for the main process, 0 % idle CPU for the main process). A screenshot of the real app on Windows is in [docs/screenshots/windows-launch.png](docs/screenshots/windows-launch.png).
+Not yet verified by me on a physical Windows 10/11 desktop: installing/uninstalling the NSIS package, multi-monitor behaviour, and the Return-to-Windows minimise/restore flow (the code path is simple but was only exercised in the browser preview, where it correctly reports there is no host window).
