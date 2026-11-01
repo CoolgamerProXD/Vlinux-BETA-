@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   windows:
     name: Build, test and smoke-launch on Windows
@@ -17,9 +20,11 @@ jobs:
       - name: Host information (read-only)
         shell: pwsh
         run: |
-          [System.Environment]::OSVersion | Format-List
-          rustc --version; cargo --version; node --version; npm --version
-          wsl.exe --status 2>&1 | Out-String | Write-Host
+          $os = (Get-CimInstance Win32_OperatingSystem)
+          $wsl = (wsl.exe --status 2>&1 | Out-String) -replace "`0",""
+          $msg = "OS: $($os.Caption) $($os.Version) build $($os.BuildNumber)`nrustc: $(rustc --version)`ncargo: $(cargo --version)`nnode: $(node --version)  npm: $(npm --version)`nwsl --status: $($wsl.Trim())"
+          Write-Host $msg
+          Write-Host ("::notice title=Host info::" + ($msg -replace "`r","" -replace "`n","%0A"))
         continue-on-error: true
 
       - uses: actions/setup-node@v4
@@ -42,7 +47,13 @@ jobs:
 
       - name: Rust unit tests
         working-directory: src-tauri
-        run: cargo test --locked --lib || cargo test --lib
+        shell: pwsh
+        run: |
+          $out = cargo test --lib 2>&1 | Out-String
+          Write-Host $out
+          $sum = ($out -split "`n" | Where-Object { $_ -match '^test |test result' }) -join "`n"
+          Write-Host ("::notice title=Rust tests::" + ($sum -replace "`r","" -replace "`n","%0A"))
+          if ($LASTEXITCODE -ne 0) { throw "cargo test failed" }
 
       - name: Clippy (informational)
         working-directory: src-tauri
@@ -60,7 +71,8 @@ jobs:
           $p = Start-Process -FilePath $exe -PassThru
           Start-Sleep -Seconds 15
           if ($p.HasExited) { throw "VLINUX exited early with code $($p.ExitCode)" }
-          Write-Host "VLINUX is running (PID $($p.Id)), working set $([math]::Round($p.WorkingSet64/1MB,1)) MiB"
+          $ws = [math]::Round($p.WorkingSet64/1MB,1)
+          Write-Host "VLINUX is running (PID $($p.Id)), working set $ws MiB"
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
           $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
@@ -71,7 +83,15 @@ jobs:
           # Measure idle CPU over 10s
           $c0 = (Get-Process -Id $p.Id).CPU; Start-Sleep -Seconds 10
           $c1 = (Get-Process -Id $p.Id).CPU
-          Write-Host "Idle CPU (VLINUX main process only): $([math]::Round(($c1-$c0)/10*100,2)) % of one core"
+          $cpu = [math]::Round(($c1-$c0)/10*100,2)
+          Write-Host "::notice title=Smoke launch::vlinux.exe still running after 15s (PID $($p.Id)); main-process working set $ws MiB; idle CPU $cpu % of one core over 10s (main process only, excludes WebView2 child processes)"
+          $kids = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedgewebview2.exe' } | Measure-Object
+          Write-Host "WebView2 processes on runner: $($kids.Count)"
+          $small = New-Object System.Drawing.Bitmap 960, 540
+          $gg = [System.Drawing.Graphics]::FromImage($small); $gg.DrawImage($bmp, 0, 0, 960, 540)
+          New-Item -ItemType Directory -Force -Path docs/screenshots | Out-Null
+          $small.Save("$PWD/docs/screenshots/windows-launch.png")
+          "screen $($b.Width)x$($b.Height)" | Out-File artifacts/screen.txt
           Stop-Process -Id $p.Id -Force
 
       - name: Collect artifacts
@@ -81,6 +101,18 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           Copy-Item src-tauri/Cargo.lock artifacts/ -ErrorAction SilentlyContinue
           Copy-Item src-tauri/target/release/bundle/nsis/*.exe artifacts/ -ErrorAction SilentlyContinue
+
+      - name: One-off - commit Cargo.lock and launch screenshot back to this branch
+        if: always() && github.event_name == 'push'
+        shell: pwsh
+        run: |
+          git config user.name "vlinux-ci"; git config user.email "ci@users.noreply.github.com"
+          git add src-tauri/Cargo.lock docs/screenshots/windows-launch.png
+          if (git diff --cached --quiet) { Write-Host "nothing to commit" } else {
+            git commit -m "ci: add Cargo.lock and Windows launch screenshot [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          }
+        continue-on-error: true
 
       - uses: actions/upload-artifact@v4
         if: always()
