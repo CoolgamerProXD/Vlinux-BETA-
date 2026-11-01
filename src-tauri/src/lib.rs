@@ -3,17 +3,20 @@
 //! * `config`  — validated TOML configuration, kept apart from any distro files
 //! * `system`  — read-only host information
 //! * `window`  — full-screen / exit-to-Windows / quit
+//! * `runtime` — Tauri bindings for the `vlinux-runtime` crate (WSL detection, install plans,
+//!   storage model). All Linux-runtime logic lives in that Tauri-free crate.
 //!
-//! Later milestones add `wsl` (detection + management), `pty` (terminal sessions),
-//! `fs` (file manager) and `distro` (registry/installer) as separate modules behind
-//! a backend trait so that non-WSL execution backends can be added.
+//! Later milestones add `pty` (terminal sessions), `fs` (file manager) and full distro
+//! management, behind a backend trait so that non-WSL execution backends can be added.
 
 mod config;
 mod error;
+mod runtime;
 mod system;
 mod window;
 
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use tauri::{Manager, State, WindowEvent};
 
@@ -81,6 +84,8 @@ pub fn run() {
                 .map(|c| c.shell.start_fullscreen)
                 .unwrap_or(true);
             app.manage(store);
+            // Only constructs the state. No wsl.exe is run until the UI asks for detection.
+            app.manage(Arc::new(runtime::RuntimeState::new(&dir)));
 
             // The window is created hidden (see tauri.conf.json) so that the user never
             // sees a flash of the wrong state. Always show it, even if a step fails.
@@ -111,6 +116,15 @@ pub fn run() {
             window::is_fullscreen,
             window::exit_to_windows,
             window::quit_app,
+            runtime::wsl_detect,
+            runtime::wsl_catalog,
+            runtime::install_prepare,
+            runtime::install_start,
+            runtime::install_cancel,
+            runtime::distro_start,
+            runtime::distro_stop,
+            runtime::storage_overview,
+            runtime::storage_validate_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running VLINUX");

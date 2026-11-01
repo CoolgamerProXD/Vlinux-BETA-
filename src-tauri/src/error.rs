@@ -8,6 +8,7 @@ pub enum AppError {
     Io(String),
     Config(String),
     Window(String),
+    Runtime(String),
 }
 
 impl fmt::Display for AppError {
@@ -16,6 +17,7 @@ impl fmt::Display for AppError {
             AppError::Io(m) => write!(f, "I/O error: {m}"),
             AppError::Config(m) => write!(f, "Configuration error: {m}"),
             AppError::Window(m) => write!(f, "Window error: {m}"),
+            AppError::Runtime(m) => write!(f, "{m}"),
         }
     }
 }

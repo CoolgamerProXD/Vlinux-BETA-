@@ -29,12 +29,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await launch();
 const errors = [];
-async function fresh(w = 1600, h = 900) {
+async function fresh(w = 1600, h = 900, query = '') {
   const page = await browser.newPage();
   await page.setViewport({ width: w, height: h });
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.goto(url, { waitUntil: 'networkidle0' });
+  await page.goto(url + query, { waitUntil: 'networkidle0' });
   await page.waitForSelector('.shell.ready');
   await sleep(900); // let entry animations settle
   return page;
@@ -51,7 +51,7 @@ try {
   check('clock shows HH:MM', /^\d{2}:\d{2}$/.test(await text(page, '.time')), await text(page, '.time'));
   check('date shown', (await text(page, '.date')).length > 3);
   check('5 workspace indicators, #1 active', (await count(page, '.ws .pill')) === 5 && (await text(page, '.ws .pill.active')) === '1');
-  check('dock has launcher + 4 apps', (await count(page, '.dock .item')) === 5);
+  check('dock has launcher + 5 apps', (await count(page, '.dock .item')) === 6);
   check('planned apps (Terminal, Files) are disabled', (await count(page, '.dock .item[aria-disabled="true"]')) === 2);
   check('wallpaper rendered', (await count(page, '.wp svg')) === 1);
   await shot(page, '01-desktop');
@@ -65,9 +65,9 @@ try {
   await page.keyboard.down('Alt'); await page.keyboard.press('F1'); await page.keyboard.up('Alt');
   await page.waitForSelector('.panel[aria-label="Application launcher"]');
   check('Alt+F1 opens launcher', true);
-  check('launcher lists all 5 apps', (await count(page, '.grid .app')) === 5);
+  check('launcher lists all 6 apps', (await count(page, '.grid .app')) === 6);
   await shot(page, '02-launcher');
-  await page.keyboard.type('set');
+  await page.keyboard.type('settin');
   check('search filters', (await count(page, '.grid .app')) === 1);
   await page.keyboard.press('Enter');
   await sleep(500);
@@ -150,6 +150,141 @@ try {
   await sleep(100);
   check('workspace count setting applies', (await count(page, '.ws .pill')) === 3);
   await shot(page, '08-left-dock');
+  await page.close();
+
+
+  console.log('M2 - Linux Setup (simulated preview data; no WSL exists in a browser)');
+  const clickText = (pg, sel, t) => pg.evaluate((s2, t2) => { const el = [...document.querySelectorAll(s2)].find((e) => e.textContent.includes(t2)); if (!el) throw new Error(`no ${s2} with "${t2}"`); el.click(); }, sel, t);
+  const openApp = async (pg, label) => { await pg.click(`.dock .item[aria-label^="${label}"]`); await sleep(500); };
+  const statusOf = (pg) => pg.$eval('.card.status', (e) => e.getAttribute('data-status'));
+
+  page = await fresh(1600, 900);
+  await openApp(page, 'Linux Setup');
+  await page.waitForSelector('.card.status');
+  check('default browser preview says WSL is not available here', (await statusOf(page)) === 'unsupported_host');
+  check('no install buttons when the host is unsupported', (await count(page, '.card.status button')) === 0);
+  await shot(page, '10-setup-unavailable');
+  await page.close();
+
+  page = await fresh(1600, 900, '?wsl=reboot');
+  await openApp(page, 'Linux Setup');
+  await page.waitForSelector('.card.status');
+  check('restart pending is explained, with no install action', (await statusOf(page)) === 'restart_required' && (await count(page, '.card.status button')) === 0 && /restart/i.test(await text(page, '.card.status')));
+  await page.close();
+
+  page = await fresh(1600, 900, '?wsl=missing');
+  await openApp(page, 'Linux Setup');
+  await page.waitForSelector('.card.status');
+  check('missing WSL is reported', (await statusOf(page)) === 'not_installed');
+  check('simulated-data banner is shown', (await count(page, '.notice.sim')) === 1);
+  await clickText(page, '.card.status button', 'Review WSL setup');
+  await page.waitForSelector('.card.review');
+  const platformText = await text(page, '.card.review');
+  check('WSL platform review mentions UAC, restart and no distribution', /UAC/.test(platformText) && /restart/i.test(platformText) && /No Linux distribution/.test(platformText));
+  check('WSL platform review shows the exact command', platformText.includes('wsl.exe --install --no-distribution'));
+  check('Install is disabled until the user approves', await page.$eval('.card.review .btn.primary', (b) => b.disabled));
+  await shot(page, '11-setup-wsl-review');
+  await page.close();
+
+  page = await fresh(1600, 900, '?wsl=empty');
+  await openApp(page, 'Linux Setup');
+  await page.waitForSelector('.card.status[data-status="no_distributions"]');
+  check('no distributions: none listed, nothing suggested', (await count(page, '.distro')) === 0 && (await count(page, '.card.offer')) === 0);
+  await page.close();
+
+  page = await fresh(1600, 900, '?wsl=ready');
+  await openApp(page, 'Linux Setup');
+  await page.waitForSelector('.card.status[data-status="ready"]');
+  check('3 user distributions + 1 other-app distribution listed', (await count(page, '.distro:not(.internal)')) === 3 && (await count(page, '.distro.internal')) === 1);
+  check('the existing Arch is labelled Existing, nothing is "Installed by VLINUX" yet', (await text(page, '.distro[data-name="archlinux"] .badges')).includes('Existing') && !(await text(page, '.setup')).includes('Installed by VLINUX'));
+  check('the other application\'s distribution has no actions', (await count(page, '.distro.internal button')) === 0);
+  check('WSL 1 distribution is flagged and cannot be selected', await page.$eval('.distro[data-name="Debian"]', (e) => e.textContent.includes('WSL 1') && [...e.querySelectorAll('button')].find((b) => b.textContent.includes('Use with VLINUX')).disabled));
+  check('existing distribution offered for use', (await count(page, '.card.offer')) === 1 && (await text(page, '.card.offer')).includes('Arch Linux') && (await text(page, '.card.offer')).includes('will not reinstall'));
+  await shot(page, '12-setup-ready');
+  await clickText(page, '.card.offer button', 'Use archlinux');
+  await sleep(700);
+  check('choosing it marks it Selected and hides the offer', (await text(page, '.distro[data-name="archlinux"] .badges')).includes('Selected') && (await count(page, '.card.offer')) === 0);
+  const sel = await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).runtime.selected_distro);
+  check('selection persisted to config', sel === 'archlinux', String(sel));
+
+  await clickText(page, 'section[aria-label="Install a distribution"] button', 'Show official list');
+  await page.waitForSelector('.catalog li');
+  check('official list shows 5 entries', (await count(page, '.catalog li')) === 5);
+  check('unsupported distro cannot be installed, installed one is marked', (await text(page, '.catalog li[data-name="kali-linux"]')).includes('Not supported yet') && (await count(page, '.catalog li[data-name="kali-linux"] button')) === 0 && (await text(page, '.catalog li[data-name="archlinux"]')).includes('Installed') && (await count(page, '.catalog li[data-name="archlinux"] button')) === 0);
+
+  await clickText(page, '.catalog li[data-name="FedoraLinux-42"] button', 'Review install');
+  await page.waitForSelector('.card.review');
+  const rv = await text(page, '.card.review');
+  check('review lists the command and the untouched distributions', rv.includes('wsl.exe --install FedoraLinux-42 --no-launch') && rv.includes('archlinux') && rv.includes('Left untouched'));
+  check('nothing installs without ticking the approval box', await page.$eval('.card.review .btn.primary', (b) => b.disabled) && (await count(page, '.card.job')) === 0);
+  await shot(page, '13-setup-review');
+  await page.click('.card.review .consent input');
+  check('approving enables Install', !(await page.$eval('.card.review .btn.primary', (b) => b.disabled)));
+  await page.click('.card.review .btn.primary');
+  await page.waitForSelector('.card.job[data-outcome="running"]');
+  await shot(page, '14-setup-progress');
+  await sleep(1200);
+  await clickText(page, '.card.job button', 'Cancel installation');
+  await page.waitForSelector('.card.job[data-outcome="cancelled"]', { timeout: 5000 });
+  check('cancelling stops the job and says existing distributions are unchanged', (await text(page, '.card.job')).includes('Existing distributions were not changed') && (await count(page, '.distro[data-name="FedoraLinux-42"]')) === 0);
+  await clickText(page, '.card.job button', 'Dismiss');
+
+  await clickText(page, '.catalog li[data-name="Ubuntu"] button', 'Review install');
+  await page.waitForSelector('.card.review');
+  await page.click('.card.review .consent input');
+  await page.click('.card.review .btn.primary');
+  await page.waitForSelector('.card.job[data-outcome="succeeded"]', { timeout: 15000 });
+  await sleep(500);
+  check('a finished install is labelled Installed by VLINUX, and Arch is still Existing', (await text(page, '.distro[data-name="Ubuntu"] .badges')).includes('Installed by VLINUX') && (await text(page, '.distro[data-name="archlinux"] .badges')).includes('Existing'));
+  await shot(page, '15-setup-installed');
+
+  console.log('M2 - status panel shows a cached summary and never detects on its own');
+  await page.click('.chip[aria-label="System status"]');
+  await page.waitForSelector('.panel[aria-label="System status"]');
+  const sp = await text(page, '.panel[aria-label="System status"]');
+  check('status panel shows the cached WSL summary and selected distribution', sp.includes('Ready · 4 distributions') && sp.includes('archlinux'), sp);
+  await page.keyboard.press('Escape');
+  await page.close();
+
+
+  console.log('M2 - cached summary is empty before any detection');
+  page = await fresh(1600, 900);
+  await page.click('.chip[aria-label="System status"]');
+  await page.waitForSelector('.panel[aria-label="System status"]');
+  check('status panel says Not checked yet and does not run detection by itself', (await text(page, '.panel[aria-label="System status"]')).includes('Not checked yet'));
+  await page.close();
+
+  console.log('M2 - Linux folders (storage preferences)');
+  page = await fresh(1600, 900);
+  await page.evaluate(() => localStorage.clear());
+  await open2(page);
+  await clickText(page, '.settings nav button', 'Linux folders');
+  await page.waitForSelector('.folder[data-folder="downloads"]');
+  check('six personal folders listed, all shared by default', (await count(page, '.folder')) === 6 && (await page.$$eval('.folder input[role="switch"]', (els) => els.every((e) => e.checked))));
+  check('preferences are labelled as not yet applied', (await text(page, '.page')).includes('not applied to any distribution yet'));
+  check('projects default to Linux-native storage', await page.$eval('.seg button[aria-checked="true"]', (b) => b.textContent.includes('Inside Linux')));
+  await page.click('.folder[data-folder="music"] input[role="switch"]');
+  await sleep(800);
+  const st = await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).storage);
+  check('turning a folder private is saved', st.music.mode === 'private' && st.downloads.mode === 'shared', JSON.stringify(st));
+  check('private folder says it stays in Linux', (await text(page, '.folder[data-folder="music"]')).includes('Linux-private'));
+  await page.type('.folder[data-folder="downloads"] input.text', '\\\\server\\share\\Dl');
+  await clickText(page, '.folder[data-folder="downloads"] button', 'Check');
+  await sleep(200);
+  check('a UNC path is detected and refused', (await text(page, '.folder[data-folder="downloads"] .custom')).includes('network (UNC)') && await page.$eval('.folder[data-folder="downloads"] .pathrow button:last-child', (b) => b.disabled));
+  await page.$eval('.folder[data-folder="downloads"] input.text', (e) => { e.value = ''; e.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.type('.folder[data-folder="downloads"] input.text', 'D:\\Media\\Dl');
+  await clickText(page, '.folder[data-folder="downloads"] button', 'Check');
+  await sleep(200);
+  check('a drive path is accepted and shows the Linux path', (await text(page, '.folder[data-folder="downloads"] .custom')).includes('/mnt/d/Media/Dl'));
+  await clickText(page, '.folder[data-folder="downloads"] button', 'Use this folder');
+  await sleep(900);
+  check('custom location is shown and saved', (await text(page, '.folder[data-folder="downloads"]')).includes('D:\\Media\\Dl') && (await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).storage.downloads.windows_path)) === 'D:\\Media\\Dl');
+  await shot(page, '16-settings-folders');
+  await clickText(page, '.page button', 'Restore folder defaults');
+  await sleep(900);
+  const st2 = await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).storage);
+  check('restore defaults resets the preferences', st2.music.mode === 'shared' && st2.downloads.windows_path === null);
   await page.close();
 
   console.log('Responsive layouts (no overflow, nothing off-screen)');

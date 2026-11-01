@@ -8,6 +8,19 @@ export type Wallpaper = (typeof WALLPAPERS)[number];
 export type Accent = (typeof ACCENTS)[number];
 export type DockPosition = (typeof DOCK_POSITIONS)[number];
 
+export const FOLDER_IDS = ['downloads', 'documents', 'pictures', 'videos', 'music', 'desktop'] as const;
+export type FolderId = (typeof FOLDER_IDS)[number];
+export const MAPPING_MODES = ['shared', 'private'] as const;
+export const PROJECT_MODES = ['linux_private', 'shared'] as const;
+export type MappingMode = (typeof MAPPING_MODES)[number];
+export type ProjectsMode = (typeof PROJECT_MODES)[number];
+
+export interface FolderPref {
+  mode: MappingMode;
+  /** Custom Windows folder; null = the Windows Known Folder, resolved by the backend. */
+  windows_path: string | null;
+}
+
 export interface Config {
   schema_version: number;
   shell: {
@@ -27,6 +40,10 @@ export interface Config {
     position: DockPosition;
     icon_size: number;
   };
+  /** Which distribution the user chose to use. Never set automatically. */
+  runtime: { selected_distro: string | null };
+  /** Saved shared-folder preferences (applied from M4 on). */
+  storage: { projects: ProjectsMode } & Record<FolderId, FolderPref>;
 }
 
 export interface ConfigPayload {
@@ -45,11 +62,29 @@ export interface SystemInfo {
 }
 
 export const defaultConfig = (): Config => ({
-  schema_version: 1,
+  schema_version: 2,
   shell: { start_fullscreen: true, clock_24h: true, show_seconds: false, show_date: true, workspace_count: 5 },
   appearance: { wallpaper: 'nebula', accent: 'violet', glass: 60, animations: true },
   dock: { position: 'bottom', icon_size: 48 },
+  runtime: { selected_distro: null },
+  storage: defaultStorage(),
 });
+
+export const defaultFolderPref = (): FolderPref => ({ mode: 'shared', windows_path: null });
+
+export function defaultStorage(): Config['storage'] {
+  return {
+    projects: 'linux_private',
+    downloads: defaultFolderPref(),
+    documents: defaultFolderPref(),
+    pictures: defaultFolderPref(),
+    videos: defaultFolderPref(),
+    music: defaultFolderPref(),
+    desktop: defaultFolderPref(),
+  };
+}
+
+const DISTRO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(Number.isFinite(n) ? n : lo)));
 const pick = <T extends string>(list: readonly T[], v: unknown, fallback: T): T =>
@@ -63,8 +98,20 @@ export function sanitizeConfig(input: unknown): Config {
   const s = (o.shell ?? {}) as Record<string, unknown>;
   const a = (o.appearance ?? {}) as Record<string, unknown>;
   const k = (o.dock ?? {}) as Record<string, unknown>;
+  const r = (o.runtime ?? {}) as Record<string, unknown>;
+  const st = (o.storage ?? {}) as Record<string, any>;
+  const ds = defaultStorage();
+  const storage = { projects: pick(PROJECT_MODES, st.projects, ds.projects) } as Config['storage'];
+  for (const id of FOLDER_IDS) {
+    const f = (st[id] ?? {}) as Record<string, unknown>;
+    const wp = typeof f.windows_path === 'string' ? f.windows_path.trim() : '';
+    storage[id] = {
+      mode: pick(MAPPING_MODES, f.mode, 'shared'),
+      windows_path: wp && wp.length <= 1024 && !wp.includes('\0') ? wp : null,
+    };
+  }
   return {
-    schema_version: 1,
+    schema_version: 2,
     shell: {
       start_fullscreen: bool(s.start_fullscreen, d.shell.start_fullscreen),
       clock_24h: bool(s.clock_24h, d.shell.clock_24h),
@@ -82,5 +129,7 @@ export function sanitizeConfig(input: unknown): Config {
       position: pick(DOCK_POSITIONS, k.position, d.dock.position),
       icon_size: clamp(Number(k.icon_size ?? d.dock.icon_size), 32, 72),
     },
+    runtime: { selected_distro: typeof r.selected_distro === 'string' && DISTRO_NAME.test(r.selected_distro) ? r.selected_distro : null },
+    storage,
   };
 }

@@ -1,6 +1,9 @@
 <script lang="ts">
   import { host } from '../lib/host.svelte';
   import { config } from '../lib/config.svelte';
+  import { runtime } from '../lib/runtime.svelte';
+  import { wm } from '../lib/wm.svelte';
+  import { APPS } from '../lib/apps';
   import Logo from '../components/Logo.svelte';
 
   const info = $derived(host.info);
@@ -8,12 +11,16 @@
   const roadmap: { id: string; name: string; state: 'done' | 'next' | 'planned' }[] = [
     { id: 'M0', name: 'Foundation — project, config, build', state: 'done' },
     { id: 'M1', name: 'Desktop shell — bar, dock, launcher, exit to Windows', state: 'done' },
-    { id: 'M2', name: 'WSL detection and safe setup workflow', state: 'next' },
-    { id: 'M3', name: 'Linux terminal (real pseudoterminal)', state: 'planned' },
+    { id: 'M2', name: 'WSL detection, distro adapters, safe setup workflow, storage model', state: 'done' },
+    { id: 'M3', name: 'Linux terminal (real pseudoterminal)', state: 'next' },
     { id: 'M4', name: 'File manager', state: 'planned' },
     { id: 'M5', name: 'Distribution manager', state: 'planned' },
     { id: 'M6', name: 'Polish, resource limits, installer testing', state: 'planned' },
   ];
+
+  const r = $derived(runtime.report);
+  const regular = $derived((r?.distros ?? []).filter((d) => d.kind === 'regular'));
+  const openSetup = () => wm.open(APPS.find((a) => a.id === 'setup')!);
 </script>
 
 <div class="sys">
@@ -48,10 +55,15 @@
   <section>
     <h3>Linux runtime</h3>
     <dl>
-      <dt>WSL2</dt><dd class="dim">Not checked yet — detection arrives in M2</dd>
-      <dt>Distributions</dt><dd class="dim">Not scanned yet (VLINUX never modifies existing distributions)</dd>
-      <dt>Linux processes</dt><dd class="dim">None — VLINUX does not start Linux yet</dd>
+      <dt>WSL</dt><dd class:dim={!r}>{runtime.summary}</dd>
+      {#if r && (r.status.kind === 'ready' || r.status.kind === 'no_distributions')}
+        <dt>WSL version</dt><dd>{r.wsl_version ?? 'unknown'} (default: WSL {r.default_wsl_version ?? '?'})</dd>
+        <dt>Distributions</dt><dd>{regular.length ? regular.map((d) => `${d.name} (${d.state})`).join(', ') : 'None'}</dd>
+      {/if}
+      <dt>Selected</dt><dd class:dim={!runtime.selected}>{runtime.selected ?? 'None — choose one in Linux Setup'}</dd>
+      <dt>Linux processes</dt><dd class="dim">VLINUX starts none on its own; a distribution runs only if you start it</dd>
     </dl>
+    <button class="open" onclick={openSetup}>Open Linux Setup</button>
   </section>
 
   <section>
@@ -76,6 +88,8 @@
   dt { color: var(--faint); }
   dd { margin: 0; overflow-wrap: anywhere; }
   .dim { color: var(--muted); }
+  .open { margin-top: 12px; padding: 8px 14px; border-radius: 10px; background: rgb(var(--accent-rgb) / 0.16); border: 1px solid rgb(var(--accent-rgb) / 0.4); }
+  .open:hover { background: rgb(var(--accent-rgb) / 0.26); }
   .small { font-size: 0.74rem; user-select: all; }
   .road { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
   .road li { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 10px; background: rgb(255 255 255 / 0.04); font-size: 0.86rem; }

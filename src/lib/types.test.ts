@@ -29,4 +29,28 @@ describe('sanitizeConfig', () => {
   it('handles NaN', () => {
     expect(sanitizeConfig({ dock: { icon_size: NaN } }).dock.icon_size).toBe(32);
   });
+  it('validates the runtime and storage sections (schema 2)', () => {
+    const c = sanitizeConfig({
+      runtime: { selected_distro: 'archlinux' },
+      storage: { projects: 'shared', music: { mode: 'private' }, downloads: { mode: 'sideways', windows_path: '  D:\\Dl  ' }, pictures: { windows_path: 'x\0y' } },
+    });
+    expect(c.schema_version).toBe(2);
+    expect(c.runtime.selected_distro).toBe('archlinux');
+    expect(c.storage.projects).toBe('shared');
+    expect(c.storage.music.mode).toBe('private');
+    expect(c.storage.downloads).toEqual({ mode: 'shared', windows_path: 'D:\\Dl' });
+    expect(c.storage.pictures.windows_path).toBeNull();
+    expect(c.storage.documents).toEqual({ mode: 'shared', windows_path: null });
+  });
+  it('drops unsafe distribution names and defaults to Linux-private projects', () => {
+    expect(sanitizeConfig({ runtime: { selected_distro: 'x; calc' } }).runtime.selected_distro).toBeNull();
+    expect(sanitizeConfig({ runtime: { selected_distro: '-rf' } }).runtime.selected_distro).toBeNull();
+    expect(defaultConfig().storage.projects).toBe('linux_private');
+    expect(defaultConfig().runtime.selected_distro).toBeNull();
+  });
+  it('loads a version-1 config without losing anything', () => {
+    const c = sanitizeConfig({ schema_version: 1, appearance: { accent: 'rose' } });
+    expect(c.appearance.accent).toBe('rose');
+    expect(c.storage).toEqual(defaultConfig().storage);
+  });
 });

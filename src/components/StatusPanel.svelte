@@ -3,10 +3,16 @@
   import { APPS } from '../lib/apps';
   import { ui } from '../lib/ui.svelte';
   import { wm } from '../lib/wm.svelte';
+  import { runtime } from '../lib/runtime.svelte';
   import Icon from './Icon.svelte';
 
   const info = $derived(host.info);
   const batt = $derived(host.battery ? `${Math.round(host.battery.level * 100)}%${host.battery.charging ? ' (charging)' : ''}` : 'Not available');
+
+  function setup() {
+    wm.open(APPS.find((a) => a.id === 'setup')!);
+    ui.close();
+  }
 
   function details() {
     wm.open(APPS.find((a) => a.id === 'system')!);
@@ -24,9 +30,10 @@
       <dt>Network</dt><dd class:bad={!host.online}>{host.online ? 'Online' : 'Offline'}</dd>
       <dt>Battery</dt><dd>{batt}</dd>
       <dt>Display</dt><dd>{host.fullscreen ? 'Full screen' : 'Windowed'}</dd>
-      <dt>WSL2</dt><dd class="dim">Not checked yet — detection arrives in M2</dd>
-      <dt>Linux</dt><dd class="dim">Not running (VLINUX does not start Linux yet)</dd>
+      <dt>WSL</dt><dd class:dim={!runtime.report}>{runtime.summary}</dd>
+      <dt>Distribution</dt><dd class:dim={!runtime.selected}>{runtime.selected ?? 'None selected'}</dd>
     </dl>
+    <button class="more" onclick={setup}><Icon name="cpu" size={16} /> Open Linux Setup</button>
     <button class="more" onclick={details}><Icon name="activity" size={16} /> Open System details</button>
   </div>
 </div>
@@ -45,5 +52,6 @@
   .dim { color: var(--muted); }
   .bad { color: #ff8a98; }
   .more { margin-top: 14px; width: 100%; display: flex; gap: 8px; align-items: center; justify-content: center; padding: 9px; border-radius: 11px; background: rgb(var(--accent-rgb) / 0.16); border: 1px solid rgb(var(--accent-rgb) / 0.4); }
+  .more + .more { margin-top: 8px; }
   .more:hover { background: rgb(var(--accent-rgb) / 0.26); }
 </style>

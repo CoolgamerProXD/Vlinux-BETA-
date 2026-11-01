@@ -12,6 +12,7 @@
 //! * [`wsl`]       — allow-listed `wsl.exe` client
 //! * [`detect`]    — read-only WSL detection, report and install catalogue
 //! * [`install`]   — consent-gated install plans and the install job
+//! * [`managed`]   — record of distributions VLINUX installed itself
 //! * [`storage`]   — Windows<->Linux shared-folder model, path validation, mapping planner
 //! * [`testing`]   — fake process runner and helpers for tests
 
@@ -20,6 +21,7 @@ pub mod detect;
 pub mod encoding;
 pub mod exec;
 pub mod install;
+pub mod managed;
 pub mod model;
 pub mod osrelease;
 pub mod parse;

@@ -7,6 +7,7 @@
 // a real system.
 
 import { sanitizeConfig, defaultConfig, type Config, type ConfigPayload, type SystemInfo } from './types';
+import type { Catalog, InstallEvent, InstallPlan, StorageOverview, Verdict, WslReport } from './runtime-types';
 
 export const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -83,4 +84,67 @@ export async function onFullscreenChange(cb: (on: boolean) => void): Promise<() 
   const h = () => cb(!!document.fullscreenElement);
   document.addEventListener('fullscreenchange', h);
   return () => document.removeEventListener('fullscreenchange', h);
+}
+
+// ---- Linux runtime (WSL) --------------------------------------------------------------------
+// Every call is a typed, narrow request. The backend validates names against the real WSL state
+// and builds all command lines itself. In the browser these are SIMULATED (see preview.ts).
+
+const preview = () => import('./preview');
+
+/** Read-only snapshot of WSL and installed distributions. Cached by the backend. */
+export async function wslDetect(force = false): Promise<WslReport> {
+  if (isTauri()) return call<WslReport>('wsl_detect', { force });
+  return (await preview()).detect();
+}
+
+/** The official list of installable distributions (needs internet). */
+export async function wslCatalog(force = false): Promise<Catalog> {
+  if (isTauri()) return call<Catalog>('wsl_catalog', { force });
+  return (await preview()).catalog();
+}
+
+/** Ask the backend for a reviewable plan. Installs nothing. */
+export async function installPrepare(kind: 'distribution' | 'wsl_platform', name: string | null): Promise<InstallPlan> {
+  if (isTauri()) return call<InstallPlan>('install_prepare', { kind, name });
+  return (await preview()).prepare(kind, name);
+}
+
+/** Start a reviewed plan. `approved` must be true: it is the user's explicit consent. */
+export async function installStart(planId: string, approved: boolean): Promise<{ job_id: string }> {
+  if (isTauri()) return call<{ job_id: string }>('install_start', { planId, approved });
+  return (await preview()).start(planId, approved);
+}
+
+export async function installCancel(jobId: string): Promise<boolean> {
+  if (isTauri()) return call<boolean>('install_cancel', { jobId });
+  return (await preview()).cancel(jobId);
+}
+
+export async function onInstallEvent(cb: (e: InstallEvent) => void): Promise<() => void> {
+  if (isTauri()) {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<InstallEvent>('vlinux://install', (e) => cb(e.payload));
+  }
+  return (await preview()).onInstall(cb);
+}
+
+export async function distroStart(name: string): Promise<WslReport> {
+  if (isTauri()) return call<WslReport>('distro_start', { name });
+  return (await preview()).distroState(name, 'running');
+}
+
+export async function distroStop(name: string): Promise<WslReport> {
+  if (isTauri()) return call<WslReport>('distro_stop', { name });
+  return (await preview()).distroState(name, 'stopped');
+}
+
+export async function storageOverview(): Promise<StorageOverview> {
+  if (isTauri()) return call<StorageOverview>('storage_overview');
+  return (await preview()).storageOverview((await getConfig()).config);
+}
+
+export async function storageValidatePath(path: string): Promise<Verdict> {
+  if (isTauri()) return call<Verdict>('storage_validate_path', { path });
+  return (await preview()).validatePath(path);
 }

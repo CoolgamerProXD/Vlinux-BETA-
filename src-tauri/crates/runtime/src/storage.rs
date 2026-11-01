@@ -98,13 +98,14 @@ pub enum ProjectsMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct StorageConfig {
+    /// Declared first: TOML wants plain values before tables.
+    pub projects: ProjectsMode,
     pub desktop: FolderConfig,
     pub documents: FolderConfig,
     pub downloads: FolderConfig,
     pub music: FolderConfig,
     pub pictures: FolderConfig,
     pub videos: FolderConfig,
-    pub projects: ProjectsMode,
 }
 
 const MAX_PATH_TEXT: usize = 1024;

@@ -16,10 +16,14 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use vlinux_runtime::parse::valid_distro_name;
+use vlinux_runtime::storage::StorageConfig;
+
 use crate::error::AppError;
 
 pub const CONFIG_FILE: &str = "config.toml";
-pub const SCHEMA_VERSION: u32 = 1;
+/// 2: adds `[runtime]` and `[storage]` (additive; version-1 files load unchanged).
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -77,6 +81,16 @@ pub struct DockConfig {
     pub icon_size: u8,
 }
 
+/// Linux runtime preferences. Only stores a *choice*; nothing here starts or changes a distro.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RuntimeConfig {
+    /// Registered WSL name of the distribution the user chose to use with VLINUX. Never set
+    /// automatically, and never written to WSL (VLINUX does not run `wsl --set-default`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_distro: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -84,6 +98,8 @@ pub struct Config {
     pub shell: ShellConfig,
     pub appearance: AppearanceConfig,
     pub dock: DockConfig,
+    pub runtime: RuntimeConfig,
+    pub storage: StorageConfig,
 }
 
 impl Default for ShellConfig {
@@ -125,6 +141,8 @@ impl Default for Config {
             shell: ShellConfig::default(),
             appearance: AppearanceConfig::default(),
             dock: DockConfig::default(),
+            runtime: RuntimeConfig::default(),
+            storage: StorageConfig::default(),
         }
     }
 }
@@ -136,6 +154,8 @@ impl Config {
         self.shell.workspace_count = self.shell.workspace_count.clamp(2, 9);
         self.appearance.glass = self.appearance.glass.min(100);
         self.dock.icon_size = self.dock.icon_size.clamp(32, 72);
+        self.runtime.selected_distro = self.runtime.selected_distro.take().filter(|n| valid_distro_name(n));
+        self.storage = self.storage.sanitized();
         self
     }
 }
@@ -319,6 +339,52 @@ mod tests {
         let kept = fs::read_to_string(backups[0].path()).unwrap();
         assert!(kept.contains("not-a-wallpaper"));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn version_1_files_load_with_new_sections_defaulted() {
+        let dir = temp_dir("v1");
+        let path = dir.join(CONFIG_FILE);
+        fs::write(&path, "schema_version = 1\n[appearance]\naccent = \"cyan\"\n").unwrap();
+        let l = load(&path);
+        assert!(l.warning.is_none());
+        assert_eq!(l.config.appearance.accent, Accent::Cyan);
+        assert_eq!(l.config.storage, StorageConfig::default());
+        assert_eq!(l.config.runtime, RuntimeConfig::default());
+        assert_eq!(l.config.schema_version, 2);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_and_storage_preferences_roundtrip_through_toml() {
+        use vlinux_runtime::storage::{MappingMode, ProjectsMode};
+        let dir = temp_dir("rt2");
+        let path = dir.join(CONFIG_FILE);
+        let mut cfg = Config::default();
+        cfg.runtime.selected_distro = Some("archlinux".into());
+        cfg.storage.music.mode = MappingMode::Private;
+        cfg.storage.documents.windows_path = Some("D:\\Docs".into());
+        cfg.storage.projects = ProjectsMode::Shared;
+        save(&path, &cfg).unwrap();
+        let l = load(&path);
+        assert!(l.warning.is_none(), "{:?}", l.warning);
+        assert_eq!(l.config, cfg);
+        // The unset selection is simply absent, not an empty string.
+        let mut none = Config::default();
+        none.runtime.selected_distro = None;
+        save(&path, &none).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("selected_distro"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unsafe_selected_distro_names_are_dropped() {
+        let mut c = Config::default();
+        c.runtime.selected_distro = Some("x; calc".into());
+        assert_eq!(c.sanitized().runtime.selected_distro, None);
+        let mut c = Config::default();
+        c.runtime.selected_distro = Some("Ubuntu-24.04".into());
+        assert_eq!(c.sanitized().runtime.selected_distro.as_deref(), Some("Ubuntu-24.04"));
     }
 
     #[test]

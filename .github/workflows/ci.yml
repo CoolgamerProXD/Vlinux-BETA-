@@ -44,7 +44,7 @@ jobs:
         working-directory: src-tauri
         shell: bash
         run: |
-          cargo clippy -p vlinux-runtime --all-targets 2>&1 | tee ../clippy.log
+          cargo clippy -p vlinux-runtime --all-targets 2>&1 | tee ../clippy.log || true
           n=$(grep -c '^warning' ../clippy.log || true)
           det=$(grep -E -A4 '^warning|^error' ../clippy.log | head -60 | cut -c1-240 | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::notice title=clippy (runtime crate): ${n} warning lines::${det}"

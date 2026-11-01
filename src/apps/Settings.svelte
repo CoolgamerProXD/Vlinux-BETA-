@@ -1,20 +1,23 @@
 <script lang="ts">
   import { config } from '../lib/config.svelte';
   import { host } from '../lib/host.svelte';
-  import { setFullscreen } from '../lib/ipc';
+  import { setFullscreen, storageOverview, storageValidatePath } from '../lib/ipc';
+  import type { StorageOverview, Verdict } from '../lib/runtime-types';
+  import { defaultStorage, FOLDER_IDS, type FolderId } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
   import { ACCENTS, DOCK_POSITIONS, WALLPAPERS, type Accent, type Wallpaper } from '../lib/types';
   import { ACCENT_COLORS } from '../lib/theme';
   import Icon from '../components/Icon.svelte';
   import type { IconName } from '../lib/icons';
 
-  type Section = 'appearance' | 'desktop' | 'startup' | 'shortcuts' | 'storage';
+  type Section = 'appearance' | 'desktop' | 'startup' | 'folders' | 'shortcuts' | 'storage';
   const sections: { id: Section; label: string; icon: IconName }[] = [
     { id: 'appearance', label: 'Appearance', icon: 'palette' },
     { id: 'desktop', label: 'Desktop & dock', icon: 'grid' },
     { id: 'startup', label: 'Startup & display', icon: 'monitor' },
+    { id: 'folders', label: 'Linux folders', icon: 'folder' },
     { id: 'shortcuts', label: 'Shortcuts', icon: 'keyboard' },
-    { id: 'storage', label: 'Storage', icon: 'info' },
+    { id: 'storage', label: 'Settings file', icon: 'info' },
   ];
   let current = $state<Section>('appearance');
   let confirmReset = $state(false);
@@ -37,6 +40,54 @@
     ['Ctrl + Alt + Q', 'Return to Windows immediately'],
     ['Esc', 'Close the open menu'],
   ];
+
+  // ---- Linux folders (saved preferences; applied from M4 on) ----
+  let overview = $state<StorageOverview | null>(null);
+  let overviewError = $state<string | null>(null);
+  let draft = $state<Record<string, string>>({});
+  let checked = $state<Record<string, Verdict | null>>({});
+
+  async function loadOverview() {
+    overviewError = null;
+    try {
+      overview = await storageOverview();
+    } catch (e) {
+      overviewError = String(e);
+    }
+  }
+
+  $effect(() => {
+    if (current === 'folders') void loadOverview();
+  });
+
+  async function setPref(mutate: (c: typeof config.value) => void) {
+    config.update(mutate);
+    await config.flush();
+    await loadOverview();
+  }
+
+  async function checkPath(id: string) {
+    const text = (draft[id] ?? '').trim();
+    try {
+      checked[id] = await storageValidatePath(text);
+    } catch (e) {
+      checked[id] = { kind: 'unsupported', message: String(e) };
+    }
+  }
+
+  async function useCustom(id: FolderId) {
+    const text = (draft[id] ?? '').trim();
+    await setPref((x) => (x.storage[id].windows_path = text));
+    draft[id] = '';
+    checked[id] = null;
+  }
+
+  async function restoreFolders() {
+    await setPref((x) => (x.storage = defaultStorage()));
+    draft = {};
+    checked = {};
+    ui.toast('Folder preferences restored to defaults');
+  }
 
   async function fullscreenNow() {
     try {
@@ -126,7 +177,62 @@
       <label class="row"><span><strong>Start in full screen</strong><small>VLINUX opens full screen. Windows stays reachable (Win key, Alt+Tab, taskbar).</small></span>
         <input type="checkbox" role="switch" checked={c.shell.start_fullscreen} onchange={(e) => config.update((x) => (x.shell.start_fullscreen = e.currentTarget.checked))} /></label>
       <h3>Linux runtime</h3>
-      <p class="muted">WSL memory/CPU limits, default distribution and auto-start options will appear here once WSL management lands (M2–M6). They are not shown yet because they would not do anything.</p>
+      <p class="muted">Selected distribution: <strong>{config.value.runtime.selected_distro ?? 'none'}</strong>. Choose it in Linux Setup. VLINUX never starts Linux at launch and never changes WSL's own default distribution. WSL memory/CPU limits and auto-start options will appear here with full distribution management (M5), not before they do something.</p>
+    {:else if current === 'folders'}
+      <h3>Shared personal folders</h3>
+      <p class="muted">Your Linux home can point straight at your real Windows folders — the same files, no copies, no sync. System files, package data and caches always stay private to Linux.</p>
+      <div class="notice warn" role="note"><Icon name="info" size={16} /> These are saved preferences. They are not applied to any distribution yet — that arrives with the file manager (M4), and an existing Linux folder will never be replaced without asking.</div>
+      {#if overviewError}<div class="notice err" role="alert"><Icon name="alert" size={16} /> {overviewError}</div>{/if}
+      {#if overview}
+        {#each overview.folders as f (f.id)}
+          {@const id = f.id as FolderId}
+          <div class="folder" data-folder={f.id}>
+            <label class="row nopad">
+              <span><strong>{f.label}</strong> <code class="mono dim">{f.linux_path}</code>
+                <small class:bad={f.verdict?.kind === 'unsupported'}>{f.points_to}</small></span>
+              <input type="checkbox" role="switch" aria-label="Share {f.label} with Windows" checked={f.mode === 'shared'}
+                     onchange={(e) => setPref((x) => (x.storage[id].mode = e.currentTarget.checked ? 'shared' : 'private'))} />
+            </label>
+            {#if f.mode === 'shared'}
+              <div class="custom">
+                {#if f.custom_windows_path}
+                  <span class="muted">Custom location: <code class="mono">{f.custom_windows_path}</code></span>
+                  <button class="btn" onclick={() => setPref((x) => (x.storage[id].windows_path = null))}>Use the Windows default</button>
+                {:else}
+                  <span class="muted">Windows default{f.default_windows_path ? '' : ' (not reported by Windows)'}: <code class="mono">{f.default_windows_path ?? '—'}</code></span>
+                {/if}
+                <div class="pathrow">
+                  <input class="text" type="text" spellcheck="false" placeholder="Choose another Windows folder, e.g. D:\Media\{f.label}" aria-label="Alternative Windows folder for {f.label}"
+                         bind:value={draft[f.id]} oninput={() => (checked[f.id] = null)} />
+                  <button class="btn" onclick={() => checkPath(f.id)} disabled={!(draft[f.id] ?? '').trim()}>Check</button>
+                  <button class="btn" onclick={() => useCustom(id)} disabled={!checked[f.id] || checked[f.id]?.kind === 'unsupported'}>Use this folder</button>
+                </div>
+                {#if checked[f.id]}
+                  {@const v = checked[f.id]!}
+                  <small class:bad={v.kind === 'unsupported'} class:warnc={v.kind === 'warning'}>
+                    {v.kind === 'unsupported' ? `Cannot be shared: ${v.message}` : v.kind === 'warning' ? `Usable, with a caveat: ${v.message}` : `Looks good — Linux would see it at ${v.wsl_path}`}
+                  </small>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        {/each}
+
+        <h3>Development projects</h3>
+        <div class="seg" role="radiogroup" aria-label="Development projects location">
+          <button role="radio" aria-checked={c.storage.projects === 'linux_private'} class:sel={c.storage.projects === 'linux_private'} onclick={() => setPref((x) => (x.storage.projects = 'linux_private'))}>Inside Linux (recommended)</button>
+          <button role="radio" aria-checked={c.storage.projects === 'shared'} class:sel={c.storage.projects === 'shared'} onclick={() => setPref((x) => (x.storage.projects = 'shared'))}>On Windows</button>
+        </div>
+        <p class="muted">{overview.notes[1]}</p>
+        <p class="muted small">{overview.notes[2]}</p>
+        {#if overview.notes[3]}<p class="muted small">{overview.notes[3]}</p>{/if}
+
+        <h3>Defaults</h3>
+        <button class="btn" onclick={restoreFolders}><Icon name="rotate" size={15} /> Restore folder defaults</button>
+        <p class="muted small">Only changes these preferences. No file or folder is touched.</p>
+      {:else if !overviewError}
+        <p class="muted" aria-busy="true">Resolving where Windows keeps your folders…</p>
+      {/if}
     {:else if current === 'shortcuts'}
       <h3>Keyboard shortcuts</h3>
       <dl class="keys">
@@ -196,15 +302,27 @@
   .btn:hover { background: rgb(255 255 255 / 0.15); }
   .btn.danger { background: rgb(255 90 110 / 0.2); border-color: rgb(255 110 130 / 0.6); color: #ffb3bd; }
 
+  .folder { padding: 4px 0 10px; border-bottom: 1px solid var(--line); }
+  .row.nopad { border-bottom: 0; padding-bottom: 6px; }
+  .folder small { display: block; margin-top: 3px; font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
+  .folder small.bad, small.bad { color: #ffb3bd; }
+  small.warnc { color: #ffb454; }
+  .custom { display: grid; gap: 8px; padding: 2px 0 4px; font-size: 0.82rem; }
+  .custom .btn { justify-self: start; }
+  .pathrow { display: flex; gap: 8px; flex-wrap: wrap; }
+  .text { flex: 1 1 220px; min-width: 0; padding: 7px 10px; border-radius: 10px; background: rgb(0 0 0 / 0.3); border: 1px solid var(--line); color: var(--text); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .small { font-size: 0.76rem; }
   .keys { display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; margin: 0; align-items: center; }
   .keys dd { margin: 0; color: var(--muted); }
   kbd { padding: 3px 8px; border-radius: 7px; background: rgb(255 255 255 / 0.1); border: 1px solid var(--line); font-size: 0.78rem; white-space: nowrap; }
 
   .path { display: block; padding: 10px 12px; border-radius: 10px; background: rgb(0 0 0 / 0.35); border: 1px solid var(--line); font-size: 0.78rem; overflow-wrap: anywhere; user-select: all; }
 
-  .notice { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; border-radius: 12px; margin: 10px 0; font-size: 0.84rem; line-height: 1.45; }
+  .notice { display: block; padding: 10px 14px; border-radius: 12px; margin: 10px 0; font-size: 0.84rem; line-height: 1.45; }
   .notice.warn { background: rgb(255 180 84 / 0.12); border: 1px solid rgb(255 180 84 / 0.4); }
   .notice.err { background: rgb(255 90 110 / 0.12); border: 1px solid rgb(255 110 130 / 0.5); }
+  .notice :global(svg) { vertical-align: -3px; margin-right: 6px; }
   .acts { display: flex; gap: 8px; width: 100%; justify-content: flex-end; margin-top: 6px; }
 
   @media (max-width: 720px) {
