@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Build, test and smoke-launch on Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host information (read-only)
+        shell: pwsh
+        run: |
+          [System.Environment]::OSVersion | Format-List
+          rustc --version; cargo --version; node --version; npm --version
+          wsl.exe --status 2>&1 | Out-String | Write-Host
+        continue-on-error: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+      - name: Rust unit tests
+        working-directory: src-tauri
+        run: cargo test --locked --lib || cargo test --lib
+
+      - name: Clippy (informational)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets
+        continue-on-error: true
+
+      - name: Build app and NSIS installer
+        run: npx tauri build
+
+      - name: Smoke test - launch the real application
+        shell: pwsh
+        run: |
+          $exe = "src-tauri/target/release/vlinux.exe"
+          if (-not (Test-Path $exe)) { throw "vlinux.exe not built" }
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { throw "VLINUX exited early with code $($p.ExitCode)" }
+          Write-Host "VLINUX is running (PID $($p.Id)), working set $([math]::Round($p.WorkingSet64/1MB,1)) MiB"
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $bmp.Save("artifacts/launch.png")
+          # Measure idle CPU over 10s
+          $c0 = (Get-Process -Id $p.Id).CPU; Start-Sleep -Seconds 10
+          $c1 = (Get-Process -Id $p.Id).CPU
+          Write-Host "Idle CPU (VLINUX main process only): $([math]::Round(($c1-$c0)/10*100,2)) % of one core"
+          Stop-Process -Id $p.Id -Force
+
+      - name: Collect artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item src-tauri/Cargo.lock artifacts/ -ErrorAction SilentlyContinue
+          Copy-Item src-tauri/target/release/bundle/nsis/*.exe artifacts/ -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vlinux-windows
+          path: artifacts/
