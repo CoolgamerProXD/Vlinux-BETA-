@@ -46,7 +46,7 @@ jobs:
         run: |
           cargo clippy -p vlinux-runtime --all-targets 2>&1 | tee ../clippy.log || true
           n=$(grep -c '^warning' ../clippy.log || true)
-          det=$(grep -E -A4 '^warning|^error' ../clippy.log | head -60 | cut -c1-240 | sed ':a;N;$!ba;s/\n/%0A/g')
+          det=$( (grep -E -A4 '^warning|^error' ../clippy.log || true) | head -60 | cut -c1-240 | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::notice title=clippy (runtime crate): ${n} warning lines::${det}"
         continue-on-error: true
 
@@ -91,13 +91,21 @@ jobs:
         run: |
           $out = cargo test --workspace --locked 2>&1 | Out-String
           Write-Host $out
-          $sum = ($out -split "`n" | Where-Object { $_ -match '^test |test result' }) -join "`n"
+          $sum = ($out -split "`n" | Where-Object { $_ -match 'Running |test result|^error|FAILED|panicked' }) -join "`n"
           Write-Host ("::notice title=Rust tests::" + ($sum -replace "`r","" -replace "`n","%0A"))
           if ($LASTEXITCODE -ne 0) { throw "cargo test failed" }
 
       - name: Clippy (informational)
         working-directory: src-tauri
-        run: cargo clippy --all-targets
+        shell: pwsh
+        run: |
+          $out = cargo clippy --workspace --all-targets 2>&1 | Out-String
+          $lines = $out -split "`n" | ForEach-Object { $_.TrimEnd() }
+          $n = ($lines | Where-Object { $_ -match '^(warning|error)' }).Count
+          $det = (($lines | Select-String -Pattern '^(warning|error)' -Context 0,4 | Select-Object -First 40 | ForEach-Object { $_.Line + "`n" + ($_.Context.PostContext -join "`n") }) -join "`n")
+          if ($det.Length -gt 3500) { $det = $det.Substring(0,3500) }
+          Write-Host $out
+          Write-Host ("::notice title=clippy workspace ($n warning/error lines)::" + ($det -replace "`r","" -replace "`n","%0A"))
         continue-on-error: true
 
       - name: Build app and NSIS installer
