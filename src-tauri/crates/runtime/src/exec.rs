@@ -221,21 +221,23 @@ impl CommandRunner for SystemRunner {
         // The process has exited: collect whatever the reader threads still deliver, but never
         // wait indefinitely (a grandchild could keep the pipe open).
         let drain_until = Instant::now() + DRAIN_GRACE;
-        while !readers_done {
-            let left = drain_until.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                break;
-            }
-            match rx.recv_timeout(left) {
-                Ok((is_err, chunk)) => {
-                    on_output(&chunk);
-                    if is_err {
-                        out.stderr.extend_from_slice(&chunk);
-                    } else {
-                        out.stdout.extend_from_slice(&chunk);
-                    }
+        if !readers_done {
+            loop {
+                let left = drain_until.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break;
                 }
-                Err(_) => break,
+                match rx.recv_timeout(left) {
+                    Ok((is_err, chunk)) => {
+                        on_output(&chunk);
+                        if is_err {
+                            out.stderr.extend_from_slice(&chunk);
+                        } else {
+                            out.stdout.extend_from_slice(&chunk);
+                        }
+                    }
+                    Err(_) => break,
+                }
             }
         }
 

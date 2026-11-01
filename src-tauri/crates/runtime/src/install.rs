@@ -279,7 +279,7 @@ pub enum InstallOutcome {
 
 /// Latest human message and percentage from (decoded) installer output, which uses `\r` redraws.
 pub fn latest_progress(text: &str) -> (String, Option<f32>) {
-    let line = text.split(|c: char| c == '\r' || c == '\n').map(|l| l.trim()).filter(|l| !l.is_empty()).last().unwrap_or("");
+    let line = text.split(['\r', '\n']).map(|l| l.trim()).rfind(|l| !l.is_empty()).unwrap_or("");
     let percent = line.rfind('%').and_then(|idx| {
         let digits: String = line[..idx]
             .chars()
@@ -308,10 +308,9 @@ fn loose_reboot_marker(lc: &str) -> bool {
 
 fn last_message(text: &str) -> String {
     let line = text
-        .split(|c: char| c == '\r' || c == '\n')
+        .split(['\r', '\n'])
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty() && !l.contains('%'))
-        .last()
+        .rfind(|l| !l.is_empty() && !l.contains('%'))
         .unwrap_or("");
     line.chars().take(240).collect()
 }

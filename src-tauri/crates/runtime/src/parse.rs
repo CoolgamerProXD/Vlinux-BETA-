@@ -93,9 +93,9 @@ pub fn parse_list_verbose(text: &str) -> (Vec<ListRow>, Vec<String>) {
 }
 
 fn split_kv(line: &str) -> Option<(&str, &str)> {
-    let idx = line.find(|c: char| c == ':' || c == '：')?;
+    let idx = line.find([':', '：'])?;
     let (k, rest) = line.split_at(idx);
-    let v = rest.trim_start_matches(|c: char| c == ':' || c == '：');
+    let v = rest.trim_start_matches([':', '：']);
     Some((k.trim(), v.trim()))
 }
 

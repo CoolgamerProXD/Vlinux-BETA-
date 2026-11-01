@@ -247,7 +247,7 @@ fn is_reserved_name(component: &str) -> bool {
     matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || ((stem.starts_with("COM") || stem.starts_with("LPT"))
             && stem.len() == 4
-            && stem.chars().nth(3).map_or(false, |c| ('1'..='9').contains(&c)))
+            && stem.chars().nth(3).is_some_and(|c| ('1'..='9').contains(&c)))
 }
 
 /// Translate an absolute Windows path to the path WSL would use, or explain why it cannot be
@@ -295,7 +295,7 @@ pub fn windows_to_wsl(path: &str, mount_root: &str, drives: &dyn DriveInspector)
     let letter = (b[0] as char).to_ascii_lowercase();
 
     let mut comps: Vec<&str> = Vec::new();
-    for c in rest[3..].split(|ch: char| ch == '\\' || ch == '/') {
+    for c in rest[3..].split(['\\', '/']) {
         if c.is_empty() || c == "." {
             continue;
         }
