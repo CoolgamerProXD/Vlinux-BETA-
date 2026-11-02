@@ -17,12 +17,37 @@
   import TopBar from './components/TopBar.svelte';
   import Wallpaper from './components/Wallpaper.svelte';
   import WindowFrame from './components/WindowFrame.svelte';
+  import Welcome from './components/Welcome.svelte';
 
   let ready = $state(false);
 
+  // First-run guidance. Pure UI state (kept in the WebView's own storage, not in config.toml): it is
+  // shown while the user has not chosen a distribution and has not dismissed it.
+  const WELCOME_KEY = 'vlinux.welcome.dismissed';
+  let welcomeDismissed = $state(false);
+  try {
+    welcomeDismissed = localStorage.getItem(WELCOME_KEY) === '1';
+  } catch {
+    /* storage unavailable: show the guidance */
+  }
+  const showWelcome = $derived(ready && !welcomeDismissed && !config.value.runtime.selected_distro && wm.visible.length === 0);
+  function dismissWelcome() {
+    welcomeDismissed = true;
+    try {
+      localStorage.setItem(WELCOME_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  }
+
   onMount(() => {
     void (async () => {
-      await Promise.all([config.load(), host.init()]);
+      try {
+        await Promise.all([config.load(), host.init()]);
+      } catch (e) {
+        // Never leave the user with an invisible shell: show it with defaults and say what happened.
+        ui.toast(`Start-up problem: ${String((e as Error)?.message ?? e)}`, 'error', 9000);
+      }
       ready = true;
     })();
     return () => {
@@ -104,7 +129,9 @@
       {#each wm.windows as win (win.id)}
         <WindowFrame {win}><AppHost appId={win.appId} /></WindowFrame>
       {/each}
-      {#if wm.visible.length === 0}
+      {#if showWelcome}
+        <Welcome ondismiss={dismissWelcome} />
+      {:else if wm.visible.length === 0}
         <div class="hint" aria-hidden="true">
           <span class="mono">Alt+F1</span> applications · <span class="mono">Alt+Shift+Q</span> power &amp; exit
         </div>

@@ -56,6 +56,24 @@ try {
   check('wallpaper rendered', (await count(page, '.wp svg')) === 1);
   await shot(page, '01-desktop');
 
+  console.log('M6 - first launch');
+  check('a first launch shows the welcome guidance on the empty desktop', (await count(page, '[data-testid="welcome"]')) === 1 && (await text(page, '[data-testid="welcome"]')).includes('Show my distributions'));
+  check('the welcome says nothing is started or changed until asked, and names the way back to Windows', (await text(page, '[data-testid="welcome"]')).includes('until you ask') && (await text(page, '[data-testid="welcome"]')).includes('Ctrl+Alt+Q'));
+  await page.click('[data-testid="welcome-detect"]'); await sleep(900);
+  check('its button opens Distributions', (await visibleWindows(page)).some((l) => (l ?? '').startsWith('Distributions')));
+  check('the welcome steps aside while a window is open', (await count(page, '[data-testid="welcome"]')) === 0);
+  await page.keyboard.down('Alt'); await page.keyboard.press('KeyW'); await page.keyboard.up('Alt'); await sleep(500);
+  check('it returns when the desktop is empty again', (await count(page, '[data-testid="welcome"]')) === 1);
+  await page.click('[data-testid="welcome-dismiss"]'); await sleep(300);
+  await page.reload({ waitUntil: 'networkidle0' }); await page.waitForSelector('.shell.ready'); await sleep(700);
+  check('"Don\'t show this again" is remembered', (await count(page, '[data-testid="welcome"]')) === 0);
+  await page.evaluate(() => localStorage.removeItem('vlinux.welcome.dismissed'));
+  await page.evaluate(() => { const c = JSON.parse(localStorage.getItem('vlinux.config') ?? '{}'); c.runtime = { selected_distro: 'archlinux' }; localStorage.setItem('vlinux.config', JSON.stringify(c)); });
+  await page.reload({ waitUntil: 'networkidle0' }); await page.waitForSelector('.shell.ready'); await sleep(700);
+  check('it is not shown once a distribution has been chosen', (await count(page, '[data-testid="welcome"]')) === 0);
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: 'networkidle0' }); await page.waitForSelector('.shell.ready'); await sleep(700);
+
   console.log('Launcher');
   await page.keyboard.down('Alt'); await page.keyboard.press('F1'); await page.keyboard.up('Alt');
   await page.waitForSelector('.panel[aria-label="Application launcher"]');

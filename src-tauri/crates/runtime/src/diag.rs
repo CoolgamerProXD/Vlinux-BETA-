@@ -263,6 +263,20 @@ struct Res {
     modified: bool,
 }
 
+/// Read `VLXID:<user>:<home>:END` out of terminal output. The echoed command line also contains
+/// `VLXID:` but with format placeholders, so only an answer without `%` or `$` counts.
+fn parse_identity(text: &str) -> Option<(String, String)> {
+    text.lines().rev().find_map(|line| {
+        let rest = line.split("VLXID:").nth(1)?;
+        if rest.contains('%') || rest.contains('$') {
+            return None;
+        }
+        let body = rest.trim_end().strip_suffix(":END")?;
+        let (user, home) = body.split_once(':')?;
+        Some((user.to_string(), home.to_string()))
+    })
+}
+
 fn pass(m: impl Into<String>) -> Res {
     Res { outcome: Outcome::Passed, message: m.into(), guidance: None, modified: false }
 }
@@ -584,6 +598,25 @@ impl<'a, 'p> Run<'a, 'p> {
         self.check(write_spec("terminal.io", cat, "Input and output", "Typed input reaches the shell and its output comes back (`printf 'VLX%sEND' 42`)."), |s| {
             step(s, "printf 'VLX%sEND\\n' 42\r", "VLX42END", "Input reached the shell and output came back.", "The shell may be slow to start or has an unusual prompt; try again.")
         });
+        self.check(
+            write_spec("terminal.identity", cat, "Runs as your normal user", "The terminal's shell reports its user and HOME (`id -un`, `$HOME`); it must not be root and HOME must be set. The user name is not shown or put in the report."),
+            |s| {
+                let Some(id) = s.session.clone() else { return skip("No terminal session is open.") };
+                let Some((mgr, sink)) = s.env.terminal else { return not_tested("No terminal backend.") };
+                if let Err(e) = mgr.write(&id, "printf 'VLXID:%s:%s:END\\n' \"$(id -un)\" \"$HOME\"\r".as_bytes()) {
+                    return fail(format!("Could not send input: {e}"), "Try again.");
+                }
+                if !sink.wait_text(&id, ":END\r\n", s.env.step_timeout) {
+                    return fail(format!("The shell did not answer within {} ms.", s.env.step_timeout.as_millis()), "The shell may be slow to start; try again.");
+                }
+                match parse_identity(&sink.text(&id)) {
+                    None => fail("The answer could not be read.", "Report this."),
+                    Some((user, _)) if user == "root" => fail("The terminal runs as root.", "VLINUX opens your distribution's default user. Check `[user] default=` in /etc/wsl.conf (VLINUX will not change it)."),
+                    Some((_, home)) if home.is_empty() || !home.starts_with('/') => fail("HOME is not set to an absolute folder.", "Check the distribution's login configuration."),
+                    Some(_) => pass("The shell runs as a non-root user with HOME set.").modified(),
+                }
+            },
+        );
         self.check(write_spec("terminal.ansi", cat, "Colour and control sequences", "ANSI escape sequences pass through unchanged (a red text sequence is printed)."), |s| {
             step(s, "printf '\\033[31mVLXRED\\033[0m\\n'\r", "\u{1b}[31mVLXRED", "ANSI sequences arrived intact.", "Something between the shell and the terminal is rewriting escape sequences.")
         });
@@ -1514,6 +1547,8 @@ mod tests {
                     for line in w[seen..].split('\r').filter(|l| !l.is_empty()) {
                         if line.contains("VLX%sEND") {
                             p.output(b"VLX42END\r\n");
+                        } else if line.contains("VLXID") {
+                            p.output(b"VLXID:tester:/home/tester:END\r\n");
                         } else if line.contains("033[31m") {
                             p.output(b"\x1b[31mVLXRED\x1b[0m\r\n");
                         } else if line.contains("342") {
@@ -1609,7 +1644,7 @@ mod tests {
     fn writing_checks_need_permission_and_leave_nothing_behind() {
         let w = world(Running);
         let r = go(&w, Mode::Simulated, Options { allow_write: false, ..full() }, None);
-        for id in ["terminal.pty_create", "terminal.io", "fs.create_dir", "fs.create_file", "fs.rename", "fs.copy", "fs.move", "fs.symlink", "shared.link_roundtrip", "desktop.unusual_names"] {
+        for id in ["terminal.pty_create", "terminal.io", "terminal.identity", "fs.create_dir", "fs.create_file", "fs.rename", "fs.copy", "fs.move", "fs.symlink", "shared.link_roundtrip", "desktop.unusual_names"] {
             let c = get(&r, id);
             assert_eq!(c.outcome, Outcome::NotTested, "{id}");
             assert!(!c.modified);
@@ -1640,6 +1675,7 @@ mod tests {
             "runtime.exec",
             "terminal.pty_create",
             "terminal.io",
+            "terminal.identity",
             "terminal.ansi",
             "terminal.unicode",
             "terminal.resize",
@@ -1974,5 +2010,13 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn identity_answer_is_read_only_from_a_real_answer_not_the_echo() {
+        let echo = "printf 'VLXID:%s:%s:END\\n' \"$(id -un)\" \"$HOME\"\r\nVLXID:dana:/home/dana:END\r\n";
+        assert_eq!(parse_identity(echo), Some(("dana".into(), "/home/dana".into())));
+        assert_eq!(parse_identity("printf 'VLXID:%s:%s:END\\n' \"$(id -un)\"\r\n"), None);
+        assert_eq!(parse_identity("nothing here"), None);
     }
 }

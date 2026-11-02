@@ -579,6 +579,7 @@ const ROWS: Row[] = [
   { id: 'runtime.exec', category: 'runtime', title: 'Commands run inside the distribution', checked: 'A fixed read-only command is run through wsl.exe and its output must come back exactly.', running: true },
   { id: 'terminal.pty_create', category: 'terminal', title: 'Terminal session opens', checked: 'A throw-away pseudo-terminal session is opened in the distribution.', writes: true, running: true },
   { id: 'terminal.io', category: 'terminal', title: 'Input and output', checked: 'Typed input reaches the shell and its output comes back.', writes: true, running: true },
+  { id: 'terminal.identity', category: 'terminal', title: 'Runs as your normal user', checked: "The terminal's shell reports its user and HOME (`id -un`, `$HOME`); it must not be root and HOME must be set. The user name is not shown or put in the report.", writes: true, running: true },
   { id: 'terminal.ansi', category: 'terminal', title: 'Colour and control sequences', checked: 'ANSI escape sequences pass through unchanged.', writes: true, running: true },
   { id: 'terminal.unicode', category: 'terminal', title: 'Unicode', checked: 'A non-ASCII character survives the round trip.', writes: true, running: true },
   { id: 'terminal.resize', category: 'terminal', title: 'Resize', checked: 'Resizing the terminal is seen by the shell.', writes: true, running: true },
