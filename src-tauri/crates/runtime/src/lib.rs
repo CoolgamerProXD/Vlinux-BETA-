@@ -16,6 +16,11 @@
 //! * [`fs`]        — file manager backend: locations, listing, file operations (M4)
 //! * [`shared`]    — shared-storage mappings: apply/undo with conflict safety (M4)
 //! * [`storage`]   — Windows<->Linux shared-folder model, path validation, mapping planner
+//! * [`lifecycle`]  — start/stop one distribution, de-duplicated and confirmed (M5)
+//! * [`inspect`]    — read-only distribution inspection and its cache (M5)
+//! * [`probe`]      — allow-listed read-only in-distribution commands (M5)
+//! * [`packages`]   — package-manager capabilities, search parsing, reviewable plans (M5)
+//! * [`overview`]   — Distribution Manager cards and the preferred-distribution status (M5)
 //! * [`terminal`]  — interactive terminal sessions on a pseudoterminal (M3)
 //! * [`testing`]   — fake process runner and helpers for tests
 
@@ -24,11 +29,16 @@ pub mod detect;
 pub mod encoding;
 pub mod exec;
 pub mod fs;
+pub mod inspect;
 pub mod install;
+pub mod lifecycle;
 pub mod managed;
 pub mod model;
 pub mod osrelease;
+pub mod overview;
+pub mod packages;
 pub mod parse;
+pub mod probe;
 pub mod shared;
 pub mod storage;
 pub mod terminal;

@@ -53,6 +53,11 @@ pub trait DistroAdapter: Send + Sync {
     /// Lower-case prefixes of names in `wsl.exe --list --online` that this adapter can install.
     fn wsl_online_prefixes(&self) -> &'static [&'static str];
     fn package_manager(&self) -> PackageManager;
+    /// What VLINUX can do with this distribution's package manager (M5). Distribution-specific
+    /// behaviour belongs here: an adapter may override the default for its package manager.
+    fn packages(&self) -> crate::packages::PackageSupport {
+        crate::packages::PackageSupport::for_manager(self.package_manager())
+    }
     fn rolling_release(&self) -> bool {
         false
     }

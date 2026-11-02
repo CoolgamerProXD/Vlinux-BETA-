@@ -91,3 +91,45 @@ pub fn utf16_ok(text: &str) -> Result<CmdOutput, RunError> {
 pub fn utf16_code(code: i32, text: &str) -> Result<CmdOutput, RunError> {
     out_code(code, &utf16le(text))
 }
+
+/// A ready-made [`WslReport`](crate::model::WslReport) for tests: `(name, state, kind, wsl version)`.
+/// The adapter comes from the registered name, exactly as real detection does for distributions
+/// that were not inspected.
+pub fn fake_report(rows: &[(&str, crate::model::DistroState, crate::model::DistroKind, u8)], default: Option<&str>) -> crate::model::WslReport {
+    use crate::adapters::DistroRegistry;
+    use crate::model::{Distro, HostEnv, IdentitySource, Origin, RuntimeStatus, WslReport};
+    let registry = DistroRegistry::with_builtin();
+    let distros: Vec<Distro> = rows
+        .iter()
+        .map(|(name, state, kind, ver)| {
+            let adapter = registry.from_registered_name(name);
+            Distro {
+                name: name.to_string(),
+                state: *state,
+                wsl_version: *ver,
+                is_default: default == Some(*name),
+                kind: *kind,
+                origin: Origin::Existing,
+                adapter: adapter.info(),
+                identity_source: IdentitySource::RegisteredName,
+                os_release: None,
+                display_label: adapter.display_name().to_string(),
+            }
+        })
+        .collect();
+    WslReport {
+        status: if distros.is_empty() { RuntimeStatus::NoDistributions } else { RuntimeStatus::Ready },
+        host: HostEnv { is_windows: true, windows_build: Some(22631) },
+        wsl_version: Some("2.3.26.0".into()),
+        kernel_version: None,
+        wslg_version: None,
+        default_wsl_version: Some(2),
+        wsl2_available: Some(true),
+        distros,
+        default_distro: default.map(|s| s.to_string()),
+        suggested_distro: None,
+        pending_reboot: None,
+        warnings: Vec::new(),
+        detected_at: 1_700_000_000,
+    }
+}
