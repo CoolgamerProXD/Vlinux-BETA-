@@ -37,7 +37,10 @@ pub struct FsError {
 
 impl FsError {
     pub fn new(kind: FsErrorKind, message: impl Into<String>) -> Self {
-        Self { kind, message: message.into() }
+        Self {
+            kind,
+            message: message.into(),
+        }
     }
 
     /// Translate an I/O error into something a person can act on. `action` is a verb phrase

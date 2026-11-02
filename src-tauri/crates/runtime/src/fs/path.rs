@@ -31,7 +31,9 @@ pub fn linux_components(path: &str) -> FsResult<Vec<String>> {
         return Err(invalid_path("The path contains control characters."));
     }
     if path.contains('\\') {
-        return Err(invalid_path("Backslashes are not supported in Linux paths here."));
+        return Err(invalid_path(
+            "Backslashes are not supported in Linux paths here.",
+        ));
     }
     let mut out = Vec::new();
     for c in path.split('/') {
@@ -39,10 +41,15 @@ pub fn linux_components(path: &str) -> FsResult<Vec<String>> {
             continue;
         }
         if c == ".." {
-            return Err(invalid_path("'..' is not allowed in a path. Use the Up button instead."));
+            return Err(invalid_path(
+                "'..' is not allowed in a path. Use the Up button instead.",
+            ));
         }
         if c.len() > MAX_NAME {
-            return Err(FsError::new(FsErrorKind::InvalidName, "A name in that path is too long."));
+            return Err(FsError::new(
+                FsErrorKind::InvalidName,
+                "A name in that path is too long.",
+            ));
         }
         out.push(c.to_string());
     }
@@ -76,7 +83,10 @@ fn is_reserved_device(name: &str) -> bool {
     matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || ((stem.starts_with("COM") || stem.starts_with("LPT"))
             && stem.len() == 4
-            && stem.chars().nth(3).is_some_and(|c| ('1'..='9').contains(&c)))
+            && stem
+                .chars()
+                .nth(3)
+                .is_some_and(|c| ('1'..='9').contains(&c)))
 }
 
 /// A name for something *new* (create, rename, paste). Valid on Linux and addressable from
@@ -121,7 +131,10 @@ pub fn check_host_component(name: &str) -> FsResult<()> {
     if name.is_empty() || name == "." || name == ".." {
         return Err(invalid_path("Invalid path component."));
     }
-    if name.chars().any(|c| c.is_control() || c == '/' || c == '\\') {
+    if name
+        .chars()
+        .any(|c| c.is_control() || c == '/' || c == '\\')
+    {
         return Err(invalid_path("Invalid path component."));
     }
     if let Some(c) = name.chars().find(|c| WINDOWS_FORBIDDEN.contains(c)) {
@@ -131,7 +144,10 @@ pub fn check_host_component(name: &str) -> FsResult<()> {
         ));
     }
     if is_reserved_device(name) {
-        return Err(FsError::new(FsErrorKind::Unavailable, format!("\"{name}\" is a reserved Windows device name.")));
+        return Err(FsError::new(
+            FsErrorKind::Unavailable,
+            format!("\"{name}\" is a reserved Windows device name."),
+        ));
     }
     Ok(())
 }
@@ -151,17 +167,35 @@ mod tests {
     #[test]
     fn linux_paths_are_normalised() {
         assert_eq!(normalize_linux("/").unwrap(), "/");
-        assert_eq!(normalize_linux("//home///me/./docs/").unwrap(), "/home/me/docs");
+        assert_eq!(
+            normalize_linux("//home///me/./docs/").unwrap(),
+            "/home/me/docs"
+        );
     }
 
     #[test]
     fn invalid_linux_paths_are_refused() {
-        for p in ["", "relative/path", "~/x", "/a/../b", "/..", "/a\0b", "/a\nb", "/a\\b", "C:\\Windows"] {
+        for p in [
+            "",
+            "relative/path",
+            "~/x",
+            "/a/../b",
+            "/..",
+            "/a\0b",
+            "/a\nb",
+            "/a\\b",
+            "C:\\Windows",
+        ] {
             let e = linux_components(p).unwrap_err();
             assert_eq!(e.kind, FsErrorKind::InvalidPath, "{p:?}");
         }
         assert!(linux_components(&format!("/{}", "a".repeat(5000))).is_err());
-        assert_eq!(linux_components(&format!("/{}", "a".repeat(300))).unwrap_err().kind, FsErrorKind::InvalidName);
+        assert_eq!(
+            linux_components(&format!("/{}", "a".repeat(300)))
+                .unwrap_err()
+                .kind,
+            FsErrorKind::InvalidName
+        );
     }
 
     #[test]
@@ -173,12 +207,41 @@ mod tests {
 
     #[test]
     fn names_for_new_items() {
-        for ok in ["notes.txt", ".bashrc", "my folder", "日本語.txt", "a-b_c (1)"] {
+        for ok in [
+            "notes.txt",
+            ".bashrc",
+            "my folder",
+            "日本語.txt",
+            "a-b_c (1)",
+        ] {
             assert!(check_name(ok).is_ok(), "{ok}");
         }
         let long = "x".repeat(256);
-        for bad in ["", ".", "..", "a/b", "a\\b", "a:b", "what?", "star*", "q\"q", "a|b", "<x>", "end.", "end ", " lead", "nul", "COM1.txt", "a\tb", long.as_str()] {
-            assert_eq!(check_name(bad).unwrap_err().kind, FsErrorKind::InvalidName, "{bad:?}");
+        for bad in [
+            "",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "a:b",
+            "what?",
+            "star*",
+            "q\"q",
+            "a|b",
+            "<x>",
+            "end.",
+            "end ",
+            " lead",
+            "nul",
+            "COM1.txt",
+            "a\tb",
+            long.as_str(),
+        ] {
+            assert_eq!(
+                check_name(bad).unwrap_err().kind,
+                FsErrorKind::InvalidName,
+                "{bad:?}"
+            );
         }
     }
 

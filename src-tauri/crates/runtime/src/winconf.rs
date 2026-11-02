@@ -48,10 +48,22 @@ pub fn default_path() -> Option<PathBuf> {
 }
 
 const RESOURCE_KEYS: [(&str, &str, &str); 4] = [
-    ("memory", "Memory limit for WSL 2", "Not set: WSL 2 decides (a share of this PC's memory)."),
-    ("processors", "Processor limit for WSL 2", "Not set: WSL 2 may use all logical processors."),
+    (
+        "memory",
+        "Memory limit for WSL 2",
+        "Not set: WSL 2 decides (a share of this PC's memory).",
+    ),
+    (
+        "processors",
+        "Processor limit for WSL 2",
+        "Not set: WSL 2 may use all logical processors.",
+    ),
     ("swap", "Swap size", "Not set: WSL's default swap applies."),
-    ("localhostForwarding", "Localhost forwarding", "Not set: WSL's default applies."),
+    (
+        "localhostForwarding",
+        "Localhost forwarding",
+        "Not set: WSL's default applies.",
+    ),
 ];
 
 /// Read `.wslconfig` from `path` (injectable for tests). A missing file is normal.
@@ -71,7 +83,8 @@ pub fn read(path: Option<&Path>, host_processors: Option<usize>) -> WindowsConfi
     };
     let text = match path {
         None => {
-            cfg.read_error = Some("The Windows user profile folder could not be determined.".into());
+            cfg.read_error =
+                Some("The Windows user profile folder could not be determined.".into());
             None
         }
         Some(p) => match fs::metadata(p) {
@@ -97,7 +110,8 @@ pub fn read(path: Option<&Path>, host_processors: Option<usize>) -> WindowsConfi
                 }
             },
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                cfg.notes.push("There is no .wslconfig, so WSL's defaults apply.".into());
+                cfg.notes
+                    .push("There is no .wslconfig, so WSL's defaults apply.".into());
                 None
             }
             Err(e) => {
@@ -110,13 +124,23 @@ pub fn read(path: Option<&Path>, host_processors: Option<usize>) -> WindowsConfi
     cfg.malformed = doc.malformed.clone();
     cfg.resources = RESOURCE_KEYS
         .iter()
-        .map(|(k, label, note)| WinResource { label: (*label).into(), value: doc.get("wsl2", k), note: (*note).into() })
+        .map(|(k, label, note)| WinResource {
+            label: (*label).into(),
+            value: doc.get("wsl2", k),
+            note: (*note).into(),
+        })
         .collect();
     cfg.entries = doc
         .keys()
         .into_iter()
         .take(100)
-        .filter_map(|(s, k)| doc.get(&s, &k).map(|v| WinEntry { section: s, key: k, value: v.chars().take(200).collect() }))
+        .filter_map(|(s, k)| {
+            doc.get(&s, &k).map(|v| WinEntry {
+                section: s,
+                key: k,
+                value: v.chars().take(200).collect(),
+            })
+        })
         .collect();
     if doc.is_malformed() {
         cfg.notes.push("Some lines could not be understood; the entries shown are the ones that could be read.".into());
@@ -148,7 +172,14 @@ mod tests {
         fs::write(&p, text).unwrap();
         let c = read(Some(&p), None);
         assert!(c.exists);
-        let get = |l: &str| c.resources.iter().find(|r| r.label.starts_with(l)).unwrap().value.clone();
+        let get = |l: &str| {
+            c.resources
+                .iter()
+                .find(|r| r.label.starts_with(l))
+                .unwrap()
+                .value
+                .clone()
+        };
         assert_eq!(get("Memory").as_deref(), Some("8GB"));
         assert_eq!(get("Processor").as_deref(), Some("4"));
         assert_eq!(get("Swap"), None);

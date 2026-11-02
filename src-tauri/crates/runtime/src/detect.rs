@@ -38,18 +38,28 @@ const REBOOT_KEYS: [&str; 2] = [
 /// Heuristic: do the standard Windows servicing "restart pending" registry keys exist?
 pub fn probe_pending_reboot(wsl: &WslClient, programs: &Programs) -> bool {
     REBOOT_KEYS.iter().any(|key| {
-        let spec = CommandSpec::new(programs.reg.clone(), &["query", *key], std::time::Duration::from_secs(5));
+        let spec = CommandSpec::new(
+            programs.reg.clone(),
+            &["query", *key],
+            std::time::Duration::from_secs(5),
+        );
         matches!(wsl.runner().run_simple(&spec), Ok(o) if o.success())
     })
 }
 
 pub fn is_internal_distro(name: &str) -> bool {
     let lc = name.to_ascii_lowercase();
-    ["docker-desktop", "rancher-desktop", "podman-machine"].iter().any(|p| lc.starts_with(p))
+    ["docker-desktop", "rancher-desktop", "podman-machine"]
+        .iter()
+        .any(|p| lc.starts_with(p))
 }
 
 pub(crate) fn first_line(text: &str) -> String {
-    let line = text.lines().map(|l| l.trim()).find(|l| !l.is_empty()).unwrap_or("");
+    let line = text
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
     line.chars().take(240).collect()
 }
 
@@ -95,7 +105,10 @@ impl Builder {
 
 fn run_error_message(what: &str, e: &RunError) -> String {
     match e {
-        RunError::Timeout(d) => format!("{what} did not answer within {} s. WSL may be starting up or stuck; try again.", d.as_secs()),
+        RunError::Timeout(d) => format!(
+            "{what} did not answer within {} s. WSL may be starting up or stuck; try again.",
+            d.as_secs()
+        ),
         other => format!("{what} failed: {other}."),
     }
 }
@@ -125,17 +138,26 @@ fn failure_status(
             if pending {
                 RuntimeStatus::RestartRequired
             } else {
-                RuntimeStatus::FeatureProblem { code: Some(code.to_string()), hint: hint.to_string() }
+                RuntimeStatus::FeatureProblem {
+                    code: Some(code.to_string()),
+                    hint: hint.to_string(),
+                }
             }
         }
         Some(Failure::NoDistributions) | None => {
             if pending {
-                b.report.warnings.push("Windows reports a pending restart; restarting may resolve this.".to_string());
+                b.report.warnings.push(
+                    "Windows reports a pending restart; restarting may resolve this.".to_string(),
+                );
             }
             let msg = first_line(text);
             RuntimeStatus::Error {
                 message: if msg.is_empty() {
-                    format!("{what} failed (exit code {}).", code.map(|c| c.to_string()).unwrap_or_else(|| "unknown".into()))
+                    format!(
+                        "{what} failed (exit code {}).",
+                        code.map(|c| c.to_string())
+                            .unwrap_or_else(|| "unknown".into())
+                    )
                 } else {
                     format!("{what} failed: {msg}")
                 },
@@ -144,7 +166,12 @@ fn failure_status(
     }
 }
 
-pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, opts: &DetectOptions<'_>) -> WslReport {
+pub fn detect(
+    wsl: &WslClient,
+    programs: &Programs,
+    registry: &DistroRegistry,
+    opts: &DetectOptions<'_>,
+) -> WslReport {
     let mut b = Builder::new(opts.host.clone());
 
     // 1. Host support.
@@ -166,7 +193,15 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
     let mut no_distros_hint = false;
     match wsl.status() {
         Err(RunError::NotFound(_)) => {
-            let status = failure_status(&mut b, wsl, programs, Some(Failure::NotInstalled), "wsl.exe", "", None);
+            let status = failure_status(
+                &mut b,
+                wsl,
+                programs,
+                Some(Failure::NotInstalled),
+                "wsl.exe",
+                "",
+                None,
+            );
             return b.done(status);
         }
         Err(e) => {
@@ -187,7 +222,15 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
                 match parse::classify_failure(&text) {
                     Some(Failure::NoDistributions) => no_distros_hint = true,
                     other => {
-                        let status = failure_status(&mut b, wsl, programs, other, "'wsl.exe --status'", &text, out.status);
+                        let status = failure_status(
+                            &mut b,
+                            wsl,
+                            programs,
+                            other,
+                            "'wsl.exe --status'",
+                            &text,
+                            out.status,
+                        );
                         return b.done(status);
                     }
                 }
@@ -220,9 +263,19 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
         let failure = parse::classify_failure(&list_text);
         return match failure {
             Some(Failure::NoDistributions) => b.done(RuntimeStatus::NoDistributions),
-            _ if no_distros_hint && list_text.trim().is_empty() => b.done(RuntimeStatus::NoDistributions),
+            _ if no_distros_hint && list_text.trim().is_empty() => {
+                b.done(RuntimeStatus::NoDistributions)
+            }
             Some(f) => {
-                let status = failure_status(&mut b, wsl, programs, Some(f), "'wsl.exe --list --verbose'", &list_text, list_out.status);
+                let status = failure_status(
+                    &mut b,
+                    wsl,
+                    programs,
+                    Some(f),
+                    "'wsl.exe --list --verbose'",
+                    &list_text,
+                    list_out.status,
+                );
                 b.done(status)
             }
             None => {
@@ -239,24 +292,36 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
 
     let surprising = unparsed
         .iter()
-        .filter(|l| !(l.split_whitespace().count() >= 2 && !l.chars().any(|c| c.is_lowercase() || c.is_ascii_digit())))
+        .filter(|l| {
+            !(l.split_whitespace().count() >= 2
+                && !l.chars().any(|c| c.is_lowercase() || c.is_ascii_digit()))
+        })
         .count();
     if surprising > 0 {
         b.report.warnings.push(format!("Ignored {surprising} line(s) of 'wsl.exe --list --verbose' output that VLINUX did not recognise."));
     }
 
     // 5. Build distributions.
-    let managed: HashSet<String> = opts.managed.iter().map(|n| n.to_ascii_lowercase()).collect();
+    let managed: HashSet<String> = opts
+        .managed
+        .iter()
+        .map(|n| n.to_ascii_lowercase())
+        .collect();
     let mut queried = 0usize;
     let mut distros = Vec::new();
     for row in &rows {
-        let kind = if is_internal_distro(&row.name) { DistroKind::Internal } else { DistroKind::Regular };
+        let kind = if is_internal_distro(&row.name) {
+            DistroKind::Internal
+        } else {
+            DistroKind::Regular
+        };
         let by_name = registry.from_registered_name(&row.name);
         let mut adapter = by_name.info();
         let mut identity_source = IdentitySource::RegisteredName;
         let mut os_release = None;
 
-        if opts.identify_running && kind == DistroKind::Regular && row.state == DistroState::Running {
+        if opts.identify_running && kind == DistroKind::Regular && row.state == DistroState::Running
+        {
             if queried < MAX_OS_RELEASE_QUERIES {
                 queried += 1;
                 match wsl.read_os_release(&row.name) {
@@ -279,7 +344,13 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
         let display_label = os_release
             .as_ref()
             .and_then(|r| r.pretty_name.clone().or_else(|| r.name.clone()))
-            .unwrap_or_else(|| if adapter.id == "generic" { row.name.clone() } else { adapter.display_name.clone() });
+            .unwrap_or_else(|| {
+                if adapter.id == "generic" {
+                    row.name.clone()
+                } else {
+                    adapter.display_name.clone()
+                }
+            });
 
         distros.push(Distro {
             name: row.name.clone(),
@@ -287,7 +358,11 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
             wsl_version: row.version,
             is_default: row.is_default,
             kind,
-            origin: if managed.contains(&row.name.to_ascii_lowercase()) { Origin::InstalledByVlinux } else { Origin::Existing },
+            origin: if managed.contains(&row.name.to_ascii_lowercase()) {
+                Origin::InstalledByVlinux
+            } else {
+                Origin::Existing
+            },
             adapter,
             identity_source,
             os_release,
@@ -313,7 +388,11 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
     };
     b.report.suggested_distro = distros
         .iter()
-        .filter(|d| d.kind == DistroKind::Regular && d.wsl_version == 2 && matches!(d.state, DistroState::Running | DistroState::Stopped))
+        .filter(|d| {
+            d.kind == DistroKind::Regular
+                && d.wsl_version == 2
+                && matches!(d.state, DistroState::Running | DistroState::Stopped)
+        })
         .min_by_key(|d| (rank(d), !d.is_default))
         .map(|d| d.name.clone());
 
@@ -324,7 +403,11 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
 
     let usable = distros.iter().any(|d| d.kind == DistroKind::Regular);
     b.report.distros = distros;
-    let status = if usable { RuntimeStatus::Ready } else { RuntimeStatus::NoDistributions };
+    let status = if usable {
+        RuntimeStatus::Ready
+    } else {
+        RuntimeStatus::NoDistributions
+    };
     b.done(status)
 }
 
@@ -332,7 +415,11 @@ pub fn detect(wsl: &WslClient, programs: &Programs, registry: &DistroRegistry, o
 /// against the adapter registry.
 pub fn fetch_catalog(wsl: &WslClient, registry: &DistroRegistry, existing: &[Distro]) -> Catalog {
     let fetched_at = unix_now();
-    let fail = |msg: String| Catalog { entries: Vec::new(), error: Some(msg), fetched_at };
+    let fail = |msg: String| Catalog {
+        entries: Vec::new(),
+        error: Some(msg),
+        fetched_at,
+    };
     let out = match wsl.list_online() {
         Ok(o) => o,
         Err(e) => return fail(format!("Could not fetch the official distribution list: {e}. This needs an internet connection.")),
@@ -351,11 +438,23 @@ pub fn fetch_catalog(wsl: &WslClient, registry: &DistroRegistry, existing: &[Dis
         .into_iter()
         .map(|r| {
             let adapter = registry.from_wsl_online_name(&r.name).map(|a| a.info());
-            let already_installed = existing.iter().any(|d| d.name.eq_ignore_ascii_case(&r.name));
-            CatalogEntry { supported: adapter.is_some(), adapter, wsl_name: r.name, friendly_name: r.friendly_name, already_installed }
+            let already_installed = existing
+                .iter()
+                .any(|d| d.name.eq_ignore_ascii_case(&r.name));
+            CatalogEntry {
+                supported: adapter.is_some(),
+                adapter,
+                wsl_name: r.name,
+                friendly_name: r.friendly_name,
+                already_installed,
+            }
         })
         .collect();
     // Supported distributions first (stable), keeping Microsoft's order within each group.
     entries.sort_by_key(|e| !e.supported);
-    Catalog { entries, error: None, fetched_at }
+    Catalog {
+        entries,
+        error: None,
+        fetched_at,
+    }
 }

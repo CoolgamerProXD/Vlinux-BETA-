@@ -16,7 +16,9 @@ use std::time::{Duration, Instant};
 use super::pty::{PtyBackend, PtyChild, PtyControl, PtyError, PtyHandles, PtySize, PtySpawn};
 use super::session::{SessionState, TerminalManager, TerminalSink};
 use crate::adapters::{AdapterInfo, PackageManager};
-use crate::model::{Distro, DistroKind, DistroState, HostEnv, IdentitySource, Origin, RuntimeStatus, WslReport};
+use crate::model::{
+    Distro, DistroKind, DistroState, HostEnv, IdentitySource, Origin, RuntimeStatus, WslReport,
+};
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -49,7 +51,10 @@ pub fn distro(name: &str, state: DistroState, kind: DistroKind) -> Distro {
 pub fn report(status: RuntimeStatus, distros: Vec<Distro>) -> WslReport {
     WslReport {
         status,
-        host: HostEnv { is_windows: true, windows_build: Some(26100) },
+        host: HostEnv {
+            is_windows: true,
+            windows_build: Some(26100),
+        },
         wsl_version: Some("2.4.13.0".into()),
         kernel_version: None,
         wslg_version: None,
@@ -211,7 +216,11 @@ pub struct FakeBackend {
 
 impl FakeBackend {
     pub fn new() -> Self {
-        FakeBackend { inner: Arc::new(FakeInner::default()), eof_on_exit: true, echo: false }
+        FakeBackend {
+            inner: Arc::new(FakeInner::default()),
+            eof_on_exit: true,
+            echo: false,
+        }
     }
     /// Output ends only when the PTY is released (like ConPTY).
     pub fn windows_style(mut self) -> Self {
@@ -279,7 +288,10 @@ impl PtyBackend for FakeBackend {
         });
         lock(&self.inner.procs).push(proc.clone());
         Ok(PtyHandles {
-            reader: Box::new(ChanReader { rx, left: Vec::new() }),
+            reader: Box::new(ChanReader {
+                rx,
+                left: Vec::new(),
+            }),
             writer: Box::new(RecWriter(proc.clone())),
             control: Arc::new(FakeControl(proc.clone())),
             child: Box::new(FakeChild(proc)),
@@ -309,11 +321,21 @@ pub struct Collector {
 
 impl Collector {
     pub fn new() -> Arc<Self> {
-        Arc::new(Collector { rec: Mutex::new(Recorded::default()), cv: Condvar::new(), manager: OnceLock::new(), auto_ack: false })
+        Arc::new(Collector {
+            rec: Mutex::new(Recorded::default()),
+            cv: Condvar::new(),
+            manager: OnceLock::new(),
+            auto_ack: false,
+        })
     }
     /// Acknowledge every chunk immediately and answer cursor-position requests.
     pub fn emulating() -> Arc<Self> {
-        Arc::new(Collector { rec: Mutex::new(Recorded::default()), cv: Condvar::new(), manager: OnceLock::new(), auto_ack: true })
+        Arc::new(Collector {
+            rec: Mutex::new(Recorded::default()),
+            cv: Condvar::new(),
+            manager: OnceLock::new(),
+            auto_ack: true,
+        })
     }
     /// Needed only for the emulating behaviours.
     pub fn attach(&self, manager: &Arc<TerminalManager>) {
@@ -351,14 +373,23 @@ impl Collector {
             if now >= end {
                 return false;
             }
-            g = self.cv.wait_timeout(g, end - now).map(|(g, _)| g).unwrap_or_else(|p| p.into_inner().0);
+            g = self
+                .cv
+                .wait_timeout(g, end - now)
+                .map(|(g, _)| g)
+                .unwrap_or_else(|p| p.into_inner().0);
         }
     }
     pub fn wait_text(&self, id: &str, needle: &str, timeout: Duration) -> bool {
         self.wait_output(id, timeout, |b| String::from_utf8_lossy(b).contains(needle))
     }
     /// Wait for a state change matching `pred`.
-    pub fn wait_state<F: Fn(&SessionState) -> bool>(&self, id: &str, timeout: Duration, pred: F) -> Option<SessionState> {
+    pub fn wait_state<F: Fn(&SessionState) -> bool>(
+        &self,
+        id: &str,
+        timeout: Duration,
+        pred: F,
+    ) -> Option<SessionState> {
         let end = Instant::now() + timeout;
         let mut g = lock(&self.rec);
         loop {
@@ -369,7 +400,11 @@ impl Collector {
             if now >= end {
                 return None;
             }
-            g = self.cv.wait_timeout(g, end - now).map(|(g, _)| g).unwrap_or_else(|p| p.into_inner().0);
+            g = self
+                .cv
+                .wait_timeout(g, end - now)
+                .map(|(g, _)| g)
+                .unwrap_or_else(|p| p.into_inner().0);
         }
     }
 }
@@ -378,7 +413,10 @@ impl TerminalSink for Collector {
     fn output(&self, id: &str, data: &[u8]) {
         {
             let mut g = lock(&self.rec);
-            g.output.entry(id.to_string()).or_default().extend_from_slice(data);
+            g.output
+                .entry(id.to_string())
+                .or_default()
+                .extend_from_slice(data);
             g.chunks += 1;
             g.max_chunk = g.max_chunk.max(data.len());
         }
@@ -394,7 +432,11 @@ impl TerminalSink for Collector {
     }
 
     fn state(&self, id: &str, state: &SessionState) {
-        lock(&self.rec).states.entry(id.to_string()).or_default().push(state.clone());
+        lock(&self.rec)
+            .states
+            .entry(id.to_string())
+            .or_default()
+            .push(state.clone());
         self.cv.notify_all();
     }
 }

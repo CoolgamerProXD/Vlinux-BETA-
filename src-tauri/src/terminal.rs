@@ -41,10 +41,22 @@ struct TauriSink {
 
 impl TerminalSink for TauriSink {
     fn output(&self, id: &str, data: &[u8]) {
-        let _ = self.app.emit(OUTPUT_EVENT, OutputPayload { id: id.to_string(), data: b64::encode(data) });
+        let _ = self.app.emit(
+            OUTPUT_EVENT,
+            OutputPayload {
+                id: id.to_string(),
+                data: b64::encode(data),
+            },
+        );
     }
     fn state(&self, id: &str, state: &SessionState) {
-        let _ = self.app.emit(STATE_EVENT, StatePayload { id: id.to_string(), state: state.clone() });
+        let _ = self.app.emit(
+            STATE_EVENT,
+            StatePayload {
+                id: id.to_string(),
+                state: state.clone(),
+            },
+        );
     }
 }
 
@@ -84,7 +96,11 @@ pub async fn terminal_open(
 ) -> Result<SessionInfo, AppError> {
     let rt = rt.inner().clone();
     let term = term.inner().clone();
-    let selected = store.current.lock().ok().and_then(|c| c.runtime.selected_distro.clone());
+    let selected = store
+        .current
+        .lock()
+        .ok()
+        .and_then(|c| c.runtime.selected_distro.clone());
     let size = PtySize::checked(rows, cols).unwrap_or(PtySize::DEFAULT);
     tauri::async_runtime::spawn_blocking(move || -> Result<SessionInfo, AppError> {
         // Validate against the current WSL state. A cached report is fine; if it does not know
@@ -94,7 +110,9 @@ pub async fn terminal_open(
         let mut target = resolve_target(&report, requested, selected.as_deref());
         if matches!(
             target,
-            Err(TerminalError::DistroNotFound { .. }) | Err(TerminalError::NoDistributions) | Err(TerminalError::WslUnavailable { .. })
+            Err(TerminalError::DistroNotFound { .. })
+                | Err(TerminalError::NoDistributions)
+                | Err(TerminalError::WslUnavailable { .. })
         ) {
             report = rt.detect(true);
             target = resolve_target(&report, requested, selected.as_deref());
@@ -113,11 +131,18 @@ pub fn terminal_input(term: Term<'_>, id: String, data: String) -> Result<(), Ap
 }
 
 #[tauri::command]
-pub async fn terminal_resize(term: Term<'_>, id: String, rows: u32, cols: u32) -> Result<(), AppError> {
+pub async fn terminal_resize(
+    term: Term<'_>,
+    id: String,
+    rows: u32,
+    cols: u32,
+) -> Result<(), AppError> {
     let term = term.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> { Ok(term.manager.resize(&id, rows, cols)?) })
-        .await
-        .map_err(|e| AppError::Runtime(format!("background task failed: {e}")))?
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> {
+        Ok(term.manager.resize(&id, rows, cols)?)
+    })
+    .await
+    .map_err(|e| AppError::Runtime(format!("background task failed: {e}")))?
 }
 
 /// The UI has rendered `bytes` of output (flow control).
@@ -130,9 +155,11 @@ pub fn terminal_ack(term: Term<'_>, id: String, bytes: u32) {
 #[tauri::command]
 pub async fn terminal_close(term: Term<'_>, id: String) -> Result<(), AppError> {
     let term = term.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> { Ok(term.manager.close(&id)?) })
-        .await
-        .map_err(|e| AppError::Runtime(format!("background task failed: {e}")))?
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> {
+        Ok(term.manager.close(&id)?)
+    })
+    .await
+    .map_err(|e| AppError::Runtime(format!("background task failed: {e}")))?
 }
 
 #[tauri::command]

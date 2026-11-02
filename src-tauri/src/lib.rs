@@ -52,7 +52,11 @@ fn get_config(store: State<'_, ConfigStore>) -> Result<ConfigPayload, AppError> 
         .lock()
         .map_err(|_| AppError::Config("config lock poisoned".into()))?
         .clone();
-    Ok(ConfigPayload { config, path: store.path.display().to_string(), warning })
+    Ok(ConfigPayload {
+        config,
+        path: store.path.display().to_string(),
+        warning,
+    })
 }
 
 /// Validate, persist and return the sanitised configuration.
@@ -97,10 +101,18 @@ pub fn run() {
             app.manage(rt.clone());
             // The file manager and shared-folder mappings. Nothing runs inside a distribution
             // until the user opens Files or checks/applies a mapping.
-            app.manage(Arc::new(files::FilesState::new(app.handle().clone(), rt.clone(), &dir)));
+            app.manage(Arc::new(files::FilesState::new(
+                app.handle().clone(),
+                rt.clone(),
+                &dir,
+            )));
             // Distribution Manager: only constructs state. Nothing is inspected, started or polled
             // until the user asks.
-            app.manage(Arc::new(distros::DistroMgmt::new(app.handle().clone(), rt, &dir)));
+            app.manage(Arc::new(distros::DistroMgmt::new(
+                app.handle().clone(),
+                rt,
+                &dir,
+            )));
             // Likewise: no PTY and no Linux process exists until the user opens a terminal.
             app.manage(Arc::new(terminal::TerminalState::new(app.handle().clone())));
 

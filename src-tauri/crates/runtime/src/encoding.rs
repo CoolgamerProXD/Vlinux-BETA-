@@ -62,13 +62,22 @@ fn looks_like_utf16(bytes: &[u8], little_endian: bool) -> bool {
 fn utf16(bytes: &[u8], little_endian: bool) -> String {
     let units: Vec<u16> = bytes
         .chunks_exact(2)
-        .map(|c| if little_endian { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) })
+        .map(|c| {
+            if little_endian {
+                u16::from_le_bytes([c[0], c[1]])
+            } else {
+                u16::from_be_bytes([c[0], c[1]])
+            }
+        })
         .collect();
     String::from_utf16_lossy(&units)
 }
 
 fn strict_utf16(bytes: &[u8]) -> Option<String> {
-    let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
     let s = String::from_utf16(&units).ok()?;
     let sane = s
         .chars()
@@ -116,7 +125,10 @@ mod tests {
 
     #[test]
     fn utf16le_without_bom() {
-        assert_eq!(decode_wsl_output(&le("  NAME  STATE\r\n* Ubuntu  Running  2\r\n")), "  NAME  STATE\n* Ubuntu  Running  2\n");
+        assert_eq!(
+            decode_wsl_output(&le("  NAME  STATE\r\n* Ubuntu  Running  2\r\n")),
+            "  NAME  STATE\n* Ubuntu  Running  2\n"
+        );
     }
 
     #[test]
@@ -136,7 +148,10 @@ mod tests {
 
     #[test]
     fn plain_utf8_and_utf8_bom() {
-        assert_eq!(decode_wsl_output("Ubuntu — Läuft\r\n".as_bytes()), "Ubuntu — Läuft\n");
+        assert_eq!(
+            decode_wsl_output("Ubuntu — Läuft\r\n".as_bytes()),
+            "Ubuntu — Läuft\n"
+        );
         let mut b = vec![0xEF, 0xBB, 0xBF];
         b.extend_from_slice(b"ok");
         assert_eq!(decode_wsl_output(&b), "ok");
@@ -155,12 +170,18 @@ mod tests {
 
     #[test]
     fn utf16_with_accents() {
-        assert_eq!(decode_wsl_output(&le("Standardversion: 2\r\nLäuft\r\n")), "Standardversion: 2\nLäuft\n");
+        assert_eq!(
+            decode_wsl_output(&le("Standardversion: 2\r\nLäuft\r\n")),
+            "Standardversion: 2\nLäuft\n"
+        );
     }
 
     #[test]
     fn lone_cr_becomes_newline_for_progress_output() {
-        assert_eq!(decode_wsl_output(b"Installing: 10%\rInstalling: 20%\r"), "Installing: 10%\nInstalling: 20%\n");
+        assert_eq!(
+            decode_wsl_output(b"Installing: 10%\rInstalling: 20%\r"),
+            "Installing: 10%\nInstalling: 20%\n"
+        );
     }
 
     #[test]

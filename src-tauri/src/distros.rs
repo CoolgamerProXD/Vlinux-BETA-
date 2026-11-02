@@ -24,13 +24,17 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use vlinux_runtime::adapters::DistroRegistry;
 use vlinux_runtime::diag::{self, CheckResult, DiagEnv, DiagSink, Mode, Options, Report};
-use vlinux_runtime::distroconf::{self, ApplyOutcome, BackupStore, Change, ConfError, ConfFile, ConfView, HostConfFile, Plan};
+use vlinux_runtime::distroconf::{
+    self, ApplyOutcome, BackupStore, Change, ConfError, ConfFile, ConfView, HostConfFile, Plan,
+};
 use vlinux_runtime::exec::{CancelToken, CommandRunner, SystemRunner};
 use vlinux_runtime::inspect::{self, InspectOptions, InspectOutcome, InspectionStore};
 use vlinux_runtime::lifecycle::{self, LifecycleError, OpKind, OpOutcome, OpRegistry};
 use vlinux_runtime::model::{DistroState, WslReport};
 use vlinux_runtime::overview::{build_overview, Overview};
-use vlinux_runtime::packages::{parse_search, valid_search_query, PackageHit, PackageOp, PackagePlan};
+use vlinux_runtime::packages::{
+    parse_search, valid_search_query, PackageHit, PackageOp, PackagePlan,
+};
 use vlinux_runtime::parse::valid_distro_name;
 use vlinux_runtime::probe::{valid_win_probe_path, Prober};
 use vlinux_runtime::shared::{DistroOps, MappingStore, WslDistroOps};
@@ -126,16 +130,38 @@ impl DistroMgmt {
     }
 
     fn emit_op(&self, distro: &str, op: OpKind, phase: &'static str, ok: bool, message: String) {
-        let _ = self.app.emit(DISTRO_OP_EVENT, OpEvent { distro: distro.to_string(), op, phase, ok, message });
+        let _ = self.app.emit(
+            DISTRO_OP_EVENT,
+            OpEvent {
+                distro: distro.to_string(),
+                op,
+                phase,
+                ok,
+                message,
+            },
+        );
     }
 
     fn overview(&self, force: bool, preferred: Option<&str>) -> Overview {
         let report = self.rt.detect(force);
-        build_overview(&report, preferred, &self.inspections.all(), &self.ops.snapshot(), &self.failures(), &self.registry, unix_now())
+        build_overview(
+            &report,
+            preferred,
+            &self.inspections.all(),
+            &self.ops.snapshot(),
+            &self.failures(),
+            &self.registry,
+            unix_now(),
+        )
     }
 
     /// Start or stop one distribution. Validation happens before anything is registered or emitted.
-    fn lifecycle(&self, name: &str, kind: OpKind, confirmed: bool) -> Result<LifecycleResult, AppError> {
+    fn lifecycle(
+        &self,
+        name: &str,
+        kind: OpKind,
+        confirmed: bool,
+    ) -> Result<LifecycleResult, AppError> {
         let report = self.rt.detect(false);
         match kind {
             OpKind::Start => {
@@ -147,7 +173,13 @@ impl DistroMgmt {
             OpKind::Inspect => return Err(AppError::Runtime("Not a lifecycle operation.".into())),
         }
         let _token = self.ops.begin(name, kind).map_err(lc)?;
-        self.emit_op(name, kind, "started", true, format!("{} '{name}'…", capitalised(kind.verb())));
+        self.emit_op(
+            name,
+            kind,
+            "started",
+            true,
+            format!("{} '{name}'…", capitalised(kind.verb())),
+        );
         let detect = || {
             self.rt.invalidate();
             self.rt.detect(true)
@@ -160,7 +192,10 @@ impl DistroMgmt {
             Ok(outcome) => {
                 self.set_failure(name, None);
                 self.emit_op(name, kind, "finished", true, outcome.message.clone());
-                Ok(LifecycleResult { outcome, report: self.rt.detect(false) })
+                Ok(LifecycleResult {
+                    outcome,
+                    report: self.rt.detect(false),
+                })
             }
             Err(e) => {
                 if matches!(e, LifecycleError::Failed(_)) {
@@ -182,8 +217,23 @@ impl DistroMgmt {
         if let Ok(mut g) = self.cancels.lock() {
             g.insert(name.to_string(), cancel.clone());
         }
-        self.emit_op(name, OpKind::Inspect, "started", true, format!("Inspecting '{name}'…"));
-        let res = inspect::inspect(&self.runner, &self.rt.programs.wsl, &report, name, InspectOptions { allow_start }, &cancel, &self.registry, unix_now());
+        self.emit_op(
+            name,
+            OpKind::Inspect,
+            "started",
+            true,
+            format!("Inspecting '{name}'…"),
+        );
+        let res = inspect::inspect(
+            &self.runner,
+            &self.rt.programs.wsl,
+            &report,
+            name,
+            InspectOptions { allow_start },
+            &cancel,
+            &self.registry,
+            unix_now(),
+        );
         if let Ok(mut g) = self.cancels.lock() {
             g.remove(name);
         }
@@ -197,11 +247,23 @@ impl DistroMgmt {
                     self.rt.invalidate();
                 }
                 self.set_failure(name, None);
-                self.emit_op(name, OpKind::Inspect, "finished", true, format!("Inspected '{name}'.{note}"));
+                self.emit_op(
+                    name,
+                    OpKind::Inspect,
+                    "finished",
+                    true,
+                    format!("Inspected '{name}'.{note}"),
+                );
                 Ok(InspectOutcome::Done { inspection })
             }
             Ok(other) => {
-                self.emit_op(name, OpKind::Inspect, "finished", true, "Not inspected: the distribution is stopped.".into());
+                self.emit_op(
+                    name,
+                    OpKind::Inspect,
+                    "finished",
+                    true,
+                    "Not inspected: the distribution is stopped.".into(),
+                );
                 Ok(other)
             }
             Err(e) => {
@@ -216,18 +278,30 @@ impl DistroMgmt {
     }
 
     /// Package support for an inspected distribution; never assumed.
-    fn package_support(&self, report: &WslReport, name: &str) -> Result<(vlinux_runtime::packages::PackageSupport, Option<String>), AppError> {
+    fn package_support(
+        &self,
+        report: &WslReport,
+        name: &str,
+    ) -> Result<(vlinux_runtime::packages::PackageSupport, Option<String>), AppError> {
         let distro = lifecycle::check_target(report, name).map_err(lc)?;
-        let adapter = self.registry.by_id(&distro.adapter.id).unwrap_or_else(|| self.registry.generic());
+        let adapter = self
+            .registry
+            .by_id(&distro.adapter.id)
+            .unwrap_or_else(|| self.registry.generic());
         let insp = self
             .inspections
             .get(name)
             .ok_or_else(|| AppError::Runtime(format!("'{name}' has not been inspected yet. Inspect it first so VLINUX can see which package manager it really has.")))?;
-        let (support, availability, _notes) = inspect::resolve_packages(adapter.packages(), &insp.managers);
+        let (support, availability, _notes) =
+            inspect::resolve_packages(adapter.packages(), &insp.managers);
         match availability {
             vlinux_runtime::packages::Availability::Present { version } => Ok((support, version)),
-            vlinux_runtime::packages::Availability::Absent => Err(AppError::Runtime("No package manager VLINUX supports was found in this distribution.".into())),
-            vlinux_runtime::packages::Availability::NotChecked => Err(AppError::Runtime("The package manager was not checked yet. Inspect the distribution first.".into())),
+            vlinux_runtime::packages::Availability::Absent => Err(AppError::Runtime(
+                "No package manager VLINUX supports was found in this distribution.".into(),
+            )),
+            vlinux_runtime::packages::Availability::NotChecked => Err(AppError::Runtime(
+                "The package manager was not checked yet. Inspect the distribution first.".into(),
+            )),
         }
     }
 
@@ -235,7 +309,10 @@ impl DistroMgmt {
         let report = self.rt.detect(false);
         let wsl_version = distroconf::check_accessible(&report, name)?;
         let root = linux_root(name).map_err(|e| ConfError::Invalid(e.message))?;
-        Ok((HostConfFile::new(root.join("etc").join("wsl.conf")), wsl_version))
+        Ok((
+            HostConfFile::new(root.join("etc").join("wsl.conf")),
+            wsl_version,
+        ))
     }
 }
 
@@ -260,13 +337,23 @@ fn capitalised(s: &str) -> String {
 // ---------------------------------------------------------------------------------------------
 
 fn preferred_of(cfg: &Cfg<'_>) -> Result<Option<String>, AppError> {
-    Ok(cfg.current.lock().map_err(|_| AppError::Config("config lock poisoned".into()))?.runtime.selected_distro.clone())
+    Ok(cfg
+        .current
+        .lock()
+        .map_err(|_| AppError::Config("config lock poisoned".into()))?
+        .runtime
+        .selected_distro
+        .clone())
 }
 
 /// Cards for every distribution plus the preferred-distribution status. `force` is the explicit
 /// "Refresh": it re-lists WSL's distributions and forgets earlier failures. Never starts anything.
 #[tauri::command]
-pub async fn distro_overview(dm: Dm<'_>, cfg: Cfg<'_>, force: Option<bool>) -> Result<Overview, AppError> {
+pub async fn distro_overview(
+    dm: Dm<'_>,
+    cfg: Cfg<'_>,
+    force: Option<bool>,
+) -> Result<Overview, AppError> {
     let dm = dm.inner().clone();
     let preferred = preferred_of(&cfg)?;
     let force = force.unwrap_or(false);
@@ -284,11 +371,17 @@ pub async fn distro_overview(dm: Dm<'_>, cfg: Cfg<'_>, force: Option<bool>) -> R
 /// Choose (or clear, with `None`) the distribution VLINUX uses. Stored in VLINUX's own config only:
 /// the Windows default distribution is never changed, and open terminals are not affected.
 #[tauri::command]
-pub async fn distro_set_preferred(dm: Dm<'_>, cfg: Cfg<'_>, name: Option<String>) -> Result<Overview, AppError> {
+pub async fn distro_set_preferred(
+    dm: Dm<'_>,
+    cfg: Cfg<'_>,
+    name: Option<String>,
+) -> Result<Overview, AppError> {
     let dm = dm.inner().clone();
     if let Some(n) = &name {
         if !valid_distro_name(n) {
-            return Err(AppError::Runtime("That is not a valid distribution name.".into()));
+            return Err(AppError::Runtime(
+                "That is not a valid distribution name.".into(),
+            ));
         }
     }
     let check_name = name.clone();
@@ -303,7 +396,10 @@ pub async fn distro_set_preferred(dm: Dm<'_>, cfg: Cfg<'_>, name: Option<String>
     })
     .await?;
     {
-        let mut cur = cfg.current.lock().map_err(|_| AppError::Config("config lock poisoned".into()))?;
+        let mut cur = cfg
+            .current
+            .lock()
+            .map_err(|_| AppError::Config("config lock poisoned".into()))?;
         let mut next = cur.clone();
         next.runtime.selected_distro = name.clone();
         let next = next.sanitized();
@@ -334,14 +430,22 @@ pub async fn distro_start(dm: Dm<'_>, name: String) -> Result<LifecycleResult, A
 /// Stop one distribution. Needs `confirmed = true` (the UI shows an interruption warning first).
 /// This stops only the named distribution: there is no global shutdown.
 #[tauri::command]
-pub async fn distro_stop(dm: Dm<'_>, name: String, confirmed: bool) -> Result<LifecycleResult, AppError> {
+pub async fn distro_stop(
+    dm: Dm<'_>,
+    name: String,
+    confirmed: bool,
+) -> Result<LifecycleResult, AppError> {
     let dm = dm.inner().clone();
     blocking(move || dm.lifecycle(&name, OpKind::Stop, confirmed)).await
 }
 
 /// Read-only inspection. A stopped distribution is started only with `allow_start`.
 #[tauri::command]
-pub async fn distro_inspect(dm: Dm<'_>, name: String, allow_start: Option<bool>) -> Result<InspectOutcome, AppError> {
+pub async fn distro_inspect(
+    dm: Dm<'_>,
+    name: String,
+    allow_start: Option<bool>,
+) -> Result<InspectOutcome, AppError> {
     let dm = dm.inner().clone();
     blocking(move || dm.inspect(&name, allow_start.unwrap_or(false))).await
 }
@@ -351,7 +455,10 @@ pub async fn distro_inspect(dm: Dm<'_>, name: String, allow_start: Option<bool>)
 pub async fn distro_inspect_cancel(dm: Dm<'_>, name: String) -> Result<bool, AppError> {
     let dm = dm.inner().clone();
     blocking(move || {
-        let g = dm.cancels.lock().map_err(|_| AppError::Runtime("internal state error".into()))?;
+        let g = dm
+            .cancels
+            .lock()
+            .map_err(|_| AppError::Runtime("internal state error".into()))?;
         match g.get(&name) {
             Some(t) => {
                 t.cancel();
@@ -377,7 +484,12 @@ pub enum PackageRequest {
 /// The exact commands for an install or update, for the user to review and run in the Terminal.
 /// Nothing is executed and no privilege escalation is attempted.
 #[tauri::command]
-pub async fn distro_pkg_plan(dm: Dm<'_>, name: String, op: PackageRequest, packages: Vec<String>) -> Result<PackagePlan, AppError> {
+pub async fn distro_pkg_plan(
+    dm: Dm<'_>,
+    name: String,
+    op: PackageRequest,
+    packages: Vec<String>,
+) -> Result<PackagePlan, AppError> {
     let dm = dm.inner().clone();
     blocking(move || {
         let report = dm.rt.detect(false);
@@ -386,32 +498,50 @@ pub async fn distro_pkg_plan(dm: Dm<'_>, name: String, op: PackageRequest, packa
             PackageRequest::Install => PackageOp::Install,
             PackageRequest::Update => PackageOp::Update,
         };
-        support.plan(&name, op, &packages).map_err(AppError::Runtime)
+        support
+            .plan(&name, op, &packages)
+            .map_err(AppError::Runtime)
     })
     .await
 }
 
 /// Search the distribution's own package index (read-only). The distribution must be running.
 #[tauri::command]
-pub async fn distro_pkg_search(dm: Dm<'_>, name: String, query: String) -> Result<Vec<PackageHit>, AppError> {
+pub async fn distro_pkg_search(
+    dm: Dm<'_>,
+    name: String,
+    query: String,
+) -> Result<Vec<PackageHit>, AppError> {
     let dm = dm.inner().clone();
     blocking(move || {
         let report = dm.rt.detect(false);
         let distro = lifecycle::check_target(&report, &name).map_err(lc)?;
         if distro.state != DistroState::Running {
-            return Err(AppError::Runtime(format!("'{name}' is stopped. Start it first: searching never starts a distribution.")));
+            return Err(AppError::Runtime(format!(
+                "'{name}' is stopped. Start it first: searching never starts a distribution."
+            )));
         }
         if !valid_search_query(&query) {
-            return Err(AppError::Runtime("Use 1–64 letters, digits, and . _ + - in the search.".into()));
+            return Err(AppError::Runtime(
+                "Use 1–64 letters, digits, and . _ + - in the search.".into(),
+            ));
         }
         let (support, _) = dm.package_support(&report, &name)?;
-        let argv = support.search_argv(&query).ok_or_else(|| AppError::Runtime("Searching is not supported for this package manager.".into()))?;
+        let argv = support.search_argv(&query).ok_or_else(|| {
+            AppError::Runtime("Searching is not supported for this package manager.".into())
+        })?;
         let cancel = CancelToken::new();
-        let prober = Prober::new(&dm.runner, &dm.rt.programs.wsl, &name, &cancel).map_err(AppError::Runtime)?;
-        let out = prober.search(&argv).map_err(|e| AppError::Runtime(format!("The search could not run: {e}.")))?;
+        let prober = Prober::new(&dm.runner, &dm.rt.programs.wsl, &name, &cancel)
+            .map_err(AppError::Runtime)?;
+        let out = prober
+            .search(&argv)
+            .map_err(|e| AppError::Runtime(format!("The search could not run: {e}.")))?;
         // Package managers exit 1 for "no match"; anything else is a real failure.
         if !out.success() && out.status != Some(1) {
-            return Err(AppError::Runtime("The package manager reported an error. Its index may be out of date or locked.".into()));
+            return Err(AppError::Runtime(
+                "The package manager reported an error. Its index may be out of date or locked."
+                    .into(),
+            ));
         }
         Ok(parse_search(support.manager, &Prober::text(&out)))
     })
@@ -425,9 +555,14 @@ pub async fn distro_pkg_search(dm: Dm<'_>, name: String, query: String) -> Resul
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WslConfRead {
-    View { view: ConfView, wsl_version: u8 },
+    View {
+        view: ConfView,
+        wsl_version: u8,
+    },
     /// Reaching the file starts a stopped distribution, so VLINUX waits for an explicit Start.
-    NeedsStart { distro: String },
+    NeedsStart {
+        distro: String,
+    },
 }
 
 #[tauri::command]
@@ -440,14 +575,21 @@ pub async fn wslconf_read(dm: Dm<'_>, name: String) -> Result<WslConfRead, AppEr
             Err(e) => return Err(conf_err(e)),
         };
         let text = file.read().map_err(conf_err)?;
-        Ok(WslConfRead::View { view: distroconf::view(&name, text.as_deref()), wsl_version })
+        Ok(WslConfRead::View {
+            view: distroconf::view(&name, text.as_deref()),
+            wsl_version,
+        })
     })
     .await
 }
 
 /// A reviewable diff for the requested settings. Writes nothing.
 #[tauri::command]
-pub async fn wslconf_preview(dm: Dm<'_>, name: String, changes: Vec<Change>) -> Result<Plan, AppError> {
+pub async fn wslconf_preview(
+    dm: Dm<'_>,
+    name: String,
+    changes: Vec<Change>,
+) -> Result<Plan, AppError> {
     let dm = dm.inner().clone();
     blocking(move || {
         let (file, wsl_version) = dm.conf_file(&name).map_err(conf_err)?;
@@ -461,20 +603,37 @@ pub async fn wslconf_preview(dm: Dm<'_>, name: String, changes: Vec<Change>) -> 
 /// requested settings (it never accepts file text from the frontend) and refuses if the file is no
 /// longer the one that was previewed. A backup is taken first. Needs `confirmed = true`.
 #[tauri::command]
-pub async fn wslconf_apply(dm: Dm<'_>, name: String, changes: Vec<Change>, based_on: String, confirmed: bool) -> Result<ApplyOutcome, AppError> {
+pub async fn wslconf_apply(
+    dm: Dm<'_>,
+    name: String,
+    changes: Vec<Change>,
+    based_on: String,
+    confirmed: bool,
+) -> Result<ApplyOutcome, AppError> {
     let dm = dm.inner().clone();
     blocking(move || {
         if !confirmed {
-            return Err(AppError::Runtime("The change was not confirmed. Nothing was written.".into()));
+            return Err(AppError::Runtime(
+                "The change was not confirmed. Nothing was written.".into(),
+            ));
         }
         let _gate = dm.conf_gate.lock().unwrap_or_else(|p| p.into_inner());
         let (file, wsl_version) = dm.conf_file(&name).map_err(conf_err)?;
         let text = file.read().map_err(conf_err)?;
-        let plan = distroconf::plan(&name, text.as_deref(), &changes, wsl_version).map_err(conf_err)?;
+        let plan =
+            distroconf::plan(&name, text.as_deref(), &changes, wsl_version).map_err(conf_err)?;
         if plan.based_on != based_on {
             return Err(conf_err(ConfError::Changed));
         }
-        distroconf::apply(&file, &dm.backups, &name, &plan.based_on, &plan.new_text, unix_now()).map_err(conf_err)
+        distroconf::apply(
+            &file,
+            &dm.backups,
+            &name,
+            &plan.based_on,
+            &plan.new_text,
+            unix_now(),
+        )
+        .map_err(conf_err)
     })
     .await
 }
@@ -495,13 +654,22 @@ pub async fn wslconf_backups(dm: Dm<'_>, name: String) -> Result<Vec<BackupInfo>
     let dm = dm.inner().clone();
     blocking(move || {
         if !valid_distro_name(&name) {
-            return Err(AppError::Runtime("That is not a valid distribution name.".into()));
+            return Err(AppError::Runtime(
+                "That is not a valid distribution name.".into(),
+            ));
         }
         let mut v: Vec<BackupInfo> = dm
             .backups
             .list(&name)
             .into_iter()
-            .map(|b| BackupInfo { id: b.id, taken_at: b.taken_at, existed: b.existed, applied: b.written_fp.is_some(), restored_at: b.restored_at, bytes: b.content.len() })
+            .map(|b| BackupInfo {
+                id: b.id,
+                taken_at: b.taken_at,
+                existed: b.existed,
+                applied: b.written_fp.is_some(),
+                restored_at: b.restored_at,
+                bytes: b.content.len(),
+            })
             .collect();
         v.sort_by(|a, b| b.taken_at.cmp(&a.taken_at));
         Ok(v)
@@ -512,15 +680,31 @@ pub async fn wslconf_backups(dm: Dm<'_>, name: String) -> Result<Vec<BackupInfo>
 /// Put a backup back. A safety backup of the current file is taken first, so this is undoable.
 /// Refuses when the file was changed by someone else since, unless `force`. Needs `confirmed`.
 #[tauri::command]
-pub async fn wslconf_restore(dm: Dm<'_>, name: String, backup_id: String, force: Option<bool>, confirmed: bool) -> Result<ApplyOutcome, AppError> {
+pub async fn wslconf_restore(
+    dm: Dm<'_>,
+    name: String,
+    backup_id: String,
+    force: Option<bool>,
+    confirmed: bool,
+) -> Result<ApplyOutcome, AppError> {
     let dm = dm.inner().clone();
     blocking(move || {
         if !confirmed {
-            return Err(AppError::Runtime("The restore was not confirmed. Nothing was changed.".into()));
+            return Err(AppError::Runtime(
+                "The restore was not confirmed. Nothing was changed.".into(),
+            ));
         }
         let _gate = dm.conf_gate.lock().unwrap_or_else(|p| p.into_inner());
         let (file, _) = dm.conf_file(&name).map_err(conf_err)?;
-        distroconf::restore(&file, &dm.backups, &name, &backup_id, force.unwrap_or(false), unix_now()).map_err(conf_err)
+        distroconf::restore(
+            &file,
+            &dm.backups,
+            &name,
+            &backup_id,
+            force.unwrap_or(false),
+            unix_now(),
+        )
+        .map_err(conf_err)
     })
     .await
 }
@@ -551,9 +735,15 @@ impl Drop for DiagGuard<'_> {
 }
 
 fn diag_token(seq: u64) -> String {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
     // 12 lower-case hex digits: unique enough for a folder name that lives for seconds.
-    format!("vlx-{:012x}", (nanos ^ seq.wrapping_mul(0x9E37_79B9_7F4A_7C15)) & 0xFFFF_FFFF_FFFF)
+    format!(
+        "vlx-{:012x}",
+        (nanos ^ seq.wrapping_mul(0x9E37_79B9_7F4A_7C15)) & 0xFFFF_FFFF_FFFF
+    )
 }
 
 impl DistroMgmt {
@@ -583,7 +773,9 @@ impl DistroMgmt {
             }
             _ => None,
         };
-        let ops = options.distro.as_deref().and_then(|n| WslDistroOps::new(self.runner.clone(), self.rt.programs.wsl.clone(), n).ok());
+        let ops = options.distro.as_deref().and_then(|n| {
+            WslDistroOps::new(self.runner.clone(), self.rt.programs.wsl.clone(), n).ok()
+        });
         let sink = Arc::new(DiagSink::new());
         let mgr = TerminalManager::new(Arc::new(NativePty), sink.clone());
         let detect = || {
@@ -594,11 +786,28 @@ impl DistroMgmt {
         let store = MappingStore::new(&self.dir);
         let resolver = SystemKnownFolders;
         let drives = SystemDrives;
-        let sysroot = if cfg!(windows) { std::env::var("SystemRoot").ok() } else { None };
-        let explorer = sysroot.as_ref().map(|r| PathBuf::from(r).join("explorer.exe"));
-        let probe = sysroot.as_ref().map(|r| r.replace('\\', "/")).filter(|p| valid_win_probe_path(p));
-        let mut scrub: Vec<String> = ["USERNAME", "USER", "COMPUTERNAME", "HOSTNAME"].iter().filter_map(|k| std::env::var(k).ok()).collect();
-        if let Some(u) = options.distro.as_deref().and_then(|n| self.inspections.get(n)).and_then(|i| i.default_user) {
+        let sysroot = if cfg!(windows) {
+            std::env::var("SystemRoot").ok()
+        } else {
+            None
+        };
+        let explorer = sysroot
+            .as_ref()
+            .map(|r| PathBuf::from(r).join("explorer.exe"));
+        let probe = sysroot
+            .as_ref()
+            .map(|r| r.replace('\\', "/"))
+            .filter(|p| valid_win_probe_path(p));
+        let mut scrub: Vec<String> = ["USERNAME", "USER", "COMPUTERNAME", "HOSTNAME"]
+            .iter()
+            .filter_map(|k| std::env::var(k).ok())
+            .collect();
+        if let Some(u) = options
+            .distro
+            .as_deref()
+            .and_then(|n| self.inspections.get(n))
+            .and_then(|i| i.default_user)
+        {
             scrub.push(u);
         }
         let env = DiagEnv {
@@ -628,7 +837,14 @@ impl DistroMgmt {
         let rid = run_id.clone();
         let result = diag::run(&env, options, cancel, &mut |c: &CheckResult| {
             index += 1;
-            let _ = app.emit(DIAG_EVENT, DiagProgress { run_id: rid.clone(), index, result: c.clone() });
+            let _ = app.emit(
+                DIAG_EVENT,
+                DiagProgress {
+                    run_id: rid.clone(),
+                    index,
+                    result: c.clone(),
+                },
+            );
         });
         mgr.close_all();
         result
@@ -641,13 +857,23 @@ impl DistroMgmt {
 #[tauri::command]
 pub async fn diag_run(dm: Dm<'_>, cfg: Cfg<'_>, options: Options) -> Result<Report, AppError> {
     let dm = dm.inner().clone();
-    let storage = cfg.current.lock().map_err(|_| AppError::Config("config lock poisoned".into()))?.storage.clone();
+    let storage = cfg
+        .current
+        .lock()
+        .map_err(|_| AppError::Config("config lock poisoned".into()))?
+        .storage
+        .clone();
     blocking(move || {
         let cancel = CancelToken::new();
         {
-            let mut g = dm.diag.lock().map_err(|_| AppError::Runtime("internal state error".into()))?;
+            let mut g = dm
+                .diag
+                .lock()
+                .map_err(|_| AppError::Runtime("internal state error".into()))?;
             if g.is_some() {
-                return Err(AppError::Runtime("A diagnostics run is already in progress.".into()));
+                return Err(AppError::Runtime(
+                    "A diagnostics run is already in progress.".into(),
+                ));
             }
             *g = Some(cancel.clone());
         }
@@ -662,7 +888,10 @@ pub async fn diag_run(dm: Dm<'_>, cfg: Cfg<'_>, options: Options) -> Result<Repo
 pub async fn diag_cancel(dm: Dm<'_>) -> Result<bool, AppError> {
     let dm = dm.inner().clone();
     blocking(move || {
-        let g = dm.diag.lock().map_err(|_| AppError::Runtime("internal state error".into()))?;
+        let g = dm
+            .diag
+            .lock()
+            .map_err(|_| AppError::Runtime("internal state error".into()))?;
         match &*g {
             Some(t) => {
                 t.cancel();

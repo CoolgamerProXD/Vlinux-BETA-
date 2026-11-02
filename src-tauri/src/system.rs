@@ -22,7 +22,9 @@ pub fn collect() -> SystemInfo {
         os_name: info.os_type().to_string(),
         os_version: info.version().to_string(),
         os_arch: std::env::consts::ARCH.to_string(),
-        cpu_threads: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+        cpu_threads: std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1),
         is_windows: cfg!(windows),
     }
 }

@@ -26,12 +26,19 @@ fn err(msg: impl Into<String>) -> OpsError {
 
 impl FakeDistro {
     pub fn new(root: &Path, home: &str) -> Self {
-        Self { root: root.to_path_buf(), home: home.to_string(), mounts: Vec::new(), fail: Mutex::new(HashSet::new()), calls: Mutex::new(Vec::new()) }
+        Self {
+            root: root.to_path_buf(),
+            home: home.to_string(),
+            mounts: Vec::new(),
+            fail: Mutex::new(HashSet::new()),
+            calls: Mutex::new(Vec::new()),
+        }
     }
 
     /// Make the host directory `host` appear at the Linux path `linux` (like `/mnt/d/Media`).
     pub fn mount(mut self, linux: &str, host: &Path) -> Self {
-        self.mounts.push((linux.trim_end_matches('/').to_string(), host.to_path_buf()));
+        self.mounts
+            .push((linux.trim_end_matches('/').to_string(), host.to_path_buf()));
         self
     }
 
@@ -132,14 +139,18 @@ impl DistroOps for FakeDistro {
     #[cfg(not(unix))]
     fn make_symlink(&self, target: &str, link: &str) -> Result<(), OpsError> {
         self.enter("make_symlink", &format!("{target} {link}"))?;
-        Err(err("symbolic links are only simulated on Unix test machines"))
+        Err(err(
+            "symbolic links are only simulated on Unix test machines",
+        ))
     }
 
     fn remove_symlink(&self, link: &str) -> Result<(), OpsError> {
         self.enter("remove_symlink", link)?;
         let host = self.host(link);
         match fs::symlink_metadata(&host) {
-            Ok(m) if m.file_type().is_symlink() => fs::remove_file(&host).map_err(|e| err(e.to_string())),
+            Ok(m) if m.file_type().is_symlink() => {
+                fs::remove_file(&host).map_err(|e| err(e.to_string()))
+            }
             Ok(_) => Err(err("unlink: not a symbolic link")),
             Err(e) => Err(err(e.to_string())),
         }

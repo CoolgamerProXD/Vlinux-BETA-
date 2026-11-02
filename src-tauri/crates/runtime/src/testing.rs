@@ -6,8 +6,11 @@ use std::sync::Mutex;
 
 use crate::exec::{CancelToken, CmdOutput, CommandRunner, CommandSpec, RunError};
 
-pub type Handler =
-    Box<dyn Fn(&CommandSpec, &CancelToken, &mut dyn FnMut(&[u8])) -> Result<CmdOutput, RunError> + Send + Sync>;
+pub type Handler = Box<
+    dyn Fn(&CommandSpec, &CancelToken, &mut dyn FnMut(&[u8])) -> Result<CmdOutput, RunError>
+        + Send
+        + Sync,
+>;
 
 struct Rule {
     program: String,
@@ -34,7 +37,10 @@ impl FakeRunner {
     /// Answer with a closure (can stream output, inspect the cancel token, ...).
     pub fn on_fn<F>(self, program: &str, args: &[&str], f: F) -> Self
     where
-        F: Fn(&CommandSpec, &CancelToken, &mut dyn FnMut(&[u8])) -> Result<CmdOutput, RunError> + Send + Sync + 'static,
+        F: Fn(&CommandSpec, &CancelToken, &mut dyn FnMut(&[u8])) -> Result<CmdOutput, RunError>
+            + Send
+            + Sync
+            + 'static,
     {
         self.rules.lock().unwrap().push(Rule {
             program: program.to_string(),
@@ -63,25 +69,42 @@ impl CommandRunner for FakeRunner {
     ) -> Result<CmdOutput, RunError> {
         self.calls.lock().unwrap().push(spec.clone());
         let rules = self.rules.lock().unwrap();
-        match rules.iter().find(|r| r.program == spec.program && r.args == spec.args) {
+        match rules
+            .iter()
+            .find(|r| r.program == spec.program && r.args == spec.args)
+        {
             Some(rule) => (rule.handler)(spec, cancel, on_output),
             // Unscripted commands are test failures, not silent successes.
-            None => Err(RunError::Io(format!("unexpected command in test: {}", spec.display()))),
+            None => Err(RunError::Io(format!(
+                "unexpected command in test: {}",
+                spec.display()
+            ))),
         }
     }
 }
 
 /// What real `wsl.exe` emits when redirected: UTF-16LE, no BOM, CRLF line endings.
 pub fn utf16le(text: &str) -> Vec<u8> {
-    text.replace('\n', "\r\n").encode_utf16().flat_map(|u| u.to_le_bytes()).collect()
+    text.replace('\n', "\r\n")
+        .encode_utf16()
+        .flat_map(|u| u.to_le_bytes())
+        .collect()
 }
 
 pub fn out_ok(stdout: &[u8]) -> Result<CmdOutput, RunError> {
-    Ok(CmdOutput { status: Some(0), stdout: stdout.to_vec(), stderr: Vec::new() })
+    Ok(CmdOutput {
+        status: Some(0),
+        stdout: stdout.to_vec(),
+        stderr: Vec::new(),
+    })
 }
 
 pub fn out_code(code: i32, stdout: &[u8]) -> Result<CmdOutput, RunError> {
-    Ok(CmdOutput { status: Some(code), stdout: stdout.to_vec(), stderr: Vec::new() })
+    Ok(CmdOutput {
+        status: Some(code),
+        stdout: stdout.to_vec(),
+        stderr: Vec::new(),
+    })
 }
 
 pub fn utf16_ok(text: &str) -> Result<CmdOutput, RunError> {
@@ -95,7 +118,15 @@ pub fn utf16_code(code: i32, text: &str) -> Result<CmdOutput, RunError> {
 /// A ready-made [`WslReport`](crate::model::WslReport) for tests: `(name, state, kind, wsl version)`.
 /// The adapter comes from the registered name, exactly as real detection does for distributions
 /// that were not inspected.
-pub fn fake_report(rows: &[(&str, crate::model::DistroState, crate::model::DistroKind, u8)], default: Option<&str>) -> crate::model::WslReport {
+pub fn fake_report(
+    rows: &[(
+        &str,
+        crate::model::DistroState,
+        crate::model::DistroKind,
+        u8,
+    )],
+    default: Option<&str>,
+) -> crate::model::WslReport {
     use crate::adapters::DistroRegistry;
     use crate::model::{Distro, HostEnv, IdentitySource, Origin, RuntimeStatus, WslReport};
     let registry = DistroRegistry::with_builtin();
@@ -118,8 +149,15 @@ pub fn fake_report(rows: &[(&str, crate::model::DistroState, crate::model::Distr
         })
         .collect();
     WslReport {
-        status: if distros.is_empty() { RuntimeStatus::NoDistributions } else { RuntimeStatus::Ready },
-        host: HostEnv { is_windows: true, windows_build: Some(22631) },
+        status: if distros.is_empty() {
+            RuntimeStatus::NoDistributions
+        } else {
+            RuntimeStatus::Ready
+        },
+        host: HostEnv {
+            is_windows: true,
+            windows_build: Some(22631),
+        },
         wsl_version: Some("2.3.26.0".into()),
         kernel_version: None,
         wslg_version: None,

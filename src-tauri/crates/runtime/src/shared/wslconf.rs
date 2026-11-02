@@ -11,7 +11,10 @@ pub struct WslConf {
 
 impl Default for WslConf {
     fn default() -> Self {
-        Self { automount_enabled: true, mount_root: "/mnt".into() }
+        Self {
+            automount_enabled: true,
+            mount_root: "/mnt".into(),
+        }
     }
 }
 
@@ -37,7 +40,9 @@ pub fn parse_wsl_conf(text: &str) -> WslConf {
         if section != "automount" {
             continue;
         }
-        let Some((k, v)) = line.split_once('=') else { continue };
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
         let key = k.trim().to_ascii_lowercase();
         let value = v.trim().trim_matches('"').trim();
         match key.as_str() {
@@ -49,7 +54,11 @@ pub fn parse_wsl_conf(text: &str) -> WslConf {
             "root" => {
                 if value.starts_with('/') && !value.contains(['\0', '\\']) {
                     let trimmed = value.trim_end_matches('/');
-                    conf.mount_root = if trimmed.is_empty() { "/".into() } else { trimmed.to_string() };
+                    conf.mount_root = if trimmed.is_empty() {
+                        "/".into()
+                    } else {
+                        trimmed.to_string()
+                    };
                 }
             }
             _ => {}
@@ -70,7 +79,9 @@ mod tests {
 
     #[test]
     fn custom_root_and_disabled_automount() {
-        let c = parse_wsl_conf("[automount]\nroot = /windir/\nenabled=false # off\n[interop]\nenabled = true\n");
+        let c = parse_wsl_conf(
+            "[automount]\nroot = /windir/\nenabled=false # off\n[interop]\nenabled = true\n",
+        );
         assert_eq!(c.mount_root, "/windir");
         assert!(!c.automount_enabled);
     }
@@ -81,6 +92,9 @@ mod tests {
         assert_eq!(c.mount_root, "/ok");
         assert!(c.automount_enabled);
         // Mixed case and quotes.
-        assert_eq!(parse_wsl_conf("[AutoMount]\nRoot = \"/drives\"").mount_root, "/drives");
+        assert_eq!(
+            parse_wsl_conf("[AutoMount]\nRoot = \"/drives\"").mount_root,
+            "/drives"
+        );
     }
 }

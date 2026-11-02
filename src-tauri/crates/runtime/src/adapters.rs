@@ -93,7 +93,10 @@ pub trait DistroAdapter: Send + Sync {
 fn prefix_match(name: &str, prefixes: &[&str]) -> bool {
     let lc = name.to_ascii_lowercase();
     prefixes.iter().any(|p| match lc.strip_prefix(p) {
-        Some(rest) => rest.chars().next().map_or(true, |c| !c.is_ascii_alphabetic()),
+        Some(rest) => rest
+            .chars()
+            .next()
+            .map_or(true, |c| !c.is_ascii_alphabetic()),
         None => false,
     })
 }
@@ -253,7 +256,10 @@ impl Default for DistroRegistry {
 
 impl DistroRegistry {
     pub fn empty() -> Self {
-        Self { adapters: Vec::new(), generic: GenericAdapter }
+        Self {
+            adapters: Vec::new(),
+            generic: GenericAdapter,
+        }
     }
 
     /// Debian, Ubuntu, Arch and Fedora.
@@ -287,22 +293,39 @@ impl DistroRegistry {
 
     /// Best guess from the registered WSL name alone (no process is launched).
     pub fn from_registered_name(&self, name: &str) -> &dyn DistroAdapter {
-        self.iter().find(|a| a.matches_registered_name(name)).unwrap_or(&self.generic)
+        self.iter()
+            .find(|a| a.matches_registered_name(name))
+            .unwrap_or(&self.generic)
     }
 
     /// Authoritative resolution from `/etc/os-release`: `ID` first, then each `ID_LIKE` entry.
     pub fn from_os_release(&self, id: &str, id_like: &[String]) -> Resolution<'_> {
         let id = id.to_ascii_lowercase();
-        if let Some(a) = self.iter().find(|a| a.os_release_ids().contains(&id.as_str())) {
-            return Resolution { adapter: a, kind: MatchKind::Exact };
+        if let Some(a) = self
+            .iter()
+            .find(|a| a.os_release_ids().contains(&id.as_str()))
+        {
+            return Resolution {
+                adapter: a,
+                kind: MatchKind::Exact,
+            };
         }
         for like in id_like {
             let like = like.to_ascii_lowercase();
-            if let Some(a) = self.iter().find(|a| a.os_release_ids().contains(&like.as_str())) {
-                return Resolution { adapter: a, kind: MatchKind::Derivative };
+            if let Some(a) = self
+                .iter()
+                .find(|a| a.os_release_ids().contains(&like.as_str()))
+            {
+                return Resolution {
+                    adapter: a,
+                    kind: MatchKind::Derivative,
+                };
             }
         }
-        Resolution { adapter: &self.generic, kind: MatchKind::Fallback }
+        Resolution {
+            adapter: &self.generic,
+            kind: MatchKind::Fallback,
+        }
     }
 
     /// Adapter able to install a name from `wsl.exe --list --online`.
@@ -349,20 +372,44 @@ mod tests {
     #[test]
     fn package_managers() {
         let r = DistroRegistry::with_builtin();
-        assert_eq!(r.by_id("debian").unwrap().package_manager(), PackageManager::Apt);
-        assert_eq!(r.by_id("ubuntu").unwrap().package_manager(), PackageManager::Apt);
-        assert_eq!(r.by_id("arch").unwrap().package_manager(), PackageManager::Pacman);
-        assert_eq!(r.by_id("fedora").unwrap().package_manager(), PackageManager::Dnf);
+        assert_eq!(
+            r.by_id("debian").unwrap().package_manager(),
+            PackageManager::Apt
+        );
+        assert_eq!(
+            r.by_id("ubuntu").unwrap().package_manager(),
+            PackageManager::Apt
+        );
+        assert_eq!(
+            r.by_id("arch").unwrap().package_manager(),
+            PackageManager::Pacman
+        );
+        assert_eq!(
+            r.by_id("fedora").unwrap().package_manager(),
+            PackageManager::Dnf
+        );
         assert_eq!(r.generic().package_manager(), PackageManager::Unknown);
     }
 
     #[test]
     fn online_names() {
         let r = DistroRegistry::with_builtin();
-        assert_eq!(r.from_wsl_online_name("Ubuntu-24.04").map(|a| a.id()), Some("ubuntu"));
-        assert_eq!(r.from_wsl_online_name("archlinux").map(|a| a.id()), Some("arch"));
-        assert_eq!(r.from_wsl_online_name("FedoraLinux-43").map(|a| a.id()), Some("fedora"));
-        assert_eq!(r.from_wsl_online_name("Debian").map(|a| a.id()), Some("debian"));
+        assert_eq!(
+            r.from_wsl_online_name("Ubuntu-24.04").map(|a| a.id()),
+            Some("ubuntu")
+        );
+        assert_eq!(
+            r.from_wsl_online_name("archlinux").map(|a| a.id()),
+            Some("arch")
+        );
+        assert_eq!(
+            r.from_wsl_online_name("FedoraLinux-43").map(|a| a.id()),
+            Some("fedora")
+        );
+        assert_eq!(
+            r.from_wsl_online_name("Debian").map(|a| a.id()),
+            Some("debian")
+        );
         assert!(r.from_wsl_online_name("kali-linux").is_none());
     }
 
@@ -404,6 +451,9 @@ mod tests {
     fn arch_is_ranked_first_for_existing_installs() {
         let r = DistroRegistry::with_builtin();
         let arch = r.by_id("arch").unwrap().existing_install_rank();
-        assert!(r.iter().filter(|a| a.id() != "arch").all(|a| a.existing_install_rank() > arch));
+        assert!(r
+            .iter()
+            .filter(|a| a.id() != "arch")
+            .all(|a| a.existing_install_rank() > arch));
     }
 }

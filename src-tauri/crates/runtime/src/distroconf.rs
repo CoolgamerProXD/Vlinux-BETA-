@@ -46,7 +46,12 @@ enum Kind {
     Comment,
     Section(String),
     /// `prefix` = everything up to and including `=` and the spaces after it.
-    Pair { key: String, value: String, prefix: String, tail: String },
+    Pair {
+        key: String,
+        value: String,
+        prefix: String,
+        tail: String,
+    },
     /// Not understood; makes the document "malformed".
     Other,
 }
@@ -76,14 +81,18 @@ fn parse_line(raw: &str, in_section: bool) -> Kind {
     }
     if let Some(rest) = t.strip_prefix('[') {
         return match rest.strip_suffix(']') {
-            Some(name) if !name.trim().is_empty() && !name.contains(['[', ']']) => Kind::Section(name.trim().to_string()),
+            Some(name) if !name.trim().is_empty() && !name.contains(['[', ']']) => {
+                Kind::Section(name.trim().to_string())
+            }
             _ => Kind::Other,
         };
     }
     if !in_section {
         return Kind::Other;
     }
-    let Some(eq) = raw.find('=') else { return Kind::Other };
+    let Some(eq) = raw.find('=') else {
+        return Kind::Other;
+    };
     let key = raw[..eq].trim();
     if key.is_empty() || key.contains(char::is_whitespace) {
         return Kind::Other;
@@ -100,11 +109,22 @@ fn parse_line(raw: &str, in_section: bool) -> Kind {
         }
     } else {
         match rest.find(" #").or_else(|| rest.find("\t#")) {
-            Some(i) => (rest[..i].trim_end().to_string(), rest[rest[..i].trim_end().len()..].to_string()),
-            None => (rest.trim_end().to_string(), rest[rest.trim_end().len()..].to_string()),
+            Some(i) => (
+                rest[..i].trim_end().to_string(),
+                rest[rest[..i].trim_end().len()..].to_string(),
+            ),
+            None => (
+                rest.trim_end().to_string(),
+                rest[rest.trim_end().len()..].to_string(),
+            ),
         }
     };
-    Kind::Pair { key: key.to_string(), value, prefix, tail }
+    Kind::Pair {
+        key: key.to_string(),
+        value,
+        prefix,
+        tail,
+    }
 }
 
 fn unquote(v: &str) -> String {
@@ -133,17 +153,30 @@ impl IniDoc {
                     Kind::Other => malformed.push(i + 1),
                     _ => {}
                 }
-                lines.push(Line { raw: raw.to_string(), kind });
+                lines.push(Line {
+                    raw: raw.to_string(),
+                    kind,
+                });
             }
         }
-        Self { lines, eol, trailing_newline: trailing_newline || text.is_empty(), malformed }
+        Self {
+            lines,
+            eol,
+            trailing_newline: trailing_newline || text.is_empty(),
+            malformed,
+        }
     }
 
     pub fn render(&self) -> String {
         if self.lines.is_empty() {
             return String::new();
         }
-        let mut s = self.lines.iter().map(|l| l.raw.as_str()).collect::<Vec<_>>().join(self.eol);
+        let mut s = self
+            .lines
+            .iter()
+            .map(|l| l.raw.as_str())
+            .collect::<Vec<_>>()
+            .join(self.eol);
         if self.trailing_newline {
             s.push_str(self.eol);
         }
@@ -161,7 +194,11 @@ impl IniDoc {
         for l in &self.lines {
             match &l.kind {
                 Kind::Section(n) => cur = n.clone(),
-                Kind::Pair { key: k, value, .. } if cur.eq_ignore_ascii_case(section) && k.eq_ignore_ascii_case(key) => found = Some(unquote(value)),
+                Kind::Pair { key: k, value, .. }
+                    if cur.eq_ignore_ascii_case(section) && k.eq_ignore_ascii_case(key) =>
+                {
+                    found = Some(unquote(value))
+                }
                 _ => {}
             }
         }
@@ -205,20 +242,48 @@ impl IniDoc {
             }
         }
         if let Some(i) = target {
-            if let Kind::Pair { key: k, prefix, tail, .. } = self.lines[i].kind.clone() {
+            if let Kind::Pair {
+                key: k,
+                prefix,
+                tail,
+                ..
+            } = self.lines[i].kind.clone()
+            {
                 let raw = format!("{prefix}{value}{tail}");
-                self.lines[i] = Line { raw, kind: Kind::Pair { key: k, value: value.to_string(), prefix, tail } };
+                self.lines[i] = Line {
+                    raw,
+                    kind: Kind::Pair {
+                        key: k,
+                        value: value.to_string(),
+                        prefix,
+                        tail,
+                    },
+                };
             }
             return;
         }
-        let new_line = Line { raw: format!("{key}={value}"), kind: Kind::Pair { key: key.to_string(), value: value.to_string(), prefix: format!("{key}="), tail: String::new() } };
+        let new_line = Line {
+            raw: format!("{key}={value}"),
+            kind: Kind::Pair {
+                key: key.to_string(),
+                value: value.to_string(),
+                prefix: format!("{key}="),
+                tail: String::new(),
+            },
+        };
         match section_end {
             Some(i) => self.lines.insert(i + 1, new_line),
             None => {
                 if self.lines.last().is_some_and(|l| l.kind != Kind::Blank) {
-                    self.lines.push(Line { raw: String::new(), kind: Kind::Blank });
+                    self.lines.push(Line {
+                        raw: String::new(),
+                        kind: Kind::Blank,
+                    });
                 }
-                self.lines.push(Line { raw: format!("[{section}]"), kind: Kind::Section(section.to_string()) });
+                self.lines.push(Line {
+                    raw: format!("[{section}]"),
+                    kind: Kind::Section(section.to_string()),
+                });
                 self.lines.push(new_line);
             }
         }
@@ -269,12 +334,60 @@ pub struct SettingDef {
 }
 
 pub static SETTINGS: [SettingDef; 6] = [
-    SettingDef { id: "automount.enabled", section: "automount", key: "enabled", kind: ValueKind::Bool, label: "Mount Windows drives", help: "Make Windows drives (C:, D:, …) available inside the distribution.", default_note: "WSL default: on" },
-    SettingDef { id: "automount.root", section: "automount", key: "root", kind: ValueKind::Path, label: "Drive mount folder", help: "Where Windows drives appear. VLINUX shared-folder links point into this folder.", default_note: "WSL default: /mnt/" },
-    SettingDef { id: "interop.enabled", section: "interop", key: "enabled", kind: ValueKind::Bool, label: "Run Windows programs", help: "Let Linux start Windows programs (including opening files with Windows apps).", default_note: "WSL default: on" },
-    SettingDef { id: "interop.appendWindowsPath", section: "interop", key: "appendWindowsPath", kind: ValueKind::Bool, label: "Windows PATH in Linux", help: "Add the Windows PATH to the distribution's PATH.", default_note: "WSL default: on" },
-    SettingDef { id: "boot.systemd", section: "boot", key: "systemd", kind: ValueKind::Bool, label: "systemd at startup", help: "Run systemd as the init process (WSL 2 only).", default_note: "WSL default: off unless the distribution sets it" },
-    SettingDef { id: "user.default", section: "user", key: "default", kind: ValueKind::Username, label: "Default user", help: "The user a new terminal opens as. It must already exist in the distribution.", default_note: "Not set: the user chosen when the distribution was set up" },
+    SettingDef {
+        id: "automount.enabled",
+        section: "automount",
+        key: "enabled",
+        kind: ValueKind::Bool,
+        label: "Mount Windows drives",
+        help: "Make Windows drives (C:, D:, …) available inside the distribution.",
+        default_note: "WSL default: on",
+    },
+    SettingDef {
+        id: "automount.root",
+        section: "automount",
+        key: "root",
+        kind: ValueKind::Path,
+        label: "Drive mount folder",
+        help: "Where Windows drives appear. VLINUX shared-folder links point into this folder.",
+        default_note: "WSL default: /mnt/",
+    },
+    SettingDef {
+        id: "interop.enabled",
+        section: "interop",
+        key: "enabled",
+        kind: ValueKind::Bool,
+        label: "Run Windows programs",
+        help: "Let Linux start Windows programs (including opening files with Windows apps).",
+        default_note: "WSL default: on",
+    },
+    SettingDef {
+        id: "interop.appendWindowsPath",
+        section: "interop",
+        key: "appendWindowsPath",
+        kind: ValueKind::Bool,
+        label: "Windows PATH in Linux",
+        help: "Add the Windows PATH to the distribution's PATH.",
+        default_note: "WSL default: on",
+    },
+    SettingDef {
+        id: "boot.systemd",
+        section: "boot",
+        key: "systemd",
+        kind: ValueKind::Bool,
+        label: "systemd at startup",
+        help: "Run systemd as the init process (WSL 2 only).",
+        default_note: "WSL default: off unless the distribution sets it",
+    },
+    SettingDef {
+        id: "user.default",
+        section: "user",
+        key: "default",
+        kind: ValueKind::Username,
+        label: "Default user",
+        help: "The user a new terminal opens as. It must already exist in the distribution.",
+        default_note: "Not set: the user chosen when the distribution was set up",
+    },
 ];
 
 pub fn setting(id: &str) -> Option<&'static SettingDef> {
@@ -283,7 +396,9 @@ pub fn setting(id: &str) -> Option<&'static SettingDef> {
 
 fn valid_username(v: &str) -> bool {
     let mut c = v.chars();
-    matches!(c.next(), Some(f) if f.is_ascii_lowercase() || f == '_') && v.len() <= 32 && c.all(|x| x.is_ascii_lowercase() || x.is_ascii_digit() || x == '_' || x == '-')
+    matches!(c.next(), Some(f) if f.is_ascii_lowercase() || f == '_')
+        && v.len() <= 32
+        && c.all(|x| x.is_ascii_lowercase() || x.is_ascii_digit() || x == '_' || x == '-')
 }
 
 fn validate_value(def: &SettingDef, v: &str) -> Result<(), ConfError> {
@@ -340,7 +455,10 @@ pub enum ConfError {
     /// Restore refused: the file differs from what VLINUX wrote.
     Diverged,
     /// The write failed and the previous content was put back (or was never replaced).
-    VerifyFailed { restored: bool, detail: String },
+    VerifyFailed {
+        restored: bool,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for ConfError {
@@ -392,7 +510,10 @@ pub struct ConfView {
 /// Read-only view of the current file contents.
 pub fn view(distro: &str, text: Option<&str>) -> ConfView {
     let doc = IniDoc::parse(text.unwrap_or(""));
-    let managed: Vec<(String, String)> = SETTINGS.iter().map(|s| (s.section.to_ascii_lowercase(), s.key.to_ascii_lowercase())).collect();
+    let managed: Vec<(String, String)> = SETTINGS
+        .iter()
+        .map(|s| (s.section.to_ascii_lowercase(), s.key.to_ascii_lowercase()))
+        .collect();
     let other_keys: Vec<String> = doc
         .keys()
         .into_iter()
@@ -478,7 +599,12 @@ pub struct Plan {
 pub const RESTART_NOTE: &str = "A saved change takes effect only after this distribution restarts. VLINUX will not restart or stop it for you, and it cannot confirm the change has taken effect until you have restarted it.";
 
 /// Build the new file text for `changes` without writing anything.
-pub fn plan(distro: &str, current: Option<&str>, changes: &[Change], wsl_version: u8) -> Result<Plan, ConfError> {
+pub fn plan(
+    distro: &str,
+    current: Option<&str>,
+    changes: &[Change],
+    wsl_version: u8,
+) -> Result<Plan, ConfError> {
     if changes.is_empty() {
         return Err(ConfError::NoChange);
     }
@@ -495,9 +621,17 @@ pub fn plan(distro: &str, current: Option<&str>, changes: &[Change], wsl_version
     let mut summary = Vec::new();
     let mut warnings = Vec::new();
     for c in changes {
-        let def = setting(&c.id).ok_or_else(|| ConfError::Invalid(format!("'{}' is not a setting VLINUX manages.", c.id.chars().take(40).collect::<String>())))?;
+        let def = setting(&c.id).ok_or_else(|| {
+            ConfError::Invalid(format!(
+                "'{}' is not a setting VLINUX manages.",
+                c.id.chars().take(40).collect::<String>()
+            ))
+        })?;
         if seen.contains(&def.id) {
-            return Err(ConfError::Invalid(format!("'{}' was given twice.", def.label)));
+            return Err(ConfError::Invalid(format!(
+                "'{}' was given twice.",
+                def.label
+            )));
         }
         seen.push(def.id);
         let before = doc.get(def.section, def.key);
@@ -519,7 +653,11 @@ pub fn plan(distro: &str, current: Option<&str>, changes: &[Change], wsl_version
                     continue;
                 }
                 doc.unset(def.section, def.key);
-                summary.push(format!("{}: {} → removed (WSL default)", def.label, before.unwrap_or_default()));
+                summary.push(format!(
+                    "{}: {} → removed (WSL default)",
+                    def.label,
+                    before.unwrap_or_default()
+                ));
             }
         }
     }
@@ -570,26 +708,44 @@ pub fn diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
     let mut lcs = vec![vec![0u32; m + 1]; n + 1];
     for i in (0..n).rev() {
         for j in (0..m).rev() {
-            lcs[i][j] = if a[i] == b[j] { lcs[i + 1][j + 1] + 1 } else { lcs[i + 1][j].max(lcs[i][j + 1]) };
+            lcs[i][j] = if a[i] == b[j] {
+                lcs[i + 1][j + 1] + 1
+            } else {
+                lcs[i + 1][j].max(lcs[i][j + 1])
+            };
         }
     }
     let mut full: Vec<DiffLine> = Vec::new();
     let (mut i, mut j) = (0, 0);
     while i < n || j < m {
         if i < n && j < m && a[i] == b[j] {
-            full.push(DiffLine { kind: DiffKind::Same, text: a[i].to_string() });
+            full.push(DiffLine {
+                kind: DiffKind::Same,
+                text: a[i].to_string(),
+            });
             i += 1;
             j += 1;
         } else if j < m && (i == n || lcs[i][j + 1] >= lcs[i + 1][j]) {
-            full.push(DiffLine { kind: DiffKind::Add, text: b[j].to_string() });
+            full.push(DiffLine {
+                kind: DiffKind::Add,
+                text: b[j].to_string(),
+            });
             j += 1;
         } else {
-            full.push(DiffLine { kind: DiffKind::Remove, text: a[i].to_string() });
+            full.push(DiffLine {
+                kind: DiffKind::Remove,
+                text: a[i].to_string(),
+            });
             i += 1;
         }
     }
     const CTX: usize = 2;
-    let changed: Vec<usize> = full.iter().enumerate().filter(|(_, l)| l.kind != DiffKind::Same).map(|(i, _)| i).collect();
+    let changed: Vec<usize> = full
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.kind != DiffKind::Same)
+        .map(|(i, _)| i)
+        .collect();
     let mut keep = vec![false; full.len()];
     for c in changed {
         for k in c.saturating_sub(CTX)..=(c + CTX).min(full.len().saturating_sub(1)) {
@@ -603,7 +759,10 @@ pub fn diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
             out.push(l);
             gap = false;
         } else if !gap {
-            out.push(DiffLine { kind: DiffKind::Gap, text: "…".into() });
+            out.push(DiffLine {
+                kind: DiffKind::Gap,
+                text: "…".into(),
+            });
             gap = true;
         }
     }
@@ -654,7 +813,11 @@ impl ConfFile for HostConfFile {
                 if b.len() > MAX_CONF_BYTES {
                     return Err(ConfError::TooLarge);
                 }
-                String::from_utf8(b).map(Some).map_err(|_| ConfError::Invalid("/etc/wsl.conf is not valid UTF-8 text, so it is not edited.".into()))
+                String::from_utf8(b).map(Some).map_err(|_| {
+                    ConfError::Invalid(
+                        "/etc/wsl.conf is not valid UTF-8 text, so it is not edited.".into(),
+                    )
+                })
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(ConfError::Io(format!("Could not read /etc/wsl.conf: {e}"))),
@@ -662,11 +825,17 @@ impl ConfFile for HostConfFile {
     }
 
     fn write(&self, content: &str) -> Result<(), WriteError> {
-        let dir = self.path.parent().ok_or_else(|| WriteError::Other("no parent folder".into()))?;
+        let dir = self
+            .path
+            .parent()
+            .ok_or_else(|| WriteError::Other("no parent folder".into()))?;
         let tmp = dir.join("wsl.conf.vlinux-tmp");
         // Never replace something we did not make.
         if fs::symlink_metadata(&tmp).is_ok() {
-            return Err(WriteError::Other("a leftover temporary file (wsl.conf.vlinux-tmp) is in the way; remove it by hand".into()));
+            return Err(WriteError::Other(
+                "a leftover temporary file (wsl.conf.vlinux-tmp) is in the way; remove it by hand"
+                    .into(),
+            ));
         }
         fs::write(&tmp, content).map_err(|e| werr(&e))?;
         if let Err(e) = fs::rename(&tmp, &self.path) {
@@ -714,7 +883,9 @@ pub struct BackupStore {
 
 impl BackupStore {
     pub fn new(dir: &Path) -> Self {
-        Self { path: dir.join(BACKUPS_FILE) }
+        Self {
+            path: dir.join(BACKUPS_FILE),
+        }
     }
 
     fn read(&self) -> Result<BackupData, String> {
@@ -730,7 +901,10 @@ impl BackupStore {
             fs::create_dir_all(dir)?;
         }
         let tmp = self.path.with_extension("json.tmp");
-        fs::write(&tmp, serde_json::to_string_pretty(data).map_err(io::Error::other)?)?;
+        fs::write(
+            &tmp,
+            serde_json::to_string_pretty(data).map_err(io::Error::other)?,
+        )?;
         fs::rename(&tmp, &self.path)
     }
 
@@ -739,7 +913,9 @@ impl BackupStore {
         match self.read() {
             Ok(d) => Ok(d),
             Err(_) => {
-                let aside = self.path.with_file_name(format!("{BACKUPS_FILE}.invalid-{now}"));
+                let aside = self
+                    .path
+                    .with_file_name(format!("{BACKUPS_FILE}.invalid-{now}"));
                 fs::rename(&self.path, aside)?;
                 Ok(BackupData::default())
             }
@@ -747,7 +923,13 @@ impl BackupStore {
     }
 
     pub fn list(&self, distro: &str) -> Vec<Backup> {
-        let mut v: Vec<Backup> = self.read().map(|d| d.backups).unwrap_or_default().into_iter().filter(|b| b.distro == distro).collect();
+        let mut v: Vec<Backup> = self
+            .read()
+            .map(|d| d.backups)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|b| b.distro == distro)
+            .collect();
         v.sort_by(|a, b| b.taken_at.cmp(&a.taken_at).then_with(|| b.id.cmp(&a.id)));
         v
     }
@@ -761,11 +943,21 @@ impl BackupStore {
         d.version = 1;
         d.backups.push(b.clone());
         // Keep the newest few per distribution.
-        let mut mine: Vec<(u64, String)> = d.backups.iter().filter(|x| x.distro == b.distro).map(|x| (x.taken_at, x.id.clone())).collect();
+        let mut mine: Vec<(u64, String)> = d
+            .backups
+            .iter()
+            .filter(|x| x.distro == b.distro)
+            .map(|x| (x.taken_at, x.id.clone()))
+            .collect();
         mine.sort();
         if mine.len() > KEEP_PER_DISTRO {
-            let drop: Vec<String> = mine.iter().take(mine.len() - KEEP_PER_DISTRO).map(|(_, id)| id.clone()).collect();
-            d.backups.retain(|x| !(x.distro == b.distro && drop.contains(&x.id)));
+            let drop: Vec<String> = mine
+                .iter()
+                .take(mine.len() - KEEP_PER_DISTRO)
+                .map(|(_, id)| id.clone())
+                .collect();
+            d.backups
+                .retain(|x| !(x.distro == b.distro && drop.contains(&x.id)));
         }
         self.write(&d)
     }
@@ -787,7 +979,13 @@ impl BackupStore {
 
     fn next_id(&self, distro: &str, now: u64) -> String {
         let used = self.read().map(|d| d.backups.len()).unwrap_or(0);
-        format!("{now}-{}-{used}", fingerprint(Some(distro)).chars().take(6).collect::<String>())
+        format!(
+            "{now}-{}-{used}",
+            fingerprint(Some(distro))
+                .chars()
+                .take(6)
+                .collect::<String>()
+        )
     }
 }
 
@@ -807,7 +1005,11 @@ pub enum ApplyOutcome {
         message: String,
     },
     /// The distribution's file is not writable by the account VLINUX runs as. Nothing was changed.
-    NotWritable { reason: String, proposed: String, instructions: String },
+    NotWritable {
+        reason: String,
+        proposed: String,
+        instructions: String,
+    },
 }
 
 fn manual_instructions(proposed_len: usize) -> String {
@@ -817,7 +1019,14 @@ fn manual_instructions(proposed_len: usize) -> String {
 }
 
 /// Write `new_text` after taking a backup. `expected_fp` is the fingerprint the preview was based on.
-pub fn apply(file: &dyn ConfFile, store: &BackupStore, distro: &str, expected_fp: &str, new_text: &str, now: u64) -> Result<ApplyOutcome, ConfError> {
+pub fn apply(
+    file: &dyn ConfFile,
+    store: &BackupStore,
+    distro: &str,
+    expected_fp: &str,
+    new_text: &str,
+    now: u64,
+) -> Result<ApplyOutcome, ConfError> {
     if new_text.len() > MAX_CONF_BYTES {
         return Err(ConfError::TooLarge);
     }
@@ -848,14 +1057,22 @@ pub fn apply(file: &dyn ConfFile, store: &BackupStore, distro: &str, expected_fp
         written_fp: None,
         restored_at: None,
     };
-    store.insert(backup.clone(), now).map_err(|e| ConfError::BackupFailed(e.to_string()))?;
+    store
+        .insert(backup.clone(), now)
+        .map_err(|e| ConfError::BackupFailed(e.to_string()))?;
 
     if let Err(e) = file.write(new_text) {
         // Nothing was replaced, so the backup would only be noise.
         store.discard(&backup.id, now);
         return match e {
-            WriteError::Denied(reason) => Ok(ApplyOutcome::NotWritable { reason, proposed: new_text.to_string(), instructions: manual_instructions(new_text.len()) }),
-            WriteError::Other(m) => Err(ConfError::Io(format!("Could not write /etc/wsl.conf: {m}. Nothing was changed."))),
+            WriteError::Denied(reason) => Ok(ApplyOutcome::NotWritable {
+                reason,
+                proposed: new_text.to_string(),
+                instructions: manual_instructions(new_text.len()),
+            }),
+            WriteError::Other(m) => Err(ConfError::Io(format!(
+                "Could not write /etc/wsl.conf: {m}. Nothing was changed."
+            ))),
         };
     }
 
@@ -869,7 +1086,13 @@ pub fn apply(file: &dyn ConfFile, store: &BackupStore, distro: &str, expected_fp
         return Err(ConfError::VerifyFailed { restored, detail });
     }
     let fp = fingerprint(Some(new_text));
-    store.update(&backup.id, now, |b| b.written_fp = Some(fp.clone())).map_err(|e| ConfError::BackupFailed(format!("the file was written but its backup record could not be updated: {e}")))?;
+    store
+        .update(&backup.id, now, |b| b.written_fp = Some(fp.clone()))
+        .map_err(|e| {
+            ConfError::BackupFailed(format!(
+                "the file was written but its backup record could not be updated: {e}"
+            ))
+        })?;
     Ok(ApplyOutcome::Applied {
         backup_id: backup.id,
         verified_on_disk: true,
@@ -887,16 +1110,33 @@ fn put_back(file: &dyn ConfFile, b: &Backup) -> Result<(), WriteError> {
 }
 
 /// Put a backup's content back. The current state is backed up first, so this can be undone too.
-pub fn restore(file: &dyn ConfFile, store: &BackupStore, distro: &str, id: &str, force: bool, now: u64) -> Result<ApplyOutcome, ConfError> {
-    let b = store.get(distro, id).ok_or_else(|| ConfError::NotFound("That backup no longer exists.".into()))?;
+pub fn restore(
+    file: &dyn ConfFile,
+    store: &BackupStore,
+    distro: &str,
+    id: &str,
+    force: bool,
+    now: u64,
+) -> Result<ApplyOutcome, ConfError> {
+    let b = store
+        .get(distro, id)
+        .ok_or_else(|| ConfError::NotFound("That backup no longer exists.".into()))?;
     let current = file.read()?;
     let cur_fp = fingerprint(current.as_deref());
     match &b.written_fp {
-        None => return Err(ConfError::Invalid("That backup was never applied, so there is nothing to undo.".into())),
+        None => {
+            return Err(ConfError::Invalid(
+                "That backup was never applied, so there is nothing to undo.".into(),
+            ))
+        }
         Some(w) if *w != cur_fp && !force => return Err(ConfError::Diverged),
         _ => {}
     }
-    let target_fp = fingerprint(if b.existed { Some(b.content.as_str()) } else { None });
+    let target_fp = fingerprint(if b.existed {
+        Some(b.content.as_str())
+    } else {
+        None
+    });
     if cur_fp == target_fp {
         return Err(ConfError::NoChange);
     }
@@ -911,21 +1151,32 @@ pub fn restore(file: &dyn ConfFile, store: &BackupStore, distro: &str, id: &str,
         written_fp: Some(target_fp.clone()),
         restored_at: None,
     };
-    store.insert(safety.clone(), now).map_err(|e| ConfError::BackupFailed(e.to_string()))?;
+    store
+        .insert(safety.clone(), now)
+        .map_err(|e| ConfError::BackupFailed(e.to_string()))?;
     if let Err(e) = put_back(file, &b) {
         store.discard(&safety.id, now);
         return match e {
             WriteError::Denied(reason) => Ok(ApplyOutcome::NotWritable {
                 reason,
-                proposed: if b.existed { b.content.clone() } else { String::new() },
+                proposed: if b.existed {
+                    b.content.clone()
+                } else {
+                    String::new()
+                },
                 instructions: manual_instructions(b.content.len()),
             }),
-            WriteError::Other(m) => Err(ConfError::Io(format!("Could not restore /etc/wsl.conf: {m}. Nothing was changed."))),
+            WriteError::Other(m) => Err(ConfError::Io(format!(
+                "Could not restore /etc/wsl.conf: {m}. Nothing was changed."
+            ))),
         };
     }
     let after = file.read()?;
     if fingerprint(after.as_deref()) != target_fp {
-        return Err(ConfError::VerifyFailed { restored: false, detail: "the restored file did not read back as expected".into() });
+        return Err(ConfError::VerifyFailed {
+            restored: false,
+            detail: "the restored file did not read back as expected".into(),
+        });
     }
     let _ = store.update(&b.id, now, |x| x.restored_at = Some(now));
     Ok(ApplyOutcome::Applied {
@@ -945,14 +1196,29 @@ pub fn restore(file: &dyn ConfFile, store: &BackupStore, distro: &str, id: &str,
 /// distribution to be running already.
 pub fn check_accessible(report: &WslReport, name: &str) -> Result<u8, ConfError> {
     if !valid_distro_name(name) {
-        return Err(ConfError::Invalid(format!("'{}' is not a valid distribution name.", name.chars().take(40).collect::<String>())));
+        return Err(ConfError::Invalid(format!(
+            "'{}' is not a valid distribution name.",
+            name.chars().take(40).collect::<String>()
+        )));
     }
     if report.status != RuntimeStatus::Ready {
-        return Err(ConfError::Invalid("WSL is not ready. Check the setup status first.".into()));
+        return Err(ConfError::Invalid(
+            "WSL is not ready. Check the setup status first.".into(),
+        ));
     }
-    let d = report.distros.iter().find(|d| d.name == name).ok_or_else(|| ConfError::NotFound(format!("No distribution named '{name}' is registered with WSL.")))?;
+    let d = report
+        .distros
+        .iter()
+        .find(|d| d.name == name)
+        .ok_or_else(|| {
+            ConfError::NotFound(format!(
+                "No distribution named '{name}' is registered with WSL."
+            ))
+        })?;
     if d.kind == DistroKind::Internal {
-        return Err(ConfError::Invalid(format!("'{name}' belongs to another application and is never touched by VLINUX.")));
+        return Err(ConfError::Invalid(format!(
+            "'{name}' belongs to another application and is never touched by VLINUX."
+        )));
     }
     if d.state != DistroState::Running {
         return Err(ConfError::NotRunning(name.to_string()));
@@ -971,12 +1237,22 @@ mod tests {
     const SAMPLE: &str = "# my distro\n[boot]\nsystemd=true\n\n[automount]\nenabled = true # keep\nOptions = \"metadata,umask=22\"\n\n[custom]\nthing=1\n";
 
     fn ch(id: &str, v: Option<&str>) -> Change {
-        Change { id: id.into(), value: v.map(|s| s.to_string()) }
+        Change {
+            id: id.into(),
+            value: v.map(|s| s.to_string()),
+        }
     }
 
     #[test]
     fn parse_render_roundtrip_is_exact() {
-        for t in [SAMPLE, "", "[a]\nb=c", "[a]\r\nb=c\r\n", "\n\n[x]\n", "# only a comment\n"] {
+        for t in [
+            SAMPLE,
+            "",
+            "[a]\nb=c",
+            "[a]\r\nb=c\r\n",
+            "\n\n[x]\n",
+            "# only a comment\n",
+        ] {
             assert_eq!(IniDoc::parse(t).render(), t, "{t:?}");
         }
     }
@@ -985,7 +1261,10 @@ mod tests {
     fn lookup_is_case_insensitive_and_unquotes() {
         let d = IniDoc::parse(SAMPLE);
         assert_eq!(d.get("AUTOMOUNT", "ENABLED").as_deref(), Some("true"));
-        assert_eq!(d.get("automount", "options").as_deref(), Some("metadata,umask=22"));
+        assert_eq!(
+            d.get("automount", "options").as_deref(),
+            Some("metadata,umask=22")
+        );
         assert_eq!(d.get("boot", "systemd").as_deref(), Some("true"));
         assert_eq!(d.get("boot", "nothing"), None);
         assert_eq!(d.get("nosuch", "enabled"), None);
@@ -993,18 +1272,43 @@ mod tests {
 
     #[test]
     fn edits_preserve_everything_else() {
-        let p = plan("D", Some(SAMPLE), &[ch("automount.enabled", Some("false"))], 2).unwrap();
-        assert_eq!(p.new_text, SAMPLE.replace("enabled = true # keep", "enabled = false # keep"));
+        let p = plan(
+            "D",
+            Some(SAMPLE),
+            &[ch("automount.enabled", Some("false"))],
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            p.new_text,
+            SAMPLE.replace("enabled = true # keep", "enabled = false # keep")
+        );
         // Unknown keys, unknown sections, comments, odd spacing and quotes all survive.
-        assert!(p.new_text.contains("# my distro") && p.new_text.contains("[custom]") && p.new_text.contains("Options = \"metadata,umask=22\""));
+        assert!(
+            p.new_text.contains("# my distro")
+                && p.new_text.contains("[custom]")
+                && p.new_text.contains("Options = \"metadata,umask=22\"")
+        );
         assert_eq!(p.diff.iter().filter(|l| l.kind == DiffKind::Add).count(), 1);
-        assert_eq!(p.diff.iter().filter(|l| l.kind == DiffKind::Remove).count(), 1);
+        assert_eq!(
+            p.diff.iter().filter(|l| l.kind == DiffKind::Remove).count(),
+            1
+        );
         assert_eq!(p.based_on, fingerprint(Some(SAMPLE)));
     }
 
     #[test]
     fn missing_keys_and_sections_are_added_in_the_right_place() {
-        let p = plan("D", Some(SAMPLE), &[ch("interop.enabled", Some("false")), ch("boot.systemd", Some("false"))], 2).unwrap();
+        let p = plan(
+            "D",
+            Some(SAMPLE),
+            &[
+                ch("interop.enabled", Some("false")),
+                ch("boot.systemd", Some("false")),
+            ],
+            2,
+        )
+        .unwrap();
         let d = IniDoc::parse(&p.new_text);
         assert_eq!(d.get("interop", "enabled").as_deref(), Some("false"));
         assert_eq!(d.get("boot", "systemd").as_deref(), Some("false"));
@@ -1013,7 +1317,10 @@ mod tests {
         let q = plan("D", Some(SAMPLE), &[ch("automount.root", Some("/mnt/"))], 2).unwrap();
         let lines: Vec<&str> = q.new_text.lines().collect();
         let pos = lines.iter().position(|l| *l == "root=/mnt/").unwrap();
-        assert!(lines[..pos].iter().rev().any(|l| l.starts_with("Options")) && lines[pos + 1].is_empty());
+        assert!(
+            lines[..pos].iter().rev().any(|l| l.starts_with("Options"))
+                && lines[pos + 1].is_empty()
+        );
     }
 
     #[test]
@@ -1027,55 +1334,153 @@ mod tests {
 
     #[test]
     fn crlf_files_stay_crlf() {
-        let p = plan("D", Some("[boot]\r\nsystemd=false\r\n"), &[ch("boot.systemd", Some("true")), ch("interop.enabled", Some("false"))], 2).unwrap();
-        assert_eq!(p.new_text, "[boot]\r\nsystemd=true\r\n\r\n[interop]\r\nenabled=false\r\n");
+        let p = plan(
+            "D",
+            Some("[boot]\r\nsystemd=false\r\n"),
+            &[
+                ch("boot.systemd", Some("true")),
+                ch("interop.enabled", Some("false")),
+            ],
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            p.new_text,
+            "[boot]\r\nsystemd=true\r\n\r\n[interop]\r\nenabled=false\r\n"
+        );
         assert!(!p.new_text.replace("\r\n", "").contains('\n'));
     }
 
     #[test]
     fn unset_removes_only_that_line() {
         let p = plan("D", Some(SAMPLE), &[ch("boot.systemd", None)], 2).unwrap();
-        assert!(!p.new_text.contains("systemd") && p.new_text.contains("[boot]") && p.new_text.contains("thing=1"));
-        assert!(plan("D", Some(SAMPLE), &[ch("user.default", None)], 2).is_err_and(|e| e == ConfError::NoChange));
+        assert!(
+            !p.new_text.contains("systemd")
+                && p.new_text.contains("[boot]")
+                && p.new_text.contains("thing=1")
+        );
+        assert!(plan("D", Some(SAMPLE), &[ch("user.default", None)], 2)
+            .is_err_and(|e| e == ConfError::NoChange));
     }
 
     #[test]
     fn invalid_requests_are_rejected() {
-        for (id, v) in [("automount.enabled", "yes"), ("automount.root", "relative"), ("automount.root", "/"), ("automount.root", "/mnt/../etc"), ("automount.root", "/a b"), ("user.default", "Root User"), ("user.default", "a\nb"), ("user.default", "dana\n[boot]")] {
-            assert!(matches!(plan("D", Some(SAMPLE), &[ch(id, Some(v))], 2), Err(ConfError::Invalid(_))), "{id}={v:?}");
+        for (id, v) in [
+            ("automount.enabled", "yes"),
+            ("automount.root", "relative"),
+            ("automount.root", "/"),
+            ("automount.root", "/mnt/../etc"),
+            ("automount.root", "/a b"),
+            ("user.default", "Root User"),
+            ("user.default", "a\nb"),
+            ("user.default", "dana\n[boot]"),
+        ] {
+            assert!(
+                matches!(
+                    plan("D", Some(SAMPLE), &[ch(id, Some(v))], 2),
+                    Err(ConfError::Invalid(_))
+                ),
+                "{id}={v:?}"
+            );
         }
-        assert!(matches!(plan("D", Some(SAMPLE), &[ch("boot.command", Some("rm -rf /"))], 2), Err(ConfError::Invalid(_))));
-        assert!(matches!(plan("D", Some(SAMPLE), &[ch("boot.systemd", Some("true")), ch("boot.systemd", Some("false"))], 2), Err(ConfError::Invalid(_))));
-        assert!(matches!(plan("D", Some(SAMPLE), &[], 2), Err(ConfError::NoChange)));
-        assert!(matches!(plan("D", Some(SAMPLE), &[ch("boot.systemd", Some("true"))], 2), Err(ConfError::NoChange)));
+        assert!(matches!(
+            plan(
+                "D",
+                Some(SAMPLE),
+                &[ch("boot.command", Some("rm -rf /"))],
+                2
+            ),
+            Err(ConfError::Invalid(_))
+        ));
+        assert!(matches!(
+            plan(
+                "D",
+                Some(SAMPLE),
+                &[
+                    ch("boot.systemd", Some("true")),
+                    ch("boot.systemd", Some("false"))
+                ],
+                2
+            ),
+            Err(ConfError::Invalid(_))
+        ));
+        assert!(matches!(
+            plan("D", Some(SAMPLE), &[], 2),
+            Err(ConfError::NoChange)
+        ));
+        assert!(matches!(
+            plan("D", Some(SAMPLE), &[ch("boot.systemd", Some("true"))], 2),
+            Err(ConfError::NoChange)
+        ));
     }
 
     #[test]
     fn malformed_files_are_not_edited() {
-        for bad in ["[boot\nsystemd=true\n", "systemd=true\n", "[boot]\nthis is not a pair\n"] {
+        for bad in [
+            "[boot\nsystemd=true\n",
+            "systemd=true\n",
+            "[boot]\nthis is not a pair\n",
+        ] {
             assert!(IniDoc::parse(bad).is_malformed(), "{bad:?}");
-            assert!(matches!(plan("D", Some(bad), &[ch("boot.systemd", Some("false"))], 2), Err(ConfError::Malformed(_))), "{bad:?}");
+            assert!(
+                matches!(
+                    plan("D", Some(bad), &[ch("boot.systemd", Some("false"))], 2),
+                    Err(ConfError::Malformed(_))
+                ),
+                "{bad:?}"
+            );
             assert!(!view("D", Some(bad)).editable);
         }
         // The readable part of a malformed file is still shown.
         let v = view("D", Some("[boot]\nsystemd=true\noops\n"));
         assert_eq!(v.malformed, vec![3]);
-        assert_eq!(v.settings.iter().find(|s| s.id == "boot.systemd").unwrap().value.as_deref(), Some("true"));
+        assert_eq!(
+            v.settings
+                .iter()
+                .find(|s| s.id == "boot.systemd")
+                .unwrap()
+                .value
+                .as_deref(),
+            Some("true")
+        );
     }
 
     #[test]
     fn view_lists_unmanaged_keys_and_states() {
         let v = view("D", Some(SAMPLE));
         assert!(v.exists && v.editable);
-        assert!(v.other_keys.contains(&"custom.thing".to_string()) && v.other_keys.contains(&"automount.Options".to_string()));
-        assert_eq!(v.settings.iter().find(|s| s.id == "interop.enabled").unwrap().value, None);
+        assert!(
+            v.other_keys.contains(&"custom.thing".to_string())
+                && v.other_keys.contains(&"automount.Options".to_string())
+        );
+        assert_eq!(
+            v.settings
+                .iter()
+                .find(|s| s.id == "interop.enabled")
+                .unwrap()
+                .value,
+            None
+        );
         let none = view("D", None);
-        assert!(!none.exists && none.editable && none.notes.iter().any(|n| n.contains("no /etc/wsl.conf")));
+        assert!(
+            !none.exists
+                && none.editable
+                && none.notes.iter().any(|n| n.contains("no /etc/wsl.conf"))
+        );
     }
 
     #[test]
     fn warnings_explain_consequences() {
-        let p = plan("D", Some(SAMPLE), &[ch("automount.enabled", Some("false")), ch("automount.root", Some("/win/"))], 2).unwrap();
+        let p = plan(
+            "D",
+            Some(SAMPLE),
+            &[
+                ch("automount.enabled", Some("false")),
+                ch("automount.root", Some("/win/")),
+            ],
+            2,
+        )
+        .unwrap();
         assert!(p.warnings.iter().any(|w| w.contains("shared-folder")));
         assert!(p.restart_note.contains("restart") && p.restart_note.contains("will not restart"));
         let q = plan("D", None, &[ch("boot.systemd", Some("true"))], 1).unwrap();
@@ -1089,9 +1494,16 @@ mod tests {
         let d = diff_lines(&old, &new);
         assert!(d.iter().any(|l| l.kind == DiffKind::Gap));
         assert!(d.iter().any(|l| l.kind == DiffKind::Add && l.text == "x"));
-        assert!(d.iter().any(|l| l.kind == DiffKind::Remove && l.text == "l10"));
+        assert!(d
+            .iter()
+            .any(|l| l.kind == DiffKind::Remove && l.text == "l10"));
         assert!(d.len() < 20);
-        assert!(diff_lines("a\n", "a\n").iter().all(|l| l.kind == DiffKind::Gap) || diff_lines("a\n", "a\n").is_empty());
+        assert!(
+            diff_lines("a\n", "a\n")
+                .iter()
+                .all(|l| l.kind == DiffKind::Gap)
+                || diff_lines("a\n", "a\n").is_empty()
+        );
     }
 
     // --- apply / restore against a real temp directory ------------------------------------
@@ -1112,10 +1524,20 @@ mod tests {
             fs::write(&conf, t).unwrap();
         }
         let store = BackupStore::new(&dir.join("appdata"));
-        Env { file: HostConfFile::new(conf.clone()), conf, store, dir }
+        Env {
+            file: HostConfFile::new(conf.clone()),
+            conf,
+            store,
+            dir,
+        }
     }
 
-    fn apply_change(e: &Env, current: Option<&str>, changes: &[Change], now: u64) -> Result<ApplyOutcome, ConfError> {
+    fn apply_change(
+        e: &Env,
+        current: Option<&str>,
+        changes: &[Change],
+        now: u64,
+    ) -> Result<ApplyOutcome, ConfError> {
         let p = plan("D", current, changes, 2)?;
         apply(&e.file, &e.store, "D", &p.based_on, &p.new_text, now)
     }
@@ -1123,11 +1545,27 @@ mod tests {
     #[test]
     fn apply_backs_up_writes_verifies_and_never_claims_activity() {
         let e = env(Some(SAMPLE));
-        let out = apply_change(&e, Some(SAMPLE), &[ch("automount.enabled", Some("false"))], 100).unwrap();
-        let ApplyOutcome::Applied { backup_id, verified_on_disk, verified_active, message } = out else { panic!("expected Applied") };
+        let out = apply_change(
+            &e,
+            Some(SAMPLE),
+            &[ch("automount.enabled", Some("false"))],
+            100,
+        )
+        .unwrap();
+        let ApplyOutcome::Applied {
+            backup_id,
+            verified_on_disk,
+            verified_active,
+            message,
+        } = out
+        else {
+            panic!("expected Applied")
+        };
         assert!(verified_on_disk && !verified_active);
         assert!(message.contains("restart") && !message.to_lowercase().contains("is active"));
-        assert!(fs::read_to_string(&e.conf).unwrap().contains("enabled = false # keep"));
+        assert!(fs::read_to_string(&e.conf)
+            .unwrap()
+            .contains("enabled = false # keep"));
         let b = e.store.get("D", &backup_id).unwrap();
         assert_eq!(b.content, SAMPLE);
         assert!(b.existed && b.written_fp.is_some());
@@ -1139,17 +1577,32 @@ mod tests {
         let e = env(Some(SAMPLE));
         let p = plan("D", Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 2).unwrap();
         fs::write(&e.conf, "[user]\ndefault=someone\n").unwrap();
-        assert_eq!(apply(&e.file, &e.store, "D", &p.based_on, &p.new_text, 1), Err(ConfError::Changed));
-        assert_eq!(fs::read_to_string(&e.conf).unwrap(), "[user]\ndefault=someone\n");
+        assert_eq!(
+            apply(&e.file, &e.store, "D", &p.based_on, &p.new_text, 1),
+            Err(ConfError::Changed)
+        );
+        assert_eq!(
+            fs::read_to_string(&e.conf).unwrap(),
+            "[user]\ndefault=someone\n"
+        );
         assert!(e.store.list("D").is_empty());
     }
 
     #[test]
     fn restore_returns_the_original_and_is_itself_reversible() {
         let e = env(Some(SAMPLE));
-        let ApplyOutcome::Applied { backup_id, .. } = apply_change(&e, Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 100).unwrap() else { panic!() };
+        let ApplyOutcome::Applied { backup_id, .. } =
+            apply_change(&e, Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 100).unwrap()
+        else {
+            panic!()
+        };
         let changed = fs::read_to_string(&e.conf).unwrap();
-        let ApplyOutcome::Applied { backup_id: undo_id, .. } = restore(&e.file, &e.store, "D", &backup_id, false, 200).unwrap() else { panic!() };
+        let ApplyOutcome::Applied {
+            backup_id: undo_id, ..
+        } = restore(&e.file, &e.store, "D", &backup_id, false, 200).unwrap()
+        else {
+            panic!()
+        };
         assert_eq!(fs::read_to_string(&e.conf).unwrap(), SAMPLE);
         // And the restore can be undone.
         restore(&e.file, &e.store, "D", &undo_id, false, 300).unwrap();
@@ -1160,20 +1613,38 @@ mod tests {
     #[test]
     fn restore_refuses_to_discard_someone_elses_edit_unless_forced() {
         let e = env(Some(SAMPLE));
-        let ApplyOutcome::Applied { backup_id, .. } = apply_change(&e, Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 100).unwrap() else { panic!() };
+        let ApplyOutcome::Applied { backup_id, .. } =
+            apply_change(&e, Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 100).unwrap()
+        else {
+            panic!()
+        };
         fs::write(&e.conf, "# edited by hand\n[boot]\nsystemd=true\n").unwrap();
-        assert_eq!(restore(&e.file, &e.store, "D", &backup_id, false, 200), Err(ConfError::Diverged));
-        assert_eq!(fs::read_to_string(&e.conf).unwrap(), "# edited by hand\n[boot]\nsystemd=true\n");
+        assert_eq!(
+            restore(&e.file, &e.store, "D", &backup_id, false, 200),
+            Err(ConfError::Diverged)
+        );
+        assert_eq!(
+            fs::read_to_string(&e.conf).unwrap(),
+            "# edited by hand\n[boot]\nsystemd=true\n"
+        );
         restore(&e.file, &e.store, "D", &backup_id, true, 300).unwrap();
         assert_eq!(fs::read_to_string(&e.conf).unwrap(), SAMPLE);
         // The hand edit was saved before being replaced.
-        assert!(e.store.list("D").iter().any(|b| b.content == "# edited by hand\n[boot]\nsystemd=true\n"));
+        assert!(e
+            .store
+            .list("D")
+            .iter()
+            .any(|b| b.content == "# edited by hand\n[boot]\nsystemd=true\n"));
     }
 
     #[test]
     fn restoring_a_created_file_removes_it() {
         let e = env(None);
-        let ApplyOutcome::Applied { backup_id, .. } = apply_change(&e, None, &[ch("user.default", Some("dana"))], 100).unwrap() else { panic!() };
+        let ApplyOutcome::Applied { backup_id, .. } =
+            apply_change(&e, None, &[ch("user.default", Some("dana"))], 100).unwrap()
+        else {
+            panic!()
+        };
         assert!(e.conf.exists());
         restore(&e.file, &e.store, "D", &backup_id, false, 200).unwrap();
         assert!(!e.conf.exists());
@@ -1182,10 +1653,20 @@ mod tests {
     #[test]
     fn restore_of_unknown_other_distro_or_unapplied_backups_fails() {
         let e = env(Some(SAMPLE));
-        assert!(matches!(restore(&e.file, &e.store, "D", "nope", false, 1), Err(ConfError::NotFound(_))));
-        let ApplyOutcome::Applied { backup_id, .. } = apply_change(&e, Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 100).unwrap() else { panic!() };
+        assert!(matches!(
+            restore(&e.file, &e.store, "D", "nope", false, 1),
+            Err(ConfError::NotFound(_))
+        ));
+        let ApplyOutcome::Applied { backup_id, .. } =
+            apply_change(&e, Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 100).unwrap()
+        else {
+            panic!()
+        };
         // Backups are per distribution.
-        assert!(matches!(restore(&e.file, &e.store, "Other", &backup_id, true, 1), Err(ConfError::NotFound(_))));
+        assert!(matches!(
+            restore(&e.file, &e.store, "Other", &backup_id, true, 1),
+            Err(ConfError::NotFound(_))
+        ));
     }
 
     struct DeniedFile(String);
@@ -1208,9 +1689,18 @@ mod tests {
         let f = DeniedFile(SAMPLE.to_string());
         let p = plan("D", Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 2).unwrap();
         let out = apply(&f, &store, "D", &p.based_on, &p.new_text, 5).unwrap();
-        let ApplyOutcome::NotWritable { proposed, instructions, .. } = out else { panic!("expected NotWritable") };
+        let ApplyOutcome::NotWritable {
+            proposed,
+            instructions,
+            ..
+        } = out
+        else {
+            panic!("expected NotWritable")
+        };
         assert_eq!(proposed, p.new_text);
-        assert!(instructions.contains("sudo") && instructions.contains("does not use administrator"));
+        assert!(
+            instructions.contains("sudo") && instructions.contains("does not use administrator")
+        );
         // The pointless backup was dropped.
         assert!(store.list("D").is_empty());
     }
@@ -1240,10 +1730,16 @@ mod tests {
                 self.inner.remove()
             }
         }
-        let f = Flaky { inner: &e.file, writes: std::cell::Cell::new(0) };
+        let f = Flaky {
+            inner: &e.file,
+            writes: std::cell::Cell::new(0),
+        };
         let p = plan("D", Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 2).unwrap();
         let err = apply(&f, &e.store, "D", &p.based_on, &p.new_text, 9).unwrap_err();
-        assert!(matches!(err, ConfError::VerifyFailed { restored: true, .. }));
+        assert!(matches!(
+            err,
+            ConfError::VerifyFailed { restored: true, .. }
+        ));
         assert_eq!(fs::read_to_string(&e.conf).unwrap(), SAMPLE);
     }
 
@@ -1251,7 +1747,14 @@ mod tests {
     fn malformed_current_file_is_never_overwritten() {
         let bad = "[boot\nsystemd=true\n";
         let e = env(Some(bad));
-        let r = apply(&e.file, &e.store, "D", &fingerprint(Some(bad)), "[boot]\nsystemd=false\n", 1);
+        let r = apply(
+            &e.file,
+            &e.store,
+            "D",
+            &fingerprint(Some(bad)),
+            "[boot]\nsystemd=false\n",
+            1,
+        );
         assert!(matches!(r, Err(ConfError::Malformed(_))));
         assert_eq!(fs::read_to_string(&e.conf).unwrap(), bad);
     }
@@ -1264,16 +1767,26 @@ mod tests {
         fs::write(&e.conf, [0xff, 0xfe, 0x00]).unwrap();
         assert!(matches!(e.file.read(), Err(ConfError::Invalid(_))));
         let big = "#".repeat(MAX_CONF_BYTES + 1);
-        assert_eq!(plan("D", Some(&big), &[ch("boot.systemd", Some("true"))], 2), Err(ConfError::TooLarge));
+        assert_eq!(
+            plan("D", Some(&big), &[ch("boot.systemd", Some("true"))], 2),
+            Err(ConfError::TooLarge)
+        );
     }
 
     #[test]
     fn a_leftover_temp_file_is_not_overwritten() {
         let e = env(Some(SAMPLE));
-        fs::write(e.conf.with_file_name("wsl.conf.vlinux-tmp"), "someone's file").unwrap();
+        fs::write(
+            e.conf.with_file_name("wsl.conf.vlinux-tmp"),
+            "someone's file",
+        )
+        .unwrap();
         let r = apply_change(&e, Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 1);
         assert!(matches!(r, Err(ConfError::Io(_))));
-        assert_eq!(fs::read_to_string(e.conf.with_file_name("wsl.conf.vlinux-tmp")).unwrap(), "someone's file");
+        assert_eq!(
+            fs::read_to_string(e.conf.with_file_name("wsl.conf.vlinux-tmp")).unwrap(),
+            "someone's file"
+        );
         assert_eq!(fs::read_to_string(&e.conf).unwrap(), SAMPLE);
     }
 
@@ -1297,16 +1810,39 @@ mod tests {
         fs::create_dir_all(&sp).unwrap();
         fs::write(sp.join(BACKUPS_FILE), "not json").unwrap();
         apply_change(&e, Some(SAMPLE), &[ch("boot.systemd", Some("false"))], 77).unwrap();
-        assert!(fs::read_dir(&sp).unwrap().any(|f| f.unwrap().file_name().to_string_lossy().contains(".invalid-77")));
+        assert!(fs::read_dir(&sp).unwrap().any(|f| f
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".invalid-77")));
     }
 
     #[test]
     fn config_access_needs_a_running_regular_distro() {
-        let r = fake_report(&[("Run", Running, Regular, 2), ("Stop", Stopped, Regular, 2), ("docker-desktop", Running, Internal, 2)], None);
+        let r = fake_report(
+            &[
+                ("Run", Running, Regular, 2),
+                ("Stop", Stopped, Regular, 2),
+                ("docker-desktop", Running, Internal, 2),
+            ],
+            None,
+        );
         assert_eq!(check_accessible(&r, "Run"), Ok(2));
-        assert_eq!(check_accessible(&r, "Stop"), Err(ConfError::NotRunning("Stop".into())));
-        assert!(matches!(check_accessible(&r, "docker-desktop"), Err(ConfError::Invalid(_))));
-        assert!(matches!(check_accessible(&r, "Nope"), Err(ConfError::NotFound(_))));
-        assert!(matches!(check_accessible(&r, "../x"), Err(ConfError::Invalid(_))));
+        assert_eq!(
+            check_accessible(&r, "Stop"),
+            Err(ConfError::NotRunning("Stop".into()))
+        );
+        assert!(matches!(
+            check_accessible(&r, "docker-desktop"),
+            Err(ConfError::Invalid(_))
+        ));
+        assert!(matches!(
+            check_accessible(&r, "Nope"),
+            Err(ConfError::NotFound(_))
+        ));
+        assert!(matches!(
+            check_accessible(&r, "../x"),
+            Err(ConfError::Invalid(_))
+        ));
     }
 }

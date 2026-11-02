@@ -19,14 +19,17 @@ use vlinux_runtime::adapters::DistroRegistry;
 use vlinux_runtime::detect::{detect, fetch_catalog, DetectOptions};
 use vlinux_runtime::exec::{CancelToken, SystemRunner};
 use vlinux_runtime::install::{
-    leftover_note, prepare_distribution_plan, prepare_wsl_platform_plan, run_install, InstallEvent, InstallOutcome,
-    InstallPlan, PlanKind, PlanStore,
+    leftover_note, prepare_distribution_plan, prepare_wsl_platform_plan, run_install, InstallEvent,
+    InstallOutcome, InstallPlan, PlanKind, PlanStore,
 };
 use vlinux_runtime::managed::ManagedStore;
 use vlinux_runtime::model::{Catalog, DistroKind, HostEnv, RuntimeStatus, WslReport};
-use vlinux_runtime::storage::{self, DriveInspector, KnownFolderResolver, StorageOverview, SystemDrives, SystemKnownFolders, Verdict};
-use vlinux_runtime::wsl::{Programs, WslClient};
+use vlinux_runtime::storage::{
+    self, DriveInspector, KnownFolderResolver, StorageOverview, SystemDrives, SystemKnownFolders,
+    Verdict,
+};
 use vlinux_runtime::unix_now;
+use vlinux_runtime::wsl::{Programs, WslClient};
 
 use crate::config::ConfigStore;
 use crate::error::AppError;
@@ -64,7 +67,10 @@ fn host_env() -> HostEnv {
         os_info::Version::Semantic(_, _, build) if cfg!(windows) => u32::try_from(*build).ok(),
         _ => None,
     };
-    HostEnv { is_windows: cfg!(windows), windows_build: build }
+    HostEnv {
+        is_windows: cfg!(windows),
+        windows_build: build,
+    }
 }
 
 impl RuntimeState {
@@ -115,7 +121,11 @@ impl RuntimeState {
             &self.wsl,
             &self.programs,
             &self.registry,
-            &DetectOptions { host: self.host.clone(), managed: &managed, identify_running: true },
+            &DetectOptions {
+                host: self.host.clone(),
+                managed: &managed,
+                identify_running: true,
+            },
         );
         if let Ok(mut g) = self.report.lock() {
             *g = Some((Instant::now(), report.clone()));
@@ -131,7 +141,10 @@ impl RuntimeState {
                         // Refresh the "already installed" flags from the current report.
                         let mut c = c.clone();
                         for e in &mut c.entries {
-                            e.already_installed = report.distros.iter().any(|d| d.name.eq_ignore_ascii_case(&e.wsl_name));
+                            e.already_installed = report
+                                .distros
+                                .iter()
+                                .any(|d| d.name.eq_ignore_ascii_case(&e.wsl_name));
                         }
                         return c;
                     }
@@ -185,14 +198,19 @@ pub enum PlanRequestKind {
 
 /// Build (and remember) a reviewable plan. Nothing is installed by this call.
 #[tauri::command]
-pub async fn install_prepare(rt: Rt<'_>, kind: PlanRequestKind, name: Option<String>) -> Result<InstallPlan, AppError> {
+pub async fn install_prepare(
+    rt: Rt<'_>,
+    kind: PlanRequestKind,
+    name: Option<String>,
+) -> Result<InstallPlan, AppError> {
     let rt = rt.inner().clone();
     blocking(move || {
         let report = rt.detect(true);
         let plan = match kind {
             PlanRequestKind::WslPlatform => prepare_wsl_platform_plan(&report),
             PlanRequestKind::Distribution => {
-                let name = name.ok_or_else(|| AppError::Runtime("No distribution was chosen.".into()))?;
+                let name =
+                    name.ok_or_else(|| AppError::Runtime("No distribution was chosen.".into()))?;
                 let catalog = rt.catalog(false, &report);
                 prepare_distribution_plan(&name, &report, &catalog)
             }
@@ -209,22 +227,40 @@ pub struct StartedJob {
 
 /// Start an approved plan on a background thread; progress arrives as `vlinux://install` events.
 #[tauri::command]
-pub async fn install_start(app: AppHandle, rt: Rt<'_>, plan_id: String, approved: bool) -> Result<StartedJob, AppError> {
+pub async fn install_start(
+    app: AppHandle,
+    rt: Rt<'_>,
+    plan_id: String,
+    approved: bool,
+) -> Result<StartedJob, AppError> {
     let rt = rt.inner().clone();
     blocking(move || {
         if !approved {
-            return Err(AppError::Runtime("The installation was not approved.".into()));
+            return Err(AppError::Runtime(
+                "The installation was not approved.".into(),
+            ));
         }
         // Re-validate against the *current* state, not the state at review time.
         let current = rt.detect(true);
-        let mut job = rt.job.lock().map_err(|_| AppError::Runtime("internal state error".into()))?;
+        let mut job = rt
+            .job
+            .lock()
+            .map_err(|_| AppError::Runtime("internal state error".into()))?;
         if job.is_some() {
-            return Err(AppError::Runtime("An installation is already in progress.".into()));
+            return Err(AppError::Runtime(
+                "An installation is already in progress.".into(),
+            ));
         }
-        let plan = rt.plans.take_approved(&plan_id, approved, &current).map_err(|e| AppError::Runtime(e.to_string()))?;
+        let plan = rt
+            .plans
+            .take_approved(&plan_id, approved, &current)
+            .map_err(|e| AppError::Runtime(e.to_string()))?;
         let job_id = format!("job-{}", rt.job_counter.fetch_add(1, Ordering::SeqCst));
         let cancel = CancelToken::new();
-        *job = Some(ActiveJob { id: job_id.clone(), cancel: cancel.clone() });
+        *job = Some(ActiveJob {
+            id: job_id.clone(),
+            cancel: cancel.clone(),
+        });
         drop(job);
 
         let worker_rt = rt.clone();
@@ -243,11 +279,24 @@ pub async fn install_start(app: AppHandle, rt: Rt<'_>, plan_id: String, approved
     .await
 }
 
-fn run_job(app: AppHandle, rt: Arc<RuntimeState>, plan: InstallPlan, job_id: String, cancel: CancelToken) {
+fn run_job(
+    app: AppHandle,
+    rt: Arc<RuntimeState>,
+    plan: InstallPlan,
+    job_id: String,
+    cancel: CancelToken,
+) {
     let emitter = app.clone();
-    let outcome = run_install(&rt.wsl, &rt.programs, &plan, &job_id, &cancel, &mut |event: InstallEvent| {
-        let _ = emitter.emit(INSTALL_EVENT, event);
-    });
+    let outcome = run_install(
+        &rt.wsl,
+        &rt.programs,
+        &plan,
+        &job_id,
+        &cancel,
+        &mut |event: InstallEvent| {
+            let _ = emitter.emit(INSTALL_EVENT, event);
+        },
+    );
 
     // Look at what exists now (fresh), so the UI shows the truth after any outcome.
     rt.invalidate();
@@ -261,16 +310,23 @@ fn run_job(app: AppHandle, rt: Arc<RuntimeState>, plan: InstallPlan, job_id: Str
     };
 
     if let (PlanKind::Distribution, Some(name)) = (plan.kind, plan.wsl_name.as_deref()) {
-        let registered = after.distros.iter().any(|d| d.name.eq_ignore_ascii_case(name));
+        let registered = after
+            .distros
+            .iter()
+            .any(|d| d.name.eq_ignore_ascii_case(name));
         match &outcome {
             InstallOutcome::Succeeded | InstallOutcome::RestartRequired { .. } if registered => {
                 // The plan guaranteed this name did not exist before, so it is ours.
                 if let Err(e) = rt.managed.record(name, name, unix_now()) {
-                    message.push_str(&format!(" (VLINUX could not record it as installed by VLINUX: {e}.)"));
+                    message.push_str(&format!(
+                        " (VLINUX could not record it as installed by VLINUX: {e}.)"
+                    ));
                 }
                 rt.invalidate();
             }
-            InstallOutcome::Failed { .. } | InstallOutcome::Cancelled | InstallOutcome::TimedOut => {
+            InstallOutcome::Failed { .. }
+            | InstallOutcome::Cancelled
+            | InstallOutcome::TimedOut => {
                 if let Some(note) = leftover_note(name, &after) {
                     message.push(' ');
                     message.push_str(&note);
@@ -285,7 +341,13 @@ fn run_job(app: AppHandle, rt: Arc<RuntimeState>, plan: InstallPlan, job_id: Str
     }
     let _ = app.emit(
         INSTALL_EVENT,
-        InstallEvent { job_id, kind: "finished", message, percent: None, outcome: Some(outcome) },
+        InstallEvent {
+            job_id,
+            kind: "finished",
+            message,
+            percent: None,
+            outcome: Some(outcome),
+        },
     );
 }
 
@@ -294,7 +356,10 @@ fn run_job(app: AppHandle, rt: Arc<RuntimeState>, plan: InstallPlan, job_id: Str
 pub async fn install_cancel(rt: Rt<'_>, job_id: String) -> Result<bool, AppError> {
     let rt = rt.inner().clone();
     blocking(move || {
-        let g = rt.job.lock().map_err(|_| AppError::Runtime("internal state error".into()))?;
+        let g = rt
+            .job
+            .lock()
+            .map_err(|_| AppError::Runtime("internal state error".into()))?;
         match &*g {
             Some(j) if j.id == job_id => {
                 j.cancel.cancel();
@@ -309,15 +374,21 @@ pub async fn install_cancel(rt: Rt<'_>, job_id: String) -> Result<bool, AppError
 pub(crate) fn require_regular_distro(report: &WslReport, name: &str) -> Result<(), AppError> {
     match report.distros.iter().find(|d| d.name == name) {
         Some(d) if d.kind == DistroKind::Regular => Ok(()),
-        Some(_) => Err(AppError::Runtime(format!("'{name}' belongs to another application and is never touched by VLINUX."))),
-        None => Err(AppError::Runtime(format!("No distribution named '{name}' is registered with WSL."))),
+        Some(_) => Err(AppError::Runtime(format!(
+            "'{name}' belongs to another application and is never touched by VLINUX."
+        ))),
+        None => Err(AppError::Runtime(format!(
+            "No distribution named '{name}' is registered with WSL."
+        ))),
     }
 }
 
 pub(crate) fn ensure_wsl_ready(report: &WslReport) -> Result<(), AppError> {
     match report.status {
         RuntimeStatus::Ready => Ok(()),
-        _ => Err(AppError::Runtime("WSL is not ready. Check the setup status first.".into())),
+        _ => Err(AppError::Runtime(
+            "WSL is not ready. Check the setup status first.".into(),
+        )),
     }
 }
 
@@ -342,5 +413,12 @@ fn overview_for(cfg: &storage::StorageConfig) -> StorageOverview {
 /// Check one candidate Windows folder (UNC, device paths, ... are reported, not mapped).
 #[tauri::command]
 pub async fn storage_validate_path(path: String) -> Result<Verdict, AppError> {
-    blocking(move || Ok(storage::windows_to_wsl(&path, storage::DEFAULT_MOUNT_ROOT, &SystemDrives))).await
+    blocking(move || {
+        Ok(storage::windows_to_wsl(
+            &path,
+            storage::DEFAULT_MOUNT_ROOT,
+            &SystemDrives,
+        ))
+    })
+    .await
 }

@@ -41,9 +41,13 @@ pub trait TerminalSink: Send + Sync {
 pub enum SessionState {
     Running,
     /// The shell ended. `code` is the process exit code when known.
-    Exited { code: Option<i32> },
+    Exited {
+        code: Option<i32>,
+    },
     /// The session could not be started or its process could not be tracked.
-    Failed { message: String },
+    Failed {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -100,7 +104,10 @@ struct Flow {
 
 impl Flow {
     fn new() -> Self {
-        Flow { pending: Mutex::new(0), cv: Condvar::new() }
+        Flow {
+            pending: Mutex::new(0),
+            cv: Condvar::new(),
+        }
     }
     fn add(&self, n: usize) {
         let mut g = lock(&self.pending);
@@ -124,7 +131,11 @@ impl Flow {
                 break;
             }
             activity.touch();
-            g = self.cv.wait_timeout(g, Duration::from_millis(50)).map(|(g, _)| g).unwrap_or_else(|p| p.into_inner().0);
+            g = self
+                .cv
+                .wait_timeout(g, Duration::from_millis(50))
+                .map(|(g, _)| g)
+                .unwrap_or_else(|p| p.into_inner().0);
         }
     }
 }
@@ -136,10 +147,14 @@ struct Activity {
 
 impl Activity {
     fn new() -> Self {
-        Activity { base: Instant::now(), last_ms: AtomicU64::new(0) }
+        Activity {
+            base: Instant::now(),
+            last_ms: AtomicU64::new(0),
+        }
     }
     fn touch(&self) {
-        self.last_ms.store(self.base.elapsed().as_millis() as u64, Ordering::SeqCst);
+        self.last_ms
+            .store(self.base.elapsed().as_millis() as u64, Ordering::SeqCst);
     }
     fn idle(&self) -> Duration {
         let now = self.base.elapsed().as_millis() as u64;
@@ -187,14 +202,22 @@ impl Session {
     }
 
     fn info(&self) -> SessionInfo {
-        let idx = self.attempt.load(Ordering::SeqCst).min(self.plan.attempts.len().saturating_sub(1));
+        let idx = self
+            .attempt
+            .load(Ordering::SeqCst)
+            .min(self.plan.attempts.len().saturating_sub(1));
         SessionInfo {
             id: self.id.clone(),
             distro: self.distro.clone(),
             label: self.label.clone(),
             state: lock(&self.state).clone(),
             started_at: self.started_at,
-            shell: self.plan.attempts.get(idx).map(|a| a.label.clone()).unwrap_or_default(),
+            shell: self
+                .plan
+                .attempts
+                .get(idx)
+                .map(|a| a.label.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -217,7 +240,10 @@ impl Session {
         // Publish the attempt *before* any thread can observe the process exiting, so a very fast
         // failure that starts the fallback cannot be overwritten by this attempt's bookkeeping.
         self.attempt.store(idx, Ordering::SeqCst);
-        *lock(&self.io) = Some(Io { input: input_tx, control: control.clone() });
+        *lock(&self.io) = Some(Io {
+            input: input_tx,
+            control: control.clone(),
+        });
 
         // From here on, any failure must not leave a running child behind.
         let abort = |e: PtyError| {
@@ -243,7 +269,12 @@ impl Session {
         spawn_thread("out", move || {
             let mut buf = vec![0u8; 32 * 1024];
             loop {
-                me.flow.wait_below(me.tuning.high_water, me.tuning.stall_timeout, &me.closing, &act);
+                me.flow.wait_below(
+                    me.tuning.high_water,
+                    me.tuning.stall_timeout,
+                    &me.closing,
+                    &act,
+                );
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
@@ -313,13 +344,17 @@ impl Session {
         if failed_fast && idx + 1 < self.plan.attempts.len() {
             self.sink.output(&self.id, FALLBACK_NOTE.as_bytes());
             if let Err(e) = self.start_attempt(idx + 1) {
-                self.set_state(SessionState::Failed { message: format!("could not start a shell: {e}") });
+                self.set_state(SessionState::Failed {
+                    message: format!("could not start a shell: {e}"),
+                });
             }
             return;
         }
         match result {
             Ok(_) => self.set_state(SessionState::Exited { code }),
-            Err(e) => self.set_state(SessionState::Failed { message: format!("lost track of the shell process: {e}") }),
+            Err(e) => self.set_state(SessionState::Failed {
+                message: format!("lost track of the shell process: {e}"),
+            }),
         }
     }
 
@@ -334,7 +369,9 @@ impl Session {
             // Release the PTY too, off-thread: on some Windows builds closing a pseudoconsole waits
             // for its output to be drained, and the reader thread is draining it.
             let control = io.control.clone();
-            let _ = thread::Builder::new().name("vlinux-term-close".into()).spawn(move || control.close());
+            let _ = thread::Builder::new()
+                .name("vlinux-term-close".into())
+                .spawn(move || control.close());
         }
     }
 }
@@ -354,26 +391,54 @@ impl TerminalManager {
         Self::with_tuning(backend, sink, Tuning::default())
     }
 
-    pub fn with_tuning(backend: Arc<dyn PtyBackend>, sink: Arc<dyn TerminalSink>, tuning: Tuning) -> Self {
-        TerminalManager { backend, sink, tuning, sessions: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1) }
+    pub fn with_tuning(
+        backend: Arc<dyn PtyBackend>,
+        sink: Arc<dyn TerminalSink>,
+        tuning: Tuning,
+    ) -> Self {
+        TerminalManager {
+            backend,
+            sink,
+            tuning,
+            sessions: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(1),
+        }
     }
 
     /// Open a terminal in an already validated distribution (see `launch::resolve_target`).
-    pub fn open_target(&self, target: &Target, programs: &Programs, size: PtySize) -> Result<SessionInfo, TerminalError> {
+    pub fn open_target(
+        &self,
+        target: &Target,
+        programs: &Programs,
+        size: PtySize,
+    ) -> Result<SessionInfo, TerminalError> {
         let plan = build_plan(programs, target)?;
         self.open_plan(&target.name, &target.label, plan, size)
     }
 
     /// Open a session from an explicit plan. Used by [`open_target`](Self::open_target) and by
     /// tests that run an ordinary program under a real PTY.
-    pub fn open_plan(&self, distro: &str, label: &str, plan: LaunchPlan, size: PtySize) -> Result<SessionInfo, TerminalError> {
+    pub fn open_plan(
+        &self,
+        distro: &str,
+        label: &str,
+        plan: LaunchPlan,
+        size: PtySize,
+    ) -> Result<SessionInfo, TerminalError> {
         if plan.attempts.is_empty() {
-            return Err(TerminalError::StartFailed { detail: "no way to start a shell was provided".into() });
+            return Err(TerminalError::StartFailed {
+                detail: "no way to start a shell was provided".into(),
+            });
         }
         {
-            let live = lock(&self.sessions).values().filter(|s| s.is_live()).count();
+            let live = lock(&self.sessions)
+                .values()
+                .filter(|s| s.is_live())
+                .count();
             if live >= self.tuning.max_sessions {
-                return Err(TerminalError::TooManySessions { max: self.tuning.max_sessions });
+                return Err(TerminalError::TooManySessions {
+                    max: self.tuning.max_sessions,
+                });
             }
         }
         let id = format!("t{}", self.next_id.fetch_add(1, Ordering::SeqCst));
@@ -394,19 +459,29 @@ impl TerminalManager {
             closing: AtomicBool::new(false),
             flow: Flow::new(),
         });
-        session.start_attempt(0).map_err(|e| TerminalError::StartFailed { detail: e.to_string() })?;
+        session
+            .start_attempt(0)
+            .map_err(|e| TerminalError::StartFailed {
+                detail: e.to_string(),
+            })?;
         lock(&self.sessions).insert(id, session.clone());
         Ok(session.info())
     }
 
     fn get(&self, id: &str) -> Result<Arc<Session>, TerminalError> {
-        lock(&self.sessions).get(id).cloned().ok_or_else(|| TerminalError::UnknownSession { id: id.to_string() })
+        lock(&self.sessions)
+            .get(id)
+            .cloned()
+            .ok_or_else(|| TerminalError::UnknownSession { id: id.to_string() })
     }
 
     /// Forward keystrokes (or pasted text) to the PTY. Never blocks.
     pub fn write(&self, id: &str, data: &[u8]) -> Result<(), TerminalError> {
         if data.len() > self.tuning.max_input {
-            return Err(TerminalError::InputTooLarge { len: data.len(), max: self.tuning.max_input });
+            return Err(TerminalError::InputTooLarge {
+                len: data.len(),
+                max: self.tuning.max_input,
+            });
         }
         let s = self.get(id)?;
         if !s.is_live() {
@@ -416,8 +491,12 @@ impl TerminalManager {
             s.input_submitted.store(true, Ordering::SeqCst);
         }
         let g = lock(&s.io);
-        let io = g.as_ref().ok_or_else(|| TerminalError::SessionEnded { id: id.to_string() })?;
-        io.input.send(data.to_vec()).map_err(|_| TerminalError::SessionEnded { id: id.to_string() })
+        let io = g
+            .as_ref()
+            .ok_or_else(|| TerminalError::SessionEnded { id: id.to_string() })?;
+        io.input
+            .send(data.to_vec())
+            .map_err(|_| TerminalError::SessionEnded { id: id.to_string() })
     }
 
     pub fn resize(&self, id: &str, rows: u32, cols: u32) -> Result<(), TerminalError> {
@@ -435,7 +514,9 @@ impl TerminalManager {
         }
         let control = lock(&s.io).as_ref().map(|io| io.control.clone());
         if let Some(c) = control {
-            c.resize(size).map_err(|e| TerminalError::StartFailed { detail: format!("could not resize the terminal: {e}") })?;
+            c.resize(size).map_err(|e| TerminalError::StartFailed {
+                detail: format!("could not resize the terminal: {e}"),
+            })?;
         }
         Ok(())
     }
@@ -449,7 +530,9 @@ impl TerminalManager {
 
     /// Close one session. Other sessions, WSL and the distribution are not affected.
     pub fn close(&self, id: &str) -> Result<(), TerminalError> {
-        let s = lock(&self.sessions).remove(id).ok_or_else(|| TerminalError::UnknownSession { id: id.to_string() })?;
+        let s = lock(&self.sessions)
+            .remove(id)
+            .ok_or_else(|| TerminalError::UnknownSession { id: id.to_string() })?;
         s.shutdown();
         Ok(())
     }
@@ -468,7 +551,10 @@ impl TerminalManager {
     }
 
     pub fn live_count(&self) -> usize {
-        lock(&self.sessions).values().filter(|s| s.is_live()).count()
+        lock(&self.sessions)
+            .values()
+            .filter(|s| s.is_live())
+            .count()
     }
 }
 
@@ -481,20 +567,31 @@ impl Drop for TerminalManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{DistroKind, DistroState, RuntimeStatus};
     use crate::terminal::launch::{resolve_target, LaunchAttempt};
     use crate::terminal::pty::PtySpawn;
     use crate::terminal::testing::{distro, report, Collector, FakeBackend};
-    use crate::model::{DistroKind, DistroState, RuntimeStatus};
 
     const T: Duration = Duration::from_secs(10);
 
     fn quick() -> Tuning {
-        Tuning { drain_quiet: Duration::from_millis(40), fast_fail: Duration::from_secs(5), ..Tuning::default() }
+        Tuning {
+            drain_quiet: Duration::from_millis(40),
+            fast_fail: Duration::from_secs(5),
+            ..Tuning::default()
+        }
     }
 
-    fn fixture(tuning: Tuning, backend: FakeBackend) -> (Arc<TerminalManager>, FakeBackend, Arc<Collector>) {
+    fn fixture(
+        tuning: Tuning,
+        backend: FakeBackend,
+    ) -> (Arc<TerminalManager>, FakeBackend, Arc<Collector>) {
         let sink = Collector::new();
-        let m = Arc::new(TerminalManager::with_tuning(Arc::new(backend.clone()), sink.clone(), tuning));
+        let m = Arc::new(TerminalManager::with_tuning(
+            Arc::new(backend.clone()),
+            sink.clone(),
+            tuning,
+        ));
         (m, backend, sink)
     }
 
@@ -513,11 +610,14 @@ mod tests {
                 size: PtySize::DEFAULT,
             },
         };
-        LaunchPlan { attempts: vec![mk("default shell", &["a"]), mk("/bin/sh", &["b"])] }
+        LaunchPlan {
+            attempts: vec![mk("default shell", &["a"]), mk("/bin/sh", &["b"])],
+        }
     }
 
     fn open(m: &TerminalManager) -> SessionInfo {
-        m.open_plan("Debian", "Debian GNU/Linux", plan(), PtySize::DEFAULT).unwrap()
+        m.open_plan("Debian", "Debian GNU/Linux", plan(), PtySize::DEFAULT)
+            .unwrap()
     }
 
     // ---- creation -----------------------------------------------------------------------
@@ -550,7 +650,9 @@ mod tests {
     fn process_startup_failure_is_reported_and_leaves_nothing_behind() {
         let (m, b, _s) = fixture(quick(), FakeBackend::new());
         b.fail_next_spawn("could not start 'wsl.exe': not found");
-        let err = m.open_plan("Debian", "Debian", plan(), PtySize::DEFAULT).unwrap_err();
+        let err = m
+            .open_plan("Debian", "Debian", plan(), PtySize::DEFAULT)
+            .unwrap_err();
         match &err {
             TerminalError::StartFailed { detail } => assert!(detail.contains("wsl.exe")),
             other => panic!("unexpected {other:?}"),
@@ -559,25 +661,45 @@ mod tests {
         assert_eq!(m.live_count(), 0);
         // The failure did not consume a slot or wedge the manager.
         b.succeed_next_spawn();
-        assert!(m.open_plan("Debian", "Debian", plan(), PtySize::DEFAULT).is_ok());
+        assert!(m
+            .open_plan("Debian", "Debian", plan(), PtySize::DEFAULT)
+            .is_ok());
     }
 
     #[test]
     fn an_empty_plan_is_refused() {
         let (m, _b, _s) = fixture(quick(), FakeBackend::new());
-        let e = m.open_plan("Debian", "Debian", LaunchPlan { attempts: vec![] }, PtySize::DEFAULT).unwrap_err();
+        let e = m
+            .open_plan(
+                "Debian",
+                "Debian",
+                LaunchPlan { attempts: vec![] },
+                PtySize::DEFAULT,
+            )
+            .unwrap_err();
         assert!(matches!(e, TerminalError::StartFailed { .. }));
     }
 
     #[test]
     fn the_session_limit_counts_live_sessions_only() {
-        let (m, b, s) = fixture(Tuning { max_sessions: 2, ..quick() }, FakeBackend::new());
+        let (m, b, s) = fixture(
+            Tuning {
+                max_sessions: 2,
+                ..quick()
+            },
+            FakeBackend::new(),
+        );
         let first = open(&m);
         let _second = open(&m);
-        assert!(matches!(m.open_plan("Debian", "D", plan(), PtySize::DEFAULT), Err(TerminalError::TooManySessions { max: 2 })));
+        assert!(matches!(
+            m.open_plan("Debian", "D", plan(), PtySize::DEFAULT),
+            Err(TerminalError::TooManySessions { max: 2 })
+        ));
         // A finished session no longer counts.
         b.proc(0).unwrap().exit(0);
-        assert!(s.wait_state(&first.id, T, |st| matches!(st, SessionState::Exited { .. })).is_some());
+        assert!(s
+            .wait_state(&first.id, T, |st| matches!(st, SessionState::Exited { .. }))
+            .is_some());
         assert!(m.open_plan("Debian", "D", plan(), PtySize::DEFAULT).is_ok());
     }
 
@@ -588,28 +710,63 @@ mod tests {
         let (m, b, _s) = fixture(quick(), FakeBackend::new());
         let r = report(
             RuntimeStatus::Ready,
-            vec![distro("Debian", DistroState::Stopped, DistroKind::Regular), distro("archlinux", DistroState::Running, DistroKind::Regular)],
+            vec![
+                distro("Debian", DistroState::Stopped, DistroKind::Regular),
+                distro("archlinux", DistroState::Running, DistroKind::Regular),
+            ],
         );
         let target = resolve_target(&r, None, Some("archlinux")).unwrap();
-        let info = m.open_target(&target, &Programs::fake(), PtySize { rows: 40, cols: 120 }).unwrap();
+        let info = m
+            .open_target(
+                &target,
+                &Programs::fake(),
+                PtySize {
+                    rows: 40,
+                    cols: 120,
+                },
+            )
+            .unwrap();
         assert_eq!(info.distro, "archlinux");
         let specs = b.specs();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].program, "wsl.exe");
         assert_eq!(specs[0].args, ["-d", "archlinux", "--cd", "~"]);
-        assert_eq!(specs[0].size, PtySize { rows: 40, cols: 120 });
-        assert!(specs[0].env.iter().any(|(k, v)| k == "TERM" && v == "xterm-256color"));
+        assert_eq!(
+            specs[0].size,
+            PtySize {
+                rows: 40,
+                cols: 120
+            }
+        );
+        assert!(specs[0]
+            .env
+            .iter()
+            .any(|(k, v)| k == "TERM" && v == "xterm-256color"));
     }
 
     #[test]
     fn invalid_missing_or_unavailable_targets_never_reach_the_backend() {
         let (_m, b, _s) = fixture(quick(), FakeBackend::new());
-        let ready = report(RuntimeStatus::Ready, vec![distro("Debian", DistroState::Running, DistroKind::Regular)]);
+        let ready = report(
+            RuntimeStatus::Ready,
+            vec![distro("Debian", DistroState::Running, DistroKind::Regular)],
+        );
         assert!(resolve_target(&ready, Some("Debian; calc"), None).is_err());
         assert!(resolve_target(&ready, Some("Fedora"), None).is_err());
-        assert!(resolve_target(&report(RuntimeStatus::NotInstalled, vec![]), Some("Debian"), None).is_err());
-        assert!(resolve_target(&report(RuntimeStatus::NoDistributions, vec![]), None, None).is_err());
-        assert_eq!(b.proc_count(), 0, "validation failures must not start any process");
+        assert!(resolve_target(
+            &report(RuntimeStatus::NotInstalled, vec![]),
+            Some("Debian"),
+            None
+        )
+        .is_err());
+        assert!(
+            resolve_target(&report(RuntimeStatus::NoDistributions, vec![]), None, None).is_err()
+        );
+        assert_eq!(
+            b.proc_count(),
+            0,
+            "validation failures must not start any process"
+        );
     }
 
     // ---- input ---------------------------------------------------------------------------
@@ -624,17 +781,36 @@ mod tests {
         m.write(&info.id, b"\x1b[A").unwrap(); // arrow up is just bytes: history is the shell's job
         m.write(&info.id, b"\x03").unwrap(); // Ctrl+C
         m.write(&info.id, b"\r").unwrap();
-        let expected: Vec<u8> = [b"echo h".as_slice(), "é✓日本".as_bytes(), b"\x1b[A", b"\x03", b"\r"].concat();
+        let expected: Vec<u8> = [
+            b"echo h".as_slice(),
+            "é✓日本".as_bytes(),
+            b"\x1b[A",
+            b"\x03",
+            b"\r",
+        ]
+        .concat();
         assert!(p.wait_until(T, |p| p.written().len() >= expected.len()));
         assert_eq!(p.written(), expected);
     }
 
     #[test]
     fn input_errors_are_reported_not_swallowed() {
-        let (m, b, _s) = fixture(Tuning { max_input: 16, ..quick() }, FakeBackend::new());
-        assert!(matches!(m.write("nope", b"x"), Err(TerminalError::UnknownSession { .. })));
+        let (m, b, _s) = fixture(
+            Tuning {
+                max_input: 16,
+                ..quick()
+            },
+            FakeBackend::new(),
+        );
+        assert!(matches!(
+            m.write("nope", b"x"),
+            Err(TerminalError::UnknownSession { .. })
+        ));
         let info = open(&m);
-        assert!(matches!(m.write(&info.id, &[b'x'; 17]), Err(TerminalError::InputTooLarge { len: 17, max: 16 })));
+        assert!(matches!(
+            m.write(&info.id, &[b'x'; 17]),
+            Err(TerminalError::InputTooLarge { len: 17, max: 16 })
+        ));
         assert!(m.write(&info.id, &[]).is_ok());
         // After the process ended, input is refused.
         b.proc(0).unwrap().exit(0);
@@ -642,7 +818,10 @@ mod tests {
         while m.live_count() > 0 && Instant::now() < end {
             thread::sleep(Duration::from_millis(5));
         }
-        assert!(matches!(m.write(&info.id, b"x"), Err(TerminalError::SessionEnded { .. })));
+        assert!(matches!(
+            m.write(&info.id, b"x"),
+            Err(TerminalError::SessionEnded { .. })
+        ));
     }
 
     #[test]
@@ -710,7 +889,14 @@ mod tests {
     #[test]
     fn large_output_is_paused_when_the_ui_falls_behind_and_resumes_on_acknowledgement() {
         let high = 64 * 1024;
-        let (m, b, s) = fixture(Tuning { high_water: high, stall_timeout: Duration::from_secs(60), ..quick() }, FakeBackend::new());
+        let (m, b, s) = fixture(
+            Tuning {
+                high_water: high,
+                stall_timeout: Duration::from_secs(60),
+                ..quick()
+            },
+            FakeBackend::new(),
+        );
         let info = open(&m);
         let p = b.proc(0).unwrap();
         let total = 4 * 1024 * 1024;
@@ -721,8 +907,14 @@ mod tests {
         // Nobody acknowledges: the reader must stop shortly after the high-water mark.
         thread::sleep(Duration::from_millis(300));
         let held = s.len(&info.id);
-        assert!(held >= high, "should have delivered up to the mark ({held})");
-        assert!(held < high + 64 * 1024, "reader must pause near the high-water mark, got {held} of {total}");
+        assert!(
+            held >= high,
+            "should have delivered up to the mark ({held})"
+        );
+        assert!(
+            held < high + 64 * 1024,
+            "reader must pause near the high-water mark, got {held} of {total}"
+        );
         thread::sleep(Duration::from_millis(200));
         assert_eq!(s.len(&info.id), held, "no more output while unacknowledged");
 
@@ -739,13 +931,20 @@ mod tests {
         }
         assert_eq!(s.len(&info.id), total);
         assert_eq!(s.bytes(&info.id), data);
-        assert!(s.max_chunk() <= 32 * 1024, "chunks stay small so the UI can stay responsive");
+        assert!(
+            s.max_chunk() <= 32 * 1024,
+            "chunks stay small so the UI can stay responsive"
+        );
     }
 
     #[test]
     fn a_ui_that_stops_acknowledging_cannot_hang_a_session_forever() {
         let (m, b, s) = fixture(
-            Tuning { high_water: 16 * 1024, stall_timeout: Duration::from_millis(150), ..quick() },
+            Tuning {
+                high_water: 16 * 1024,
+                stall_timeout: Duration::from_millis(150),
+                ..quick()
+            },
             FakeBackend::new(),
         );
         let info = open(&m);
@@ -769,22 +968,52 @@ mod tests {
         m.resize(&info.id, 40, 120).unwrap();
         m.resize(&info.id, 40, 120).unwrap(); // unchanged: not sent again
         m.resize(&info.id, 24, 80).unwrap();
-        assert_eq!(p.sizes(), vec![PtySize::DEFAULT, PtySize { rows: 40, cols: 120 }, PtySize { rows: 24, cols: 80 }]);
-        assert!(matches!(m.resize(&info.id, 0, 80), Err(TerminalError::InvalidSize { .. })));
-        assert!(matches!(m.resize(&info.id, 24, 0), Err(TerminalError::InvalidSize { .. })));
-        assert!(matches!(m.resize(&info.id, 5000, 80), Err(TerminalError::InvalidSize { .. })));
-        assert!(matches!(m.resize("nope", 24, 80), Err(TerminalError::UnknownSession { .. })));
+        assert_eq!(
+            p.sizes(),
+            vec![
+                PtySize::DEFAULT,
+                PtySize {
+                    rows: 40,
+                    cols: 120
+                },
+                PtySize { rows: 24, cols: 80 }
+            ]
+        );
+        assert!(matches!(
+            m.resize(&info.id, 0, 80),
+            Err(TerminalError::InvalidSize { .. })
+        ));
+        assert!(matches!(
+            m.resize(&info.id, 24, 0),
+            Err(TerminalError::InvalidSize { .. })
+        ));
+        assert!(matches!(
+            m.resize(&info.id, 5000, 80),
+            Err(TerminalError::InvalidSize { .. })
+        ));
+        assert!(matches!(
+            m.resize("nope", 24, 80),
+            Err(TerminalError::UnknownSession { .. })
+        ));
         assert_eq!(p.sizes().len(), 3);
     }
 
     #[test]
     fn the_latest_size_is_used_if_a_fallback_shell_has_to_be_started() {
         let (m, b, _s) = fixture(quick(), FakeBackend::new());
-        let info = m.open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT).unwrap();
+        let info = m
+            .open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT)
+            .unwrap();
         m.resize(&info.id, 50, 150).unwrap();
         b.proc(0).unwrap().exit(1);
         let second = b.wait_proc(1, T).expect("fallback started");
-        assert_eq!(second.spec.size, PtySize { rows: 50, cols: 150 });
+        assert_eq!(
+            second.spec.size,
+            PtySize {
+                rows: 50,
+                cols: 150
+            }
+        );
     }
 
     // ---- termination ------------------------------------------------------------------------
@@ -796,9 +1025,15 @@ mod tests {
         let p = b.proc(0).unwrap();
         p.output(b"logout\r\n");
         p.exit(3);
-        let st = s.wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { .. })).expect("exit reported");
+        let st = s
+            .wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { .. }))
+            .expect("exit reported");
         assert_eq!(st, SessionState::Exited { code: Some(3) });
-        assert_eq!(s.text(&info.id), "logout\r\n", "output must not be lost to the exit");
+        assert_eq!(
+            s.text(&info.id),
+            "logout\r\n",
+            "output must not be lost to the exit"
+        );
         assert_eq!(m.list()[0].state, SessionState::Exited { code: Some(3) });
         assert_eq!(s.states(&info.id).len(), 1, "exactly one state report");
     }
@@ -810,10 +1045,15 @@ mod tests {
         let p = b.proc(0).unwrap();
         p.output(b"bye\r\n");
         p.exit(0);
-        let st = s.wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { .. })).expect("exit reported");
+        let st = s
+            .wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { .. }))
+            .expect("exit reported");
         assert_eq!(st, SessionState::Exited { code: Some(0) });
         assert_eq!(s.text(&info.id), "bye\r\n");
-        assert!(p.wait_until(T, |p| p.was_closed()), "the PTY must be released after the process ends");
+        assert!(
+            p.wait_until(T, |p| p.was_closed()),
+            "the PTY must be released after the process ends"
+        );
     }
 
     #[test]
@@ -823,7 +1063,12 @@ mod tests {
             let info = open(&m);
             let p = b.proc(0).unwrap();
             p.exit(137); // killed from outside, e.g. `wsl --shutdown` by the user
-            assert!(s.wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { code: Some(137) })).is_some());
+            assert!(s
+                .wait_state(&info.id, T, |st| matches!(
+                    st,
+                    SessionState::Exited { code: Some(137) }
+                ))
+                .is_some());
             assert!(p.wait_until(T, |p| p.was_closed()));
         }
     }
@@ -837,13 +1082,22 @@ mod tests {
         let p0 = b.proc(0).unwrap();
         let p1 = b.proc(1).unwrap();
         assert!(p0.was_killed());
-        assert!(p0.wait_until(T, |p| p.was_closed()), "closed session's PTY is released");
+        assert!(
+            p0.wait_until(T, |p| p.was_closed()),
+            "closed session's PTY is released"
+        );
         assert!(!p1.was_killed(), "the other session must be untouched");
         assert!(!p1.was_closed());
         assert_eq!(m.list().len(), 1);
         assert_eq!(m.list()[0].id, two.id);
-        assert!(matches!(m.write(&one.id, b"x"), Err(TerminalError::UnknownSession { .. })));
-        assert!(matches!(m.close(&one.id), Err(TerminalError::UnknownSession { .. })));
+        assert!(matches!(
+            m.write(&one.id, b"x"),
+            Err(TerminalError::UnknownSession { .. })
+        ));
+        assert!(matches!(
+            m.close(&one.id),
+            Err(TerminalError::UnknownSession { .. })
+        ));
         // ...and it keeps working.
         p1.output(b"still here");
         assert!(s.wait_text(&two.id, "still here", T));
@@ -855,7 +1109,14 @@ mod tests {
 
     #[test]
     fn closing_works_while_output_is_flooding_and_nobody_acknowledges() {
-        let (m, b, _s) = fixture(Tuning { high_water: 8 * 1024, stall_timeout: Duration::from_secs(60), ..quick() }, FakeBackend::new());
+        let (m, b, _s) = fixture(
+            Tuning {
+                high_water: 8 * 1024,
+                stall_timeout: Duration::from_secs(60),
+                ..quick()
+            },
+            FakeBackend::new(),
+        );
         let info = open(&m);
         let p = b.proc(0).unwrap();
         for _ in 0..64 {
@@ -863,7 +1124,10 @@ mod tests {
         }
         thread::sleep(Duration::from_millis(100));
         m.close(&info.id).unwrap();
-        assert!(p.wait_until(T, |p| p.was_killed() && p.was_closed()), "close must not wait for the UI");
+        assert!(
+            p.wait_until(T, |p| p.was_killed() && p.was_closed()),
+            "close must not wait for the UI"
+        );
     }
 
     #[test]
@@ -878,7 +1142,10 @@ mod tests {
         let (m2, b2, _s2) = fixture(quick(), FakeBackend::new());
         open(&m2);
         drop(m2);
-        assert!(b2.proc(0).unwrap().was_killed(), "dropping the manager must not leak a shell");
+        assert!(
+            b2.proc(0).unwrap().was_killed(),
+            "dropping the manager must not leak a shell"
+        );
     }
 
     #[test]
@@ -886,12 +1153,21 @@ mod tests {
         // Session cleanup only kills the process VLINUX started. The backend is never asked to run
         // anything else, so WSL (`--shutdown`, `--terminate`, `--unregister`) cannot be touched.
         let (m, b, _s) = fixture(quick(), FakeBackend::new());
-        let r = report(RuntimeStatus::Ready, vec![distro("Debian", DistroState::Running, DistroKind::Regular)]);
+        let r = report(
+            RuntimeStatus::Ready,
+            vec![distro("Debian", DistroState::Running, DistroKind::Regular)],
+        );
         let t = resolve_target(&r, Some("Debian"), None).unwrap();
-        let info = m.open_target(&t, &Programs::fake(), PtySize::DEFAULT).unwrap();
+        let info = m
+            .open_target(&t, &Programs::fake(), PtySize::DEFAULT)
+            .unwrap();
         m.close(&info.id).unwrap();
         m.close_all();
-        assert_eq!(b.specs().len(), 1, "only the one terminal process was ever started");
+        assert_eq!(
+            b.specs().len(),
+            1,
+            "only the one terminal process was ever started"
+        );
         assert_eq!(b.specs()[0].args, ["-d", "Debian", "--cd", "~"]);
     }
 
@@ -900,53 +1176,96 @@ mod tests {
     #[test]
     fn an_immediate_startup_failure_falls_back_to_the_next_shell_and_says_so() {
         let (m, b, s) = fixture(quick(), FakeBackend::new());
-        let info = m.open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT).unwrap();
+        let info = m
+            .open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT)
+            .unwrap();
         b.proc(0).unwrap().exit(1);
         let second = b.wait_proc(1, T).expect("fallback shell started");
         assert_eq!(second.spec.args, ["b"]);
         assert!(s.wait_text(&info.id, "opening /bin/sh instead", T));
         assert_eq!(m.list()[0].state, SessionState::Running);
         assert_eq!(m.list()[0].shell, "/bin/sh");
-        assert!(s.states(&info.id).is_empty(), "the session never ended, so no exit is reported");
+        assert!(
+            s.states(&info.id).is_empty(),
+            "the session never ended, so no exit is reported"
+        );
         // The fallback shell is fully usable.
         m.write(&info.id, b"ls\r").unwrap();
         assert!(second.wait_until(T, |p| p.written() == b"ls\r"));
         second.exit(0);
-        assert!(s.wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { code: Some(0) })).is_some());
+        assert!(s
+            .wait_state(&info.id, T, |st| matches!(
+                st,
+                SessionState::Exited { code: Some(0) }
+            ))
+            .is_some());
     }
 
     #[test]
     fn a_successful_or_late_exit_never_triggers_the_fallback() {
         // exit code 0
         let (m, b, s) = fixture(quick(), FakeBackend::new());
-        let info = m.open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT).unwrap();
+        let info = m
+            .open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT)
+            .unwrap();
         b.proc(0).unwrap().exit(0);
-        assert!(s.wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { code: Some(0) })).is_some());
+        assert!(s
+            .wait_state(&info.id, T, |st| matches!(
+                st,
+                SessionState::Exited { code: Some(0) }
+            ))
+            .is_some());
         assert_eq!(b.proc_count(), 1);
 
         // non-zero, but after the fast-fail window
-        let (m, b, s) = fixture(Tuning { fast_fail: Duration::from_millis(1), ..quick() }, FakeBackend::new());
-        let info = m.open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT).unwrap();
+        let (m, b, s) = fixture(
+            Tuning {
+                fast_fail: Duration::from_millis(1),
+                ..quick()
+            },
+            FakeBackend::new(),
+        );
+        let info = m
+            .open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT)
+            .unwrap();
         thread::sleep(Duration::from_millis(30));
         b.proc(0).unwrap().exit(2);
-        assert!(s.wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { code: Some(2) })).is_some());
+        assert!(s
+            .wait_state(&info.id, T, |st| matches!(
+                st,
+                SessionState::Exited { code: Some(2) }
+            ))
+            .is_some());
         assert_eq!(b.proc_count(), 1);
     }
 
     #[test]
     fn a_shell_the_user_already_typed_into_is_not_replaced() {
         let (m, b, s) = fixture(quick(), FakeBackend::new());
-        let info = m.open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT).unwrap();
+        let info = m
+            .open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT)
+            .unwrap();
         m.write(&info.id, b"exit 1\r").unwrap();
         b.proc(0).unwrap().exit(1);
-        assert!(s.wait_state(&info.id, T, |st| matches!(st, SessionState::Exited { code: Some(1) })).is_some());
-        assert_eq!(b.proc_count(), 1, "the user's own `exit 1` must not start another shell");
+        assert!(s
+            .wait_state(&info.id, T, |st| matches!(
+                st,
+                SessionState::Exited { code: Some(1) }
+            ))
+            .is_some());
+        assert_eq!(
+            b.proc_count(),
+            1,
+            "the user's own `exit 1` must not start another shell"
+        );
     }
 
     #[test]
     fn terminal_auto_replies_do_not_count_as_user_input() {
         let (m, b, s) = fixture(quick(), FakeBackend::new());
-        let info = m.open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT).unwrap();
+        let info = m
+            .open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT)
+            .unwrap();
         m.write(&info.id, b"\x1b[1;1R").unwrap(); // cursor-position reply from the emulator
         b.proc(0).unwrap().exit(1);
         assert!(b.wait_proc(1, T).is_some(), "fallback should still start");
@@ -956,15 +1275,24 @@ mod tests {
     #[test]
     fn if_the_fallback_cannot_start_either_the_session_fails_cleanly() {
         let (m, b, s) = fixture(quick(), FakeBackend::new());
-        let info = m.open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT).unwrap();
+        let info = m
+            .open_plan("Debian", "D", two_attempt_plan(), PtySize::DEFAULT)
+            .unwrap();
         b.fail_next_spawn("no such program");
         b.proc(0).unwrap().exit(1);
-        let st = s.wait_state(&info.id, T, |st| matches!(st, SessionState::Failed { .. })).expect("failure reported");
+        let st = s
+            .wait_state(&info.id, T, |st| matches!(st, SessionState::Failed { .. }))
+            .expect("failure reported");
         match st {
-            SessionState::Failed { message } => assert!(message.contains("no such program"), "{message}"),
+            SessionState::Failed { message } => {
+                assert!(message.contains("no such program"), "{message}")
+            }
             _ => unreachable!(),
         }
-        assert!(matches!(m.write(&info.id, b"x"), Err(TerminalError::SessionEnded { .. })));
+        assert!(matches!(
+            m.write(&info.id, b"x"),
+            Err(TerminalError::SessionEnded { .. })
+        ));
         m.close(&info.id).unwrap();
     }
 

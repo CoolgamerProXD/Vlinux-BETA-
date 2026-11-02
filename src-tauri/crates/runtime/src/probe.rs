@@ -19,7 +19,11 @@ pub const SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Tokens used by the diagnostics round trip: `vlx-` plus 8–24 lower-case alphanumerics.
 pub fn valid_token(t: &str) -> bool {
-    t.strip_prefix("vlx-").is_some_and(|r| (8..=24).contains(&r.len()) && r.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()))
+    t.strip_prefix("vlx-").is_some_and(|r| {
+        (8..=24).contains(&r.len())
+            && r.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    })
 }
 
 /// A Windows path in forward-slash form for `wslpath -u`: `C:/Windows`.
@@ -30,7 +34,9 @@ pub fn valid_win_probe_path(p: &str) -> bool {
         && b[0].is_ascii_alphabetic()
         && b[1] == b':'
         && b[2] == b'/'
-        && !p.chars().any(|c| c.is_control() || matches!(c, '"' | '\\' | '*' | '?' | '<' | '>' | '|'))
+        && !p
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '"' | '\\' | '*' | '?' | '<' | '>' | '|'))
         && !p.split('/').any(|c| c == "..")
 }
 
@@ -42,7 +48,9 @@ pub fn is_allowed_probe(args: &[String]) -> bool {
         ["-d", name, "--exec", rest @ ..] if valid_distro_name(name) => match rest {
             ["uname", "-r"] | ["uname", "-m"] | ["id", "-un"] | ["id", "-u"] => true,
             [bin, "--version"] => PROBE_BINARIES.iter().any(|b| b == bin),
-            ["apt-cache", "search", "--names-only", q] | ["pacman", "-Ss", q] | ["dnf", "--quiet", "search", q] => valid_search_query(q),
+            ["apt-cache", "search", "--names-only", q]
+            | ["pacman", "-Ss", q]
+            | ["dnf", "--quiet", "search", q] => valid_search_query(q),
             ["printf", "%s", t] => valid_token(t),
             ["test", "-e" | "-f" | "-d", p] => valid_exec_path(p),
             ["wslpath", "-u", w] => valid_win_probe_path(w),
@@ -69,11 +77,24 @@ pub enum Probed {
 }
 
 impl<'a> Prober<'a> {
-    pub fn new(runner: &'a Arc<dyn CommandRunner>, program: &'a str, distro: &'a str, cancel: &'a CancelToken) -> Result<Self, String> {
+    pub fn new(
+        runner: &'a Arc<dyn CommandRunner>,
+        program: &'a str,
+        distro: &'a str,
+        cancel: &'a CancelToken,
+    ) -> Result<Self, String> {
         if !valid_distro_name(distro) {
-            return Err(format!("'{}' is not a valid distribution name.", distro.chars().take(40).collect::<String>()));
+            return Err(format!(
+                "'{}' is not a valid distribution name.",
+                distro.chars().take(40).collect::<String>()
+            ));
         }
-        Ok(Self { runner, program, distro, cancel })
+        Ok(Self {
+            runner,
+            program,
+            distro,
+            cancel,
+        })
     }
 
     pub fn exec(&self, tail: &[&str], timeout: Duration) -> Result<CmdOutput, RunError> {
@@ -81,13 +102,19 @@ impl<'a> Prober<'a> {
         args.extend_from_slice(tail);
         let spec = CommandSpec::new(self.program, &args, timeout).with_env("WSL_UTF8", "1");
         if !is_allowed_probe(&spec.args) {
-            return Err(RunError::Io(format!("refused to run a non-allow-listed command: {}", spec.args.join(" "))));
+            return Err(RunError::Io(format!(
+                "refused to run a non-allow-listed command: {}",
+                spec.args.join(" ")
+            )));
         }
         self.runner.run(&spec, self.cancel, &mut |_| {})
     }
 
     pub fn text(out: &CmdOutput) -> String {
-        decode_wsl_output(&out.stdout).trim_end_matches(['\r', '\n']).trim().to_string()
+        decode_wsl_output(&out.stdout)
+            .trim_end_matches(['\r', '\n'])
+            .trim()
+            .to_string()
     }
 
     fn one_line(&self, tail: &[&str]) -> Result<Probed, RunError> {
@@ -96,8 +123,19 @@ impl<'a> Prober<'a> {
             return Ok(Probed::Absent);
         }
         let t = Self::text(&out);
-        let line: String = t.lines().next().unwrap_or("").trim().chars().take(200).collect();
-        Ok(if line.is_empty() { Probed::Absent } else { Probed::Value(line) })
+        let line: String = t
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(200)
+            .collect();
+        Ok(if line.is_empty() {
+            Probed::Absent
+        } else {
+            Probed::Value(line)
+        })
     }
 
     pub fn os_release(&self) -> Result<Probed, RunError> {
@@ -106,7 +144,11 @@ impl<'a> Prober<'a> {
             return Ok(Probed::Absent);
         }
         let t = Self::text(&out);
-        Ok(if t.is_empty() { Probed::Absent } else { Probed::Value(t) })
+        Ok(if t.is_empty() {
+            Probed::Absent
+        } else {
+            Probed::Value(t)
+        })
     }
     pub fn kernel(&self) -> Result<Probed, RunError> {
         self.one_line(&["uname", "-r"])
@@ -130,7 +172,11 @@ impl<'a> Prober<'a> {
         }
         let t = Self::text(&out);
         let t: String = t.lines().take(6).collect::<Vec<_>>().join("\n");
-        Ok(if t.trim().is_empty() { Probed::Absent } else { Probed::Value(t) })
+        Ok(if t.trim().is_empty() {
+            Probed::Absent
+        } else {
+            Probed::Value(t)
+        })
     }
 
     /// Run an already-built search argv (from `PackageSupport::search_argv`).
@@ -146,7 +192,11 @@ impl<'a> Prober<'a> {
             return Ok(Probed::Absent);
         }
         let t = Self::text(&out);
-        Ok(if t.is_empty() { Probed::Absent } else { Probed::Value(t) })
+        Ok(if t.is_empty() {
+            Probed::Absent
+        } else {
+            Probed::Value(t)
+        })
     }
 
     /// `test -e|-f|-d <path>`: `Ok(true/false)`; any other exit code is an error.
@@ -155,7 +205,12 @@ impl<'a> Prober<'a> {
         match out.status {
             Some(0) => Ok(true),
             Some(1) => Ok(false),
-            other => Err(RunError::Io(format!("test exited with {}", other.map(|c| c.to_string()).unwrap_or_else(|| "no status".into())))),
+            other => Err(RunError::Io(format!(
+                "test exited with {}",
+                other
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "no status".into())
+            ))),
         }
     }
 
@@ -181,7 +236,15 @@ mod tests {
             &["-d", "Debian", "--exec", "id", "-un"],
             &["-d", "Debian", "--exec", "apt-get", "--version"],
             &["-d", "Debian", "--exec", "zypper", "--version"],
-            &["-d", "Debian", "--exec", "apt-cache", "search", "--names-only", "git"],
+            &[
+                "-d",
+                "Debian",
+                "--exec",
+                "apt-cache",
+                "search",
+                "--names-only",
+                "git",
+            ],
             &["-d", "Arch", "--exec", "pacman", "-Ss", "g++"],
             &["-d", "Fedora", "--exec", "dnf", "--quiet", "search", "git"],
             &["-d", "Debian", "--exec", "printf", "%s", "vlx-abcdef12"],
@@ -203,7 +266,15 @@ mod tests {
             &["-d", "Debian", "--exec", "apt-get", "upgrade"],
             &["-d", "Debian", "--exec", "pacman", "-Syu"],
             &["-d", "Debian", "--exec", "pacman", "-Ss", "-h"],
-            &["-d", "Debian", "--exec", "apt-cache", "search", "--names-only", "a b"],
+            &[
+                "-d",
+                "Debian",
+                "--exec",
+                "apt-cache",
+                "search",
+                "--names-only",
+                "a b",
+            ],
             &["-d", "Debian", "--exec", "evil", "--version"],
             &["-d", "Debian", "--exec", "printf", "%s", "hello"],
             &["-d", "Debian", "--exec", "printf", "%s", "vlx-ABCDEFGH"],
@@ -239,13 +310,24 @@ mod tests {
     fn prober_runs_through_the_runner_without_a_shell() {
         let fake = Arc::new(
             FakeRunner::new()
-                .on("wsl.exe", &["-d", "Debian", "--exec", "uname", "-r"], out_ok(b"5.15.153.1-microsoft-standard-WSL2\n"))
-                .on("wsl.exe", &["-d", "Debian", "--exec", "pacman", "--version"], out_code(127, b"")),
+                .on(
+                    "wsl.exe",
+                    &["-d", "Debian", "--exec", "uname", "-r"],
+                    out_ok(b"5.15.153.1-microsoft-standard-WSL2\n"),
+                )
+                .on(
+                    "wsl.exe",
+                    &["-d", "Debian", "--exec", "pacman", "--version"],
+                    out_code(127, b""),
+                ),
         );
         let r: Arc<dyn CommandRunner> = fake.clone();
         let c = CancelToken::new();
         let p = Prober::new(&r, "wsl.exe", "Debian", &c).unwrap();
-        assert_eq!(p.kernel().unwrap(), Probed::Value("5.15.153.1-microsoft-standard-WSL2".into()));
+        assert_eq!(
+            p.kernel().unwrap(),
+            Probed::Value("5.15.153.1-microsoft-standard-WSL2".into())
+        );
         assert_eq!(p.manager_version("pacman").unwrap(), Probed::Absent);
         // A command outside the allow-list never reaches the runner.
         assert!(p.exec(&["sh", "-c", "id"], PROBE_TIMEOUT).is_err());
@@ -256,9 +338,21 @@ mod tests {
     fn test_path_distinguishes_missing_from_errors() {
         let fake = Arc::new(
             FakeRunner::new()
-                .on("wsl.exe", &["-d", "D", "--exec", "test", "-e", "/a"], out_ok(b""))
-                .on("wsl.exe", &["-d", "D", "--exec", "test", "-e", "/b"], out_code(1, b""))
-                .on("wsl.exe", &["-d", "D", "--exec", "test", "-e", "/c"], out_code(2, b"")),
+                .on(
+                    "wsl.exe",
+                    &["-d", "D", "--exec", "test", "-e", "/a"],
+                    out_ok(b""),
+                )
+                .on(
+                    "wsl.exe",
+                    &["-d", "D", "--exec", "test", "-e", "/b"],
+                    out_code(1, b""),
+                )
+                .on(
+                    "wsl.exe",
+                    &["-d", "D", "--exec", "test", "-e", "/c"],
+                    out_code(2, b""),
+                ),
         );
         let r: Arc<dyn CommandRunner> = fake;
         let c = CancelToken::new();

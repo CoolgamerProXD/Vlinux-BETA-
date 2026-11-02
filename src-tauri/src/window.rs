@@ -22,7 +22,10 @@ pub const FULLSCREEN_EVENT: &str = "vlinux://fullscreen";
 pub struct FullscreenTracker(pub AtomicBool);
 
 #[tauri::command]
-pub fn set_fullscreen<R: Runtime>(window: WebviewWindow<R>, fullscreen: bool) -> Result<bool, AppError> {
+pub fn set_fullscreen<R: Runtime>(
+    window: WebviewWindow<R>,
+    fullscreen: bool,
+) -> Result<bool, AppError> {
     if !fullscreen {
         // Make sure we are not stuck minimised/maximised oddly when leaving full-screen.
         let _ = window.unminimize();

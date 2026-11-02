@@ -54,9 +54,13 @@ pub struct Inspection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InspectOutcome {
-    Done { inspection: Inspection },
+    Done {
+        inspection: Inspection,
+    },
     /// The distribution is stopped and the caller did not allow starting it. Nothing was run.
-    NeedsStart { distro: String },
+    NeedsStart {
+        distro: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,7 +71,10 @@ pub struct InspectOptions {
 /// Which package manager VLINUX should treat this distribution as using, from what probing found.
 /// Never assumed from the name: the adapter's manager counts only if its binary was found; an
 /// unidentified distribution falls back to the single supported manager that probing found.
-pub fn resolve_packages(adapter: PackageSupport, managers: &[ManagerProbe]) -> (PackageSupport, Availability, Vec<String>) {
+pub fn resolve_packages(
+    adapter: PackageSupport,
+    managers: &[ManagerProbe],
+) -> (PackageSupport, Availability, Vec<String>) {
     if managers.is_empty() {
         return (adapter, Availability::NotChecked, Vec::new());
     }
@@ -75,7 +82,15 @@ pub fn resolve_packages(adapter: PackageSupport, managers: &[ManagerProbe]) -> (
     let mut notes = Vec::new();
     if let Some(bin) = adapter.binary() {
         match find(bin) {
-            Some(m) if m.present => return (adapter, Availability::Present { version: m.version.clone() }, notes),
+            Some(m) if m.present => {
+                return (
+                    adapter,
+                    Availability::Present {
+                        version: m.version.clone(),
+                    },
+                    notes,
+                )
+            }
             _ => {}
         }
     }
@@ -84,10 +99,14 @@ pub fn resolve_packages(adapter: PackageSupport, managers: &[ManagerProbe]) -> (
     let supported: Vec<PackageSupport> = present
         .iter()
         .filter_map(|m| {
-            [PackageManager::Apt, PackageManager::Pacman, PackageManager::Dnf]
-                .iter()
-                .map(|pm| PackageSupport::for_manager(*pm))
-                .find(|s| s.binary() == Some(m.binary.as_str()))
+            [
+                PackageManager::Apt,
+                PackageManager::Pacman,
+                PackageManager::Dnf,
+            ]
+            .iter()
+            .map(|pm| PackageSupport::for_manager(*pm))
+            .find(|s| s.binary() == Some(m.binary.as_str()))
         })
         .collect();
     if adapter.manager == PackageManager::Unknown && supported.len() == 1 {
@@ -98,7 +117,10 @@ pub fn resolve_packages(adapter: PackageSupport, managers: &[ManagerProbe]) -> (
     }
     let others: Vec<&str> = present.iter().map(|m| m.binary.as_str()).collect();
     if !others.is_empty() {
-        notes.push(format!("Found {} here, which VLINUX has no package adapter for.", others.join(", ")));
+        notes.push(format!(
+            "Found {} here, which VLINUX has no package adapter for.",
+            others.join(", ")
+        ));
     }
     (adapter, Availability::Absent, notes)
 }
@@ -112,8 +134,12 @@ impl Inspection {
 
 fn map_run(what: &str, e: RunError) -> LifecycleError {
     match e {
-        RunError::Cancelled => LifecycleError::Failed("Inspection was cancelled. Nothing was changed.".into()),
-        RunError::Timeout(d) => LifecycleError::Failed(format!("{what} did not finish within {} s.", d.as_secs())),
+        RunError::Cancelled => {
+            LifecycleError::Failed("Inspection was cancelled. Nothing was changed.".into())
+        }
+        RunError::Timeout(d) => {
+            LifecycleError::Failed(format!("{what} did not finish within {} s.", d.as_secs()))
+        }
         other => LifecycleError::Failed(format!("{what} failed: {other}.")),
     }
 }
@@ -132,7 +158,9 @@ pub fn inspect(
     let distro = check_target(report, name)?;
     let was_running = distro.state == DistroState::Running;
     if !was_running && !opts.allow_start {
-        return Ok(InspectOutcome::NeedsStart { distro: name.to_string() });
+        return Ok(InspectOutcome::NeedsStart {
+            distro: name.to_string(),
+        });
     }
     let prober = Prober::new(runner, program, name, cancel).map_err(LifecycleError::Invalid)?;
     let mut notes: Vec<String> = Vec::new();
@@ -141,16 +169,26 @@ pub fn inspect(
     if !was_running {
         // The explicit, user-approved start: same call as the Start action.
         let wsl = WslClient::new(runner.clone(), program);
-        let out = wsl.start(name).map_err(|e| map_run("Starting the distribution", e))?;
+        let out = wsl
+            .start(name)
+            .map_err(|e| map_run("Starting the distribution", e))?;
         if !out.success() {
-            return Err(LifecycleError::Failed(format!("WSL could not start '{name}', so it could not be inspected (exit code {}).", out.status.map(|c| c.to_string()).unwrap_or_else(|| "unknown".into()))));
+            return Err(LifecycleError::Failed(format!(
+                "WSL could not start '{name}', so it could not be inspected (exit code {}).",
+                out.status
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".into())
+            )));
         }
         started = true;
         notes.push("Inspection started this distribution (you allowed it). WSL stops an idle distribution by itself.".into());
     }
 
     let mut answered = 0u32;
-    let mut take = |label: &str, r: Result<Probed, RunError>, notes: &mut Vec<String>| -> Result<Option<String>, LifecycleError> {
+    let mut take = |label: &str,
+                    r: Result<Probed, RunError>,
+                    notes: &mut Vec<String>|
+     -> Result<Option<String>, LifecycleError> {
         match r {
             Ok(Probed::Value(v)) => {
                 answered += 1;
@@ -169,7 +207,11 @@ pub fn inspect(
         }
     };
 
-    let os_text = take("The distribution's os-release", prober.os_release(), &mut notes)?;
+    let os_text = take(
+        "The distribution's os-release",
+        prober.os_release(),
+        &mut notes,
+    )?;
     let kernel = take("The kernel version", prober.kernel(), &mut notes)?;
     let arch = take("The architecture", prober.arch(), &mut notes)?;
     let user = take("The default user", prober.user_name(), &mut notes)?;
@@ -188,17 +230,30 @@ pub fn inspect(
 
     // Probe the adapter's own manager first; probe the rest only when it is missing or unknown.
     let mut managers: Vec<ManagerProbe> = Vec::new();
-    let probe_one = |bin: &str, managers: &mut Vec<ManagerProbe>, notes: &mut Vec<String>| -> Result<bool, LifecycleError> {
+    let probe_one = |bin: &str,
+                     managers: &mut Vec<ManagerProbe>,
+                     notes: &mut Vec<String>|
+     -> Result<bool, LifecycleError> {
         match prober.manager_version(bin) {
             Ok(Probed::Value(text)) => {
-                managers.push(ManagerProbe { binary: bin.to_string(), present: true, version: parse_version(bin, &text) });
+                managers.push(ManagerProbe {
+                    binary: bin.to_string(),
+                    present: true,
+                    version: parse_version(bin, &text),
+                });
                 Ok(true)
             }
             Ok(Probed::Absent) => {
-                managers.push(ManagerProbe { binary: bin.to_string(), present: false, version: None });
+                managers.push(ManagerProbe {
+                    binary: bin.to_string(),
+                    present: false,
+                    version: None,
+                });
                 Ok(false)
             }
-            Err(RunError::Cancelled) => Err(map_run("Probing the package manager", RunError::Cancelled)),
+            Err(RunError::Cancelled) => {
+                Err(map_run("Probing the package manager", RunError::Cancelled))
+            }
             Err(e) => {
                 notes.push(format!("Could not probe {bin}: {e}."));
                 Ok(false)
@@ -254,7 +309,9 @@ pub struct InspectionStore {
 
 impl InspectionStore {
     pub fn new(dir: &Path) -> Self {
-        Self { path: dir.join(INSPECTIONS_FILE) }
+        Self {
+            path: dir.join(INSPECTIONS_FILE),
+        }
     }
 
     fn read(&self) -> Result<FileData, String> {
@@ -278,7 +335,9 @@ impl InspectionStore {
         let mut data = match self.read() {
             Ok(d) => d,
             Err(_) => {
-                let aside = self.path.with_file_name(format!("{INSPECTIONS_FILE}.invalid-{}", insp.at));
+                let aside = self
+                    .path
+                    .with_file_name(format!("{INSPECTIONS_FILE}.invalid-{}", insp.at));
                 fs::rename(&self.path, aside)?;
                 FileData::default()
             }
@@ -290,7 +349,10 @@ impl InspectionStore {
             fs::create_dir_all(dir)?;
         }
         let tmp = self.path.with_extension("json.tmp");
-        fs::write(&tmp, serde_json::to_string_pretty(&data).map_err(io::Error::other)?)?;
+        fs::write(
+            &tmp,
+            serde_json::to_string_pretty(&data).map_err(io::Error::other)?,
+        )?;
         fs::rename(&tmp, &self.path)
     }
 }
@@ -303,35 +365,83 @@ mod tests {
     use crate::model::DistroState::{Running, Stopped};
     use crate::testing::{fake_report, out_code, out_ok, FakeRunner};
 
-    const OS_ARCH: &[u8] = b"NAME=\"Arch Linux\"\nID=arch\nPRETTY_NAME=\"Arch Linux\"\nBUILD_ID=rolling\n";
-    const OS_DEBIAN: &[u8] = b"PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nID=debian\nVERSION_ID=\"12\"\n";
+    const OS_ARCH: &[u8] =
+        b"NAME=\"Arch Linux\"\nID=arch\nPRETTY_NAME=\"Arch Linux\"\nBUILD_ID=rolling\n";
+    const OS_DEBIAN: &[u8] =
+        b"PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nID=debian\nVERSION_ID=\"12\"\n";
     const OS_ALPINE: &[u8] = b"NAME=\"Alpine Linux\"\nID=alpine\nVERSION_ID=3.20.0\n";
 
     fn rules(name: &str, os: &[u8], pm: &[(&str, bool)]) -> FakeRunner {
         let mut f = FakeRunner::new()
-            .on("wsl.exe", &["-d", name, "--exec", "cat", "/etc/os-release"], out_ok(os))
-            .on("wsl.exe", &["-d", name, "--exec", "uname", "-r"], out_ok(b"5.15.153.1-microsoft-standard-WSL2\n"))
-            .on("wsl.exe", &["-d", name, "--exec", "uname", "-m"], out_ok(b"x86_64\n"))
-            .on("wsl.exe", &["-d", name, "--exec", "id", "-un"], out_ok(b"dana\n"))
-            .on("wsl.exe", &["-d", name, "--exec", "id", "-u"], out_ok(b"1000\n"));
+            .on(
+                "wsl.exe",
+                &["-d", name, "--exec", "cat", "/etc/os-release"],
+                out_ok(os),
+            )
+            .on(
+                "wsl.exe",
+                &["-d", name, "--exec", "uname", "-r"],
+                out_ok(b"5.15.153.1-microsoft-standard-WSL2\n"),
+            )
+            .on(
+                "wsl.exe",
+                &["-d", name, "--exec", "uname", "-m"],
+                out_ok(b"x86_64\n"),
+            )
+            .on(
+                "wsl.exe",
+                &["-d", name, "--exec", "id", "-un"],
+                out_ok(b"dana\n"),
+            )
+            .on(
+                "wsl.exe",
+                &["-d", name, "--exec", "id", "-u"],
+                out_ok(b"1000\n"),
+            );
         for bin in PROBE_BINARIES {
-            let present = pm.iter().find(|(b, _)| *b == bin).map(|(_, p)| *p).unwrap_or(false);
+            let present = pm
+                .iter()
+                .find(|(b, _)| *b == bin)
+                .map(|(_, p)| *p)
+                .unwrap_or(false);
             let ver: &[u8] = match bin {
                 "apt-get" => b"apt 2.6.1 (amd64)\n",
                 "pacman" => b"\n .--.   Pacman v7.0.0 - libalpm v15.0.0\n",
                 "dnf" => b"4.18.2\n",
                 _ => b"x 1\n",
             };
-            f = f.on("wsl.exe", &["-d", name, "--exec", bin, "--version"], if present { out_ok(ver) } else { out_code(127, b"") });
+            f = f.on(
+                "wsl.exe",
+                &["-d", name, "--exec", bin, "--version"],
+                if present {
+                    out_ok(ver)
+                } else {
+                    out_code(127, b"")
+                },
+            );
         }
         f
     }
 
-    fn run(f: FakeRunner, report: &WslReport, name: &str, allow: bool) -> (Result<InspectOutcome, LifecycleError>, Arc<FakeRunner>) {
+    fn run(
+        f: FakeRunner,
+        report: &WslReport,
+        name: &str,
+        allow: bool,
+    ) -> (Result<InspectOutcome, LifecycleError>, Arc<FakeRunner>) {
         let fake = Arc::new(f);
         let r: Arc<dyn CommandRunner> = fake.clone();
         let reg = DistroRegistry::with_builtin();
-        let out = inspect(&r, "wsl.exe", report, name, InspectOptions { allow_start: allow }, &CancelToken::new(), &reg, 123);
+        let out = inspect(
+            &r,
+            "wsl.exe",
+            report,
+            name,
+            InspectOptions { allow_start: allow },
+            &CancelToken::new(),
+            &reg,
+            123,
+        );
         (out, fake)
     }
 
@@ -345,21 +455,40 @@ mod tests {
     #[test]
     fn running_arch_is_inspected_read_only() {
         let report = fake_report(&[("archlinux", Running, Regular, 2)], Some("archlinux"));
-        let (o, fake) = run(rules("archlinux", OS_ARCH, &[("pacman", true)]), &report, "archlinux", false);
+        let (o, fake) = run(
+            rules("archlinux", OS_ARCH, &[("pacman", true)]),
+            &report,
+            "archlinux",
+            false,
+        );
         let i = done(o);
         assert!(i.was_running && !i.started_by_inspection);
-        assert_eq!(i.kernel.as_deref(), Some("5.15.153.1-microsoft-standard-WSL2"));
+        assert_eq!(
+            i.kernel.as_deref(),
+            Some("5.15.153.1-microsoft-standard-WSL2")
+        );
         assert_eq!(i.arch.as_deref(), Some("x86_64"));
         assert_eq!(i.default_user.as_deref(), Some("dana"));
         assert_eq!(i.uid, Some(1000));
         assert_eq!(i.os_release.as_ref().unwrap().id, "arch");
-        let (caps, _) = i.package_caps(DistroRegistry::with_builtin().by_id("arch").unwrap().packages());
+        let (caps, _) = i.package_caps(
+            DistroRegistry::with_builtin()
+                .by_id("arch")
+                .unwrap()
+                .packages(),
+        );
         assert_eq!(caps.manager, PackageManager::Pacman);
-        assert!(matches!(caps.availability, Availability::Present { version: Some(ref v) } if v == "Pacman v7.0.0"));
+        assert!(
+            matches!(caps.availability, Availability::Present { version: Some(ref v) } if v == "Pacman v7.0.0")
+        );
         // Never started it, never escalated, never ran anything but allow-listed probes.
         let calls = fake.call_lines();
-        assert!(!calls.iter().any(|c| c.contains("/bin/true") || c.contains("sudo") || c.contains("--terminate")));
-        assert!(calls.iter().all(|c| c.starts_with("wsl.exe -d archlinux --exec ")));
+        assert!(!calls
+            .iter()
+            .any(|c| c.contains("/bin/true") || c.contains("sudo") || c.contains("--terminate")));
+        assert!(calls
+            .iter()
+            .all(|c| c.starts_with("wsl.exe -d archlinux --exec ")));
         // Own manager found: no probing of the others.
         assert_eq!(calls.iter().filter(|c| c.ends_with("--version")).count(), 1);
     }
@@ -368,33 +497,62 @@ mod tests {
     fn stopped_distro_needs_permission_and_runs_nothing() {
         let report = fake_report(&[("Debian", Stopped, Regular, 2)], None);
         let (o, fake) = run(FakeRunner::new(), &report, "Debian", false);
-        assert_eq!(o.unwrap(), InspectOutcome::NeedsStart { distro: "Debian".into() });
+        assert_eq!(
+            o.unwrap(),
+            InspectOutcome::NeedsStart {
+                distro: "Debian".into()
+            }
+        );
         assert!(fake.calls().is_empty());
     }
 
     #[test]
     fn stopped_distro_with_permission_reports_that_it_started_it() {
         let report = fake_report(&[("Debian", Stopped, Regular, 2)], None);
-        let f = rules("Debian", OS_DEBIAN, &[("apt-get", true)]).on("wsl.exe", &["-d", "Debian", "--exec", "/bin/true"], out_ok(b""));
+        let f = rules("Debian", OS_DEBIAN, &[("apt-get", true)]).on(
+            "wsl.exe",
+            &["-d", "Debian", "--exec", "/bin/true"],
+            out_ok(b""),
+        );
         let (o, fake) = run(f, &report, "Debian", true);
         let i = done(o);
         assert!(!i.was_running && i.started_by_inspection);
-        assert!(i.notes.iter().any(|n| n.contains("started this distribution")));
+        assert!(i
+            .notes
+            .iter()
+            .any(|n| n.contains("started this distribution")));
         assert_eq!(fake.call_lines()[0], "wsl.exe -d Debian --exec /bin/true");
     }
 
     #[test]
     fn failed_start_and_unreachable_distros_are_errors_not_guesses() {
         let report = fake_report(&[("Debian", Stopped, Regular, 2)], None);
-        let f = FakeRunner::new().on("wsl.exe", &["-d", "Debian", "--exec", "/bin/true"], out_code(1, b""));
-        assert!(matches!(run(f, &report, "Debian", true).0, Err(LifecycleError::Failed(_))));
+        let f = FakeRunner::new().on(
+            "wsl.exe",
+            &["-d", "Debian", "--exec", "/bin/true"],
+            out_code(1, b""),
+        );
+        assert!(matches!(
+            run(f, &report, "Debian", true).0,
+            Err(LifecycleError::Failed(_))
+        ));
 
         let running = fake_report(&[("Debian", Running, Regular, 2)], None);
         let mut f = FakeRunner::new();
-        for tail in [&["cat", "/etc/os-release"][..], &["uname", "-r"], &["uname", "-m"], &["id", "-un"], &["id", "-u"]] {
+        for tail in [
+            &["cat", "/etc/os-release"][..],
+            &["uname", "-r"],
+            &["uname", "-m"],
+            &["id", "-un"],
+            &["id", "-u"],
+        ] {
             let mut a = vec!["-d", "Debian", "--exec"];
             a.extend_from_slice(tail);
-            f = f.on("wsl.exe", &a, Err(RunError::Timeout(std::time::Duration::from_secs(12))));
+            f = f.on(
+                "wsl.exe",
+                &a,
+                Err(RunError::Timeout(std::time::Duration::from_secs(12))),
+            );
         }
         let e = run(f, &running, "Debian", false).0.unwrap_err();
         assert!(matches!(e, LifecycleError::Failed(m) if m.contains("did not answer")));
@@ -402,16 +560,35 @@ mod tests {
 
     #[test]
     fn internal_busy_and_unknown_distros_are_refused() {
-        let report = fake_report(&[("docker-desktop", Running, Internal, 2), ("Debian", Running, Regular, 2)], None);
-        assert!(matches!(run(FakeRunner::new(), &report, "docker-desktop", true).0, Err(LifecycleError::Internal(_))));
-        assert!(matches!(run(FakeRunner::new(), &report, "Nope", true).0, Err(LifecycleError::NotFound(_))));
-        assert!(matches!(run(FakeRunner::new(), &report, "-x", true).0, Err(LifecycleError::Invalid(_))));
+        let report = fake_report(
+            &[
+                ("docker-desktop", Running, Internal, 2),
+                ("Debian", Running, Regular, 2),
+            ],
+            None,
+        );
+        assert!(matches!(
+            run(FakeRunner::new(), &report, "docker-desktop", true).0,
+            Err(LifecycleError::Internal(_))
+        ));
+        assert!(matches!(
+            run(FakeRunner::new(), &report, "Nope", true).0,
+            Err(LifecycleError::NotFound(_))
+        ));
+        assert!(matches!(
+            run(FakeRunner::new(), &report, "-x", true).0,
+            Err(LifecycleError::Invalid(_))
+        ));
     }
 
     #[test]
     fn cancellation_stops_inspection() {
         let report = fake_report(&[("Debian", Running, Regular, 2)], None);
-        let f = FakeRunner::new().on_fn("wsl.exe", &["-d", "Debian", "--exec", "cat", "/etc/os-release"], |_, _, _| Err(RunError::Cancelled));
+        let f = FakeRunner::new().on_fn(
+            "wsl.exe",
+            &["-d", "Debian", "--exec", "cat", "/etc/os-release"],
+            |_, _, _| Err(RunError::Cancelled),
+        );
         let e = run(f, &report, "Debian", false).0.unwrap_err();
         assert!(matches!(e, LifecycleError::Failed(m) if m.contains("cancelled")));
     }
@@ -419,9 +596,17 @@ mod tests {
     #[test]
     fn unsupported_manager_is_reported_as_found_but_unsupported() {
         let report = fake_report(&[("Alpine", Running, Regular, 2)], None);
-        let (o, _) = run(rules("Alpine", OS_ALPINE, &[("apk", true)]), &report, "Alpine", false);
+        let (o, _) = run(
+            rules("Alpine", OS_ALPINE, &[("apk", true)]),
+            &report,
+            "Alpine",
+            false,
+        );
         let i = done(o);
-        let adapter = DistroRegistry::with_builtin().from_os_release("alpine", &[]).adapter.packages();
+        let adapter = DistroRegistry::with_builtin()
+            .from_os_release("alpine", &[])
+            .adapter
+            .packages();
         let (caps, notes) = i.package_caps(adapter);
         assert_eq!(caps.manager, PackageManager::Unknown);
         assert_eq!(caps.install.support, crate::packages::Support::Unsupported);
@@ -434,19 +619,38 @@ mod tests {
         let report = fake_report(&[("Debian", Running, Regular, 2)], None);
         let (o, fake) = run(rules("Debian", OS_DEBIAN, &[]), &report, "Debian", false);
         let i = done(o);
-        let (caps, _) = i.package_caps(DistroRegistry::with_builtin().by_id("debian").unwrap().packages());
+        let (caps, _) = i.package_caps(
+            DistroRegistry::with_builtin()
+                .by_id("debian")
+                .unwrap()
+                .packages(),
+        );
         assert_eq!(caps.availability, Availability::Absent);
         assert_eq!(caps.search.support, crate::packages::Support::Unsupported);
         // The others were probed because the expected one was missing.
-        assert_eq!(fake.call_lines().iter().filter(|c| c.ends_with("--version")).count(), PROBE_BINARIES.len());
+        assert_eq!(
+            fake.call_lines()
+                .iter()
+                .filter(|c| c.ends_with("--version"))
+                .count(),
+            PROBE_BINARIES.len()
+        );
     }
 
     #[test]
     fn unidentified_distro_adopts_the_single_probed_supported_manager() {
         let report = fake_report(&[("MyBox", Running, Regular, 2)], None);
-        let (o, _) = run(rules("MyBox", b"ID=mystery\n", &[("dnf", true)]), &report, "MyBox", false);
+        let (o, _) = run(
+            rules("MyBox", b"ID=mystery\n", &[("dnf", true)]),
+            &report,
+            "MyBox",
+            false,
+        );
         let i = done(o);
-        let adapter = DistroRegistry::with_builtin().from_os_release("mystery", &[]).adapter.packages();
+        let adapter = DistroRegistry::with_builtin()
+            .from_os_release("mystery", &[])
+            .adapter
+            .packages();
         let (caps, notes) = i.package_caps(adapter);
         assert_eq!(caps.manager, PackageManager::Dnf);
         assert!(notes.iter().any(|n| n.contains("found by probing")));
@@ -455,8 +659,16 @@ mod tests {
     #[test]
     fn two_managers_on_an_unidentified_distro_are_not_guessed_between() {
         let managers = vec![
-            ManagerProbe { binary: "apt-get".into(), present: true, version: None },
-            ManagerProbe { binary: "dnf".into(), present: true, version: None },
+            ManagerProbe {
+                binary: "apt-get".into(),
+                present: true,
+                version: None,
+            },
+            ManagerProbe {
+                binary: "dnf".into(),
+                present: true,
+                version: None,
+            },
         ];
         let (s, a, _) = resolve_packages(PackageSupport::none(), &managers);
         assert_eq!(s.manager, PackageManager::Unknown);
@@ -474,7 +686,19 @@ mod tests {
         let dir = TempDir::new("inspect-store");
         let store = InspectionStore::new(dir.path());
         assert!(store.all().is_empty());
-        let mk = |at| Inspection { distro: "Debian".into(), at, was_running: true, started_by_inspection: false, os_release: None, kernel: Some("k".into()), arch: None, default_user: None, uid: None, managers: vec![], notes: vec![] };
+        let mk = |at| Inspection {
+            distro: "Debian".into(),
+            at,
+            was_running: true,
+            started_by_inspection: false,
+            os_release: None,
+            kernel: Some("k".into()),
+            arch: None,
+            default_user: None,
+            uid: None,
+            managers: vec![],
+            notes: vec![],
+        };
         store.put(mk(1)).unwrap();
         store.put(mk(2)).unwrap();
         assert_eq!(store.all().len(), 1);
@@ -484,6 +708,10 @@ mod tests {
         assert!(store.all().is_empty());
         store.put(mk(3)).unwrap();
         assert_eq!(store.get("Debian").unwrap().at, 3);
-        assert!(fs::read_dir(dir.path()).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains(".invalid-")));
+        assert!(fs::read_dir(dir.path()).unwrap().any(|e| e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".invalid-")));
     }
 }

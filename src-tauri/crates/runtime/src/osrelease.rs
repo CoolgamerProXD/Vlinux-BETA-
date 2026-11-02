@@ -8,17 +8,28 @@ const MAX_LINE: usize = 2048;
 
 pub fn parse_os_release(text: &str) -> OsRelease {
     let mut r = OsRelease::default();
-    let text = if text.len() > MAX_BYTES { &text[..floor_char_boundary(text, MAX_BYTES)] } else { text };
+    let text = if text.len() > MAX_BYTES {
+        &text[..floor_char_boundary(text, MAX_BYTES)]
+    } else {
+        text
+    };
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') || line.len() > MAX_LINE {
             continue;
         }
-        let Some((key, raw)) = line.split_once('=') else { continue };
+        let Some((key, raw)) = line.split_once('=') else {
+            continue;
+        };
         let value = unquote(raw.trim());
         match key.trim() {
             "ID" => r.id = value.to_ascii_lowercase(),
-            "ID_LIKE" => r.id_like = value.split_whitespace().map(|s| s.to_ascii_lowercase()).collect(),
+            "ID_LIKE" => {
+                r.id_like = value
+                    .split_whitespace()
+                    .map(|s| s.to_ascii_lowercase())
+                    .collect()
+            }
             "NAME" => r.name = non_empty(value),
             "PRETTY_NAME" => r.pretty_name = non_empty(value),
             "VERSION" => r.version = non_empty(value),
@@ -52,7 +63,10 @@ fn non_empty(s: String) -> Option<String> {
 
 fn unquote(v: &str) -> String {
     let bytes = v.as_bytes();
-    if bytes.len() >= 2 && (bytes[0] == b'"' || bytes[0] == b'\'') && bytes[bytes.len() - 1] == bytes[0] {
+    if bytes.len() >= 2
+        && (bytes[0] == b'"' || bytes[0] == b'\'')
+        && bytes[bytes.len() - 1] == bytes[0]
+    {
         let inner = &v[1..v.len() - 1];
         if bytes[0] == b'\'' {
             return inner.to_string();

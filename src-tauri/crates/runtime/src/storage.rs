@@ -239,15 +239,24 @@ impl Verdict {
 pub const DEFAULT_MOUNT_ROOT: &str = "/mnt";
 
 fn unsupported(msg: &str) -> Verdict {
-    Verdict::Unsupported { message: msg.to_string() }
+    Verdict::Unsupported {
+        message: msg.to_string(),
+    }
 }
 
 fn is_reserved_name(component: &str) -> bool {
-    let stem = component.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let stem = component
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
     matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || ((stem.starts_with("COM") || stem.starts_with("LPT"))
             && stem.len() == 4
-            && stem.chars().nth(3).is_some_and(|c| ('1'..='9').contains(&c)))
+            && stem
+                .chars()
+                .nth(3)
+                .is_some_and(|c| ('1'..='9').contains(&c)))
 }
 
 /// Translate an absolute Windows path to the path WSL would use, or explain why it cannot be
@@ -273,7 +282,11 @@ pub fn windows_to_wsl(path: &str, mount_root: &str, drives: &dyn DriveInspector)
     if lower.starts_with("\\\\?\\unc\\") || lower.starts_with("//?/unc/") {
         return unsupported("This is a network (UNC) location. WSL cannot reach it through a normal drive mount; choose a folder on a local drive.");
     }
-    if lower.starts_with("\\\\wsl$\\") || lower.starts_with("\\\\wsl.localhost\\") || lower.starts_with("//wsl$/") || lower.starts_with("//wsl.localhost/") {
+    if lower.starts_with("\\\\wsl$\\")
+        || lower.starts_with("\\\\wsl.localhost\\")
+        || lower.starts_with("//wsl$/")
+        || lower.starts_with("//wsl.localhost/")
+    {
         return unsupported("This location is inside a Linux distribution. Sharing it back into Linux would be circular.");
     }
     if lower.starts_with("\\\\.\\") {
@@ -287,7 +300,9 @@ pub fn windows_to_wsl(path: &str, mount_root: &str, drives: &dyn DriveInspector)
 
     let b = rest.as_bytes();
     if b.len() < 2 || !b[0].is_ascii_alphabetic() || b[1] != b':' {
-        return unsupported("Only absolute paths on a drive letter (for example D:\\Folder) are supported.");
+        return unsupported(
+            "Only absolute paths on a drive letter (for example D:\\Folder) are supported.",
+        );
     }
     if b.len() == 2 || (b[2] != b'\\' && b[2] != b'/') {
         return unsupported("The path is drive-relative; give the full path including the backslash after the drive letter.");
@@ -302,11 +317,15 @@ pub fn windows_to_wsl(path: &str, mount_root: &str, drives: &dyn DriveInspector)
         if c == ".." {
             return unsupported("'..' is not allowed in a mapped path.");
         }
-        if c.chars().any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+        if c.chars()
+            .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+        {
             return unsupported("The path contains characters Windows does not allow in names.");
         }
         if c.ends_with(' ') || c.ends_with('.') {
-            return unsupported("A folder name ends with a space or a dot, which Windows does not preserve.");
+            return unsupported(
+                "A folder name ends with a space or a dot, which Windows does not preserve.",
+            );
         }
         if is_reserved_name(c) {
             return unsupported("The path contains a reserved Windows device name.");
@@ -314,7 +333,9 @@ pub fn windows_to_wsl(path: &str, mount_root: &str, drives: &dyn DriveInspector)
         comps.push(c);
     }
     if comps.is_empty() {
-        return unsupported("A whole drive cannot be used as a mapping target; choose a folder on it.");
+        return unsupported(
+            "A whole drive cannot be used as a mapping target; choose a folder on it.",
+        );
     }
 
     let wsl_path = format!("{root}/{letter}/{}", comps.join("/"));
@@ -357,7 +378,12 @@ pub struct StorageOverview {
     pub notes: Vec<String>,
 }
 
-pub fn overview(cfg: &StorageConfig, resolver: &dyn KnownFolderResolver, drives: &dyn DriveInspector, mount_root: &str) -> StorageOverview {
+pub fn overview(
+    cfg: &StorageConfig,
+    resolver: &dyn KnownFolderResolver,
+    drives: &dyn DriveInspector,
+    mount_root: &str,
+) -> StorageOverview {
     let folders = KnownFolder::ALL
         .iter()
         .map(|&f| {
@@ -439,7 +465,12 @@ pub enum MappingAction {
 
 impl MappingAction {
     pub fn requires_confirmation(&self) -> bool {
-        matches!(self, MappingAction::ReplaceEmptyDir { .. } | MappingAction::RetargetLink { .. } | MappingAction::UnlinkToPrivate { .. })
+        matches!(
+            self,
+            MappingAction::ReplaceEmptyDir { .. }
+                | MappingAction::RetargetLink { .. }
+                | MappingAction::UnlinkToPrivate { .. }
+        )
     }
     /// Does this action delete or overwrite user files? Never (by construction).
     pub fn touches_user_files(&self) -> bool {
@@ -451,10 +482,16 @@ fn same_path(a: &str, b: &str) -> bool {
     a.trim_end_matches('/') == b.trim_end_matches('/')
 }
 
-pub fn plan_mapping(mode: MappingMode, verdict: Option<&Verdict>, linux: &LinuxEntry) -> MappingAction {
+pub fn plan_mapping(
+    mode: MappingMode,
+    verdict: Option<&Verdict>,
+    linux: &LinuxEntry,
+) -> MappingAction {
     match mode {
         MappingMode::Private => match linux {
-            LinuxEntry::Symlink { target } => MappingAction::UnlinkToPrivate { from: target.clone() },
+            LinuxEntry::Symlink { target } => MappingAction::UnlinkToPrivate {
+                from: target.clone(),
+            },
             _ => MappingAction::NoOp,
         },
         MappingMode::Shared => {
@@ -470,7 +507,11 @@ pub fn plan_mapping(mode: MappingMode, verdict: Option<&Verdict>, linux: &LinuxE
                         }
                     }
                 },
-                None => return MappingAction::Blocked { reason: "No Windows folder was chosen.".into() },
+                None => {
+                    return MappingAction::Blocked {
+                        reason: "No Windows folder was chosen.".into(),
+                    }
+                }
             };
             match linux {
                 LinuxEntry::Missing => MappingAction::CreateLink { target },
@@ -516,23 +557,68 @@ mod tests {
 
     #[test]
     fn ordinary_paths_map_to_mnt() {
-        assert_eq!(sup(r"C:\Users\Someone\Downloads"), Verdict::Supported { wsl_path: "/mnt/c/Users/Someone/Downloads".into() });
-        assert_eq!(sup(r"D:\Media\Pictures\"), Verdict::Supported { wsl_path: "/mnt/d/Media/Pictures".into() });
-        assert_eq!(sup("e:/Docs/Work"), Verdict::Supported { wsl_path: "/mnt/e/Docs/Work".into() });
-        assert_eq!(sup(r"\\?\C:\Users\X\Music"), Verdict::Supported { wsl_path: "/mnt/c/Users/X/Music".into() });
-        assert_eq!(sup(r"C:\Users\Zoë\Dokumente"), Verdict::Supported { wsl_path: "/mnt/c/Users/Zoë/Dokumente".into() });
-        assert_eq!(sup(r"C:\a\\b\.\c"), Verdict::Supported { wsl_path: "/mnt/c/a/b/c".into() });
+        assert_eq!(
+            sup(r"C:\Users\Someone\Downloads"),
+            Verdict::Supported {
+                wsl_path: "/mnt/c/Users/Someone/Downloads".into()
+            }
+        );
+        assert_eq!(
+            sup(r"D:\Media\Pictures\"),
+            Verdict::Supported {
+                wsl_path: "/mnt/d/Media/Pictures".into()
+            }
+        );
+        assert_eq!(
+            sup("e:/Docs/Work"),
+            Verdict::Supported {
+                wsl_path: "/mnt/e/Docs/Work".into()
+            }
+        );
+        assert_eq!(
+            sup(r"\\?\C:\Users\X\Music"),
+            Verdict::Supported {
+                wsl_path: "/mnt/c/Users/X/Music".into()
+            }
+        );
+        assert_eq!(
+            sup(r"C:\Users\Zoë\Dokumente"),
+            Verdict::Supported {
+                wsl_path: "/mnt/c/Users/Zoë/Dokumente".into()
+            }
+        );
+        assert_eq!(
+            sup(r"C:\a\\b\.\c"),
+            Verdict::Supported {
+                wsl_path: "/mnt/c/a/b/c".into()
+            }
+        );
     }
 
     #[test]
     fn custom_mount_root() {
-        assert_eq!(windows_to_wsl(r"C:\x", "/windir/", &fixed()), Verdict::Supported { wsl_path: "/windir/c/x".into() });
-        assert!(matches!(windows_to_wsl(r"C:\x", "mnt", &fixed()), Verdict::Unsupported { .. }));
+        assert_eq!(
+            windows_to_wsl(r"C:\x", "/windir/", &fixed()),
+            Verdict::Supported {
+                wsl_path: "/windir/c/x".into()
+            }
+        );
+        assert!(matches!(
+            windows_to_wsl(r"C:\x", "mnt", &fixed()),
+            Verdict::Unsupported { .. }
+        ));
     }
 
     #[test]
     fn unc_and_network_locations_are_detected_not_mapped() {
-        for p in [r"\\server\share\Docs", r"\\?\UNC\server\share\x", "//server/share/x", r"\\wsl$\Ubuntu\home\me", r"\\wsl.localhost\Ubuntu\home", r"\\.\PHYSICALDRIVE0"] {
+        for p in [
+            r"\\server\share\Docs",
+            r"\\?\UNC\server\share\x",
+            "//server/share/x",
+            r"\\wsl$\Ubuntu\home\me",
+            r"\\wsl.localhost\Ubuntu\home",
+            r"\\.\PHYSICALDRIVE0",
+        ] {
             assert!(matches!(sup(p), Verdict::Unsupported { .. }), "{p}");
         }
         match sup(r"\\wsl$\Ubuntu\home") {
@@ -543,7 +629,25 @@ mod tests {
 
     #[test]
     fn invalid_paths_are_rejected() {
-        for p in ["", "   ", "Downloads", r"..\x", r"C:", r"C:Users\x", r"C:\", r"D:\\", r"C:\a\..\b", "C:\\a\u{0}b", r"C:\a<b", r"C:\a:stream", r"C:\folder.", r"C:\CON", r"C:\x\nul.txt", r"C:\lpt1", r"1:\x"] {
+        for p in [
+            "",
+            "   ",
+            "Downloads",
+            r"..\x",
+            r"C:",
+            r"C:Users\x",
+            r"C:\",
+            r"D:\\",
+            r"C:\a\..\b",
+            "C:\\a\u{0}b",
+            r"C:\a<b",
+            r"C:\a:stream",
+            r"C:\folder.",
+            r"C:\CON",
+            r"C:\x\nul.txt",
+            r"C:\lpt1",
+            r"1:\x",
+        ] {
             assert!(matches!(sup(p), Verdict::Unsupported { .. }), "{p:?}");
         }
         assert!(matches!(sup(r"C:\COM10"), Verdict::Supported { .. }));
@@ -551,10 +655,22 @@ mod tests {
 
     #[test]
     fn network_and_removable_drives_warn() {
-        let d = Drives(HashMap::from([('z', DriveKind::Network), ('f', DriveKind::Removable)]));
-        assert!(matches!(windows_to_wsl(r"Z:\Share\Docs", "/mnt", &d), Verdict::Warning { .. }));
-        assert!(matches!(windows_to_wsl(r"F:\Usb", "/mnt", &d), Verdict::Warning { .. }));
-        assert!(matches!(windows_to_wsl(r"C:\Fixed", "/mnt", &d), Verdict::Supported { .. }));
+        let d = Drives(HashMap::from([
+            ('z', DriveKind::Network),
+            ('f', DriveKind::Removable),
+        ]));
+        assert!(matches!(
+            windows_to_wsl(r"Z:\Share\Docs", "/mnt", &d),
+            Verdict::Warning { .. }
+        ));
+        assert!(matches!(
+            windows_to_wsl(r"F:\Usb", "/mnt", &d),
+            Verdict::Warning { .. }
+        ));
+        assert!(matches!(
+            windows_to_wsl(r"C:\Fixed", "/mnt", &d),
+            Verdict::Supported { .. }
+        ));
     }
 
     #[test]
@@ -571,33 +687,64 @@ mod tests {
     fn overview_resolves_redirected_folders_and_other_drives() {
         // A user whose Documents is redirected to D: and whose Pictures is on a network share.
         let r = Folders(HashMap::from([
-            (KnownFolder::Downloads, r"C:\Users\Anyone\Downloads".to_string()),
-            (KnownFolder::Documents, r"D:\Redirected\Documents".to_string()),
+            (
+                KnownFolder::Downloads,
+                r"C:\Users\Anyone\Downloads".to_string(),
+            ),
+            (
+                KnownFolder::Documents,
+                r"D:\Redirected\Documents".to_string(),
+            ),
             (KnownFolder::Pictures, r"\\nas\home\Pictures".to_string()),
         ]));
         let o = overview(&StorageConfig::default(), &r, &fixed(), "/mnt");
         let by = |id: &str| o.folders.iter().find(|f| f.id == id).unwrap().clone();
-        assert_eq!(by("downloads").verdict, Some(Verdict::Supported { wsl_path: "/mnt/c/Users/Anyone/Downloads".into() }));
-        assert_eq!(by("documents").verdict, Some(Verdict::Supported { wsl_path: "/mnt/d/Redirected/Documents".into() }));
-        assert!(matches!(by("pictures").verdict, Some(Verdict::Unsupported { .. })));
+        assert_eq!(
+            by("downloads").verdict,
+            Some(Verdict::Supported {
+                wsl_path: "/mnt/c/Users/Anyone/Downloads".into()
+            })
+        );
+        assert_eq!(
+            by("documents").verdict,
+            Some(Verdict::Supported {
+                wsl_path: "/mnt/d/Redirected/Documents".into()
+            })
+        );
+        assert!(matches!(
+            by("pictures").verdict,
+            Some(Verdict::Unsupported { .. })
+        ));
         assert!(by("pictures").points_to.starts_with("Cannot be shared"));
         // No location reported at all.
-        assert!(matches!(by("videos").verdict, Some(Verdict::Unsupported { .. })));
+        assert!(matches!(
+            by("videos").verdict,
+            Some(Verdict::Unsupported { .. })
+        ));
         assert_eq!(by("downloads").linux_path, "~/Downloads");
         assert_eq!(o.folders.len(), 6);
     }
 
     #[test]
     fn overview_custom_path_and_private_mode() {
-        let r = Folders(HashMap::from([(KnownFolder::Downloads, r"C:\Users\A\Downloads".to_string())]));
+        let r = Folders(HashMap::from([(
+            KnownFolder::Downloads,
+            r"C:\Users\A\Downloads".to_string(),
+        )]));
         let mut cfg = StorageConfig::default();
         cfg.downloads.windows_path = Some(r"E:\Stuff\Dl".into());
         cfg.music.mode = MappingMode::Private;
         let o = overview(&cfg, &r, &fixed(), "/mnt");
         let dl = o.folders.iter().find(|f| f.id == "downloads").unwrap();
         assert_eq!(dl.effective_windows_path.as_deref(), Some(r"E:\Stuff\Dl"));
-        assert_eq!(dl.default_windows_path.as_deref(), Some(r"C:\Users\A\Downloads"));
-        assert_eq!(dl.verdict.as_ref().and_then(|v| v.wsl_path()), Some("/mnt/e/Stuff/Dl"));
+        assert_eq!(
+            dl.default_windows_path.as_deref(),
+            Some(r"C:\Users\A\Downloads")
+        );
+        assert_eq!(
+            dl.verdict.as_ref().and_then(|v| v.wsl_path()),
+            Some("/mnt/e/Stuff/Dl")
+        );
         let music = o.folders.iter().find(|f| f.id == "music").unwrap();
         assert!(music.verdict.is_none());
         assert!(music.points_to.contains("Linux-private"));
@@ -625,40 +772,100 @@ mod tests {
         cfg.projects = ProjectsMode::Shared;
         let json = serde_json::to_string(&cfg).unwrap();
         assert_eq!(serde_json::from_str::<StorageConfig>(&json).unwrap(), cfg);
-        let partial: StorageConfig = serde_json::from_str(r#"{"music":{"mode":"private"}}"#).unwrap();
+        let partial: StorageConfig =
+            serde_json::from_str(r#"{"music":{"mode":"private"}}"#).unwrap();
         assert_eq!(partial.music.mode, MappingMode::Private);
         assert_eq!(partial.downloads.mode, MappingMode::Shared);
         assert!(serde_json::from_str::<StorageConfig>(r#"{"music":{"mode":"sideways"}}"#).is_err());
     }
 
     fn shared_ok() -> Verdict {
-        Verdict::Supported { wsl_path: "/mnt/c/Users/A/Downloads".into() }
+        Verdict::Supported {
+            wsl_path: "/mnt/c/Users/A/Downloads".into(),
+        }
     }
 
     #[test]
     fn planner_never_touches_user_data() {
         let v = shared_ok();
         let t = "/mnt/c/Users/A/Downloads".to_string();
-        assert_eq!(plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::Missing), MappingAction::CreateLink { target: t.clone() });
-        assert_eq!(plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::Symlink { target: format!("{t}/") }), MappingAction::NoOp);
-        assert!(matches!(plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::Symlink { target: "/elsewhere".into() }), MappingAction::RetargetLink { .. }));
-        assert!(matches!(plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::EmptyDir), MappingAction::ReplaceEmptyDir { .. }));
+        assert_eq!(
+            plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::Missing),
+            MappingAction::CreateLink { target: t.clone() }
+        );
+        assert_eq!(
+            plan_mapping(
+                MappingMode::Shared,
+                Some(&v),
+                &LinuxEntry::Symlink {
+                    target: format!("{t}/")
+                }
+            ),
+            MappingAction::NoOp
+        );
+        assert!(matches!(
+            plan_mapping(
+                MappingMode::Shared,
+                Some(&v),
+                &LinuxEntry::Symlink {
+                    target: "/elsewhere".into()
+                }
+            ),
+            MappingAction::RetargetLink { .. }
+        ));
+        assert!(matches!(
+            plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::EmptyDir),
+            MappingAction::ReplaceEmptyDir { .. }
+        ));
         // Existing data: never replaced, handed back to the user.
-        assert!(matches!(plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::NonEmptyDir), MappingAction::NeedsUserDecision { .. }));
-        assert!(matches!(plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::File), MappingAction::NeedsUserDecision { .. }));
+        assert!(matches!(
+            plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::NonEmptyDir),
+            MappingAction::NeedsUserDecision { .. }
+        ));
+        assert!(matches!(
+            plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::File),
+            MappingAction::NeedsUserDecision { .. }
+        ));
         // Unsupported Windows path.
-        let bad = Verdict::Unsupported { message: "unc".into() };
-        assert!(matches!(plan_mapping(MappingMode::Shared, Some(&bad), &LinuxEntry::Missing), MappingAction::Blocked { .. }));
-        assert!(matches!(plan_mapping(MappingMode::Shared, None, &LinuxEntry::Missing), MappingAction::Blocked { .. }));
+        let bad = Verdict::Unsupported {
+            message: "unc".into(),
+        };
+        assert!(matches!(
+            plan_mapping(MappingMode::Shared, Some(&bad), &LinuxEntry::Missing),
+            MappingAction::Blocked { .. }
+        ));
+        assert!(matches!(
+            plan_mapping(MappingMode::Shared, None, &LinuxEntry::Missing),
+            MappingAction::Blocked { .. }
+        ));
     }
 
     #[test]
     fn planner_private_mode_only_unlinks_symlinks() {
-        for e in [LinuxEntry::Missing, LinuxEntry::EmptyDir, LinuxEntry::NonEmptyDir, LinuxEntry::File] {
-            assert_eq!(plan_mapping(MappingMode::Private, None, &e), MappingAction::NoOp);
+        for e in [
+            LinuxEntry::Missing,
+            LinuxEntry::EmptyDir,
+            LinuxEntry::NonEmptyDir,
+            LinuxEntry::File,
+        ] {
+            assert_eq!(
+                plan_mapping(MappingMode::Private, None, &e),
+                MappingAction::NoOp
+            );
         }
-        let a = plan_mapping(MappingMode::Private, None, &LinuxEntry::Symlink { target: "/mnt/c/x".into() });
-        assert_eq!(a, MappingAction::UnlinkToPrivate { from: "/mnt/c/x".into() });
+        let a = plan_mapping(
+            MappingMode::Private,
+            None,
+            &LinuxEntry::Symlink {
+                target: "/mnt/c/x".into(),
+            },
+        );
+        assert_eq!(
+            a,
+            MappingAction::UnlinkToPrivate {
+                from: "/mnt/c/x".into()
+            }
+        );
         assert!(a.requires_confirmation());
         assert!(!a.touches_user_files());
     }
@@ -666,8 +873,17 @@ mod tests {
     #[test]
     fn confirmation_rules() {
         let v = shared_ok();
-        assert!(!plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::Missing).requires_confirmation());
-        assert!(plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::EmptyDir).requires_confirmation());
-        assert!(!plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::NonEmptyDir).requires_confirmation());
+        assert!(
+            !plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::Missing)
+                .requires_confirmation()
+        );
+        assert!(
+            plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::EmptyDir)
+                .requires_confirmation()
+        );
+        assert!(
+            !plan_mapping(MappingMode::Shared, Some(&v), &LinuxEntry::NonEmptyDir)
+                .requires_confirmation()
+        );
     }
 }

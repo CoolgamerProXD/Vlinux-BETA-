@@ -36,7 +36,8 @@ pub struct Programs {
 impl Programs {
     /// Absolute `System32` paths when `SystemRoot` is known (avoids PATH hijacking), otherwise bare names.
     pub fn system() -> Self {
-        let sys32 = std::env::var_os("SystemRoot").map(|root| std::path::PathBuf::from(root).join("System32"));
+        let sys32 = std::env::var_os("SystemRoot")
+            .map(|root| std::path::PathBuf::from(root).join("System32"));
         let pick = |exe: &str| -> String {
             if let Some(dir) = &sys32 {
                 let p = dir.join(exe);
@@ -46,12 +47,18 @@ impl Programs {
             }
             exe.to_string()
         };
-        Self { wsl: pick("wsl.exe"), reg: pick("reg.exe") }
+        Self {
+            wsl: pick("wsl.exe"),
+            reg: pick("reg.exe"),
+        }
     }
 
     /// Fixed names for tests with a fake runner.
     pub fn fake() -> Self {
-        Self { wsl: "wsl.exe".into(), reg: "reg.exe".into() }
+        Self {
+            wsl: "wsl.exe".into(),
+            reg: "reg.exe".into(),
+        }
     }
 }
 
@@ -78,7 +85,10 @@ pub struct WslClient {
 
 impl WslClient {
     pub fn new(runner: Arc<dyn CommandRunner>, program: impl Into<String>) -> Self {
-        Self { runner, program: program.into() }
+        Self {
+            runner,
+            program: program.into(),
+        }
     }
 
     pub fn runner(&self) -> &Arc<dyn CommandRunner> {
@@ -92,7 +102,10 @@ impl WslClient {
         if is_allowed_invocation(&spec.args) {
             Ok(spec)
         } else {
-            Err(RunError::Io(format!("refused to run a non-allow-listed wsl.exe invocation: {}", args.join(" "))))
+            Err(RunError::Io(format!(
+                "refused to run a non-allow-listed wsl.exe invocation: {}",
+                args.join(" ")
+            )))
         }
     }
 
@@ -118,7 +131,10 @@ impl WslClient {
     /// Read-only: `cat /etc/os-release` inside `name` (no shell). On a *stopped* distribution
     /// this starts it, so callers must only do that with the user's say-so.
     pub fn read_os_release(&self, name: &str) -> Result<CmdOutput, RunError> {
-        self.run(&["-d", name, "--exec", "cat", "/etc/os-release"], OS_RELEASE_TIMEOUT)
+        self.run(
+            &["-d", name, "--exec", "cat", "/etc/os-release"],
+            OS_RELEASE_TIMEOUT,
+        )
     }
 
     /// Start a distribution (user-initiated).
@@ -139,8 +155,12 @@ impl WslClient {
         on_output: &mut dyn FnMut(&[u8]),
     ) -> Result<CmdOutput, RunError> {
         let spec = match target {
-            InstallTarget::Distribution(name) => self.spec(&["--install", name, "--no-launch"], INSTALL_TIMEOUT)?,
-            InstallTarget::WslPlatform => self.spec(&["--install", "--no-distribution"], INSTALL_TIMEOUT)?,
+            InstallTarget::Distribution(name) => {
+                self.spec(&["--install", name, "--no-launch"], INSTALL_TIMEOUT)?
+            }
+            InstallTarget::WslPlatform => {
+                self.spec(&["--install", "--no-distribution"], INSTALL_TIMEOUT)?
+            }
         };
         self.runner.run(&spec, cancel, on_output)
     }
@@ -213,13 +233,28 @@ mod tests {
         let c = WslClient::new(fake.clone(), "wsl.exe");
         assert!(c.read_os_release("a b").is_err());
         assert!(c.terminate("--all").is_err());
-        assert!(c.install(&InstallTarget::Distribution("x;y".into()), &CancelToken::new(), &mut |_| {}).is_err());
-        assert!(fake.calls().is_empty(), "nothing may reach the process runner");
+        assert!(c
+            .install(
+                &InstallTarget::Distribution("x;y".into()),
+                &CancelToken::new(),
+                &mut |_| {}
+            )
+            .is_err());
+        assert!(
+            fake.calls().is_empty(),
+            "nothing may reach the process runner"
+        );
     }
 
     #[test]
     fn previews() {
-        assert_eq!(WslClient::install_command_preview(&InstallTarget::Distribution("Debian".into())), "wsl.exe --install Debian --no-launch");
-        assert_eq!(WslClient::install_command_preview(&InstallTarget::WslPlatform), "wsl.exe --install --no-distribution");
+        assert_eq!(
+            WslClient::install_command_preview(&InstallTarget::Distribution("Debian".into())),
+            "wsl.exe --install Debian --no-launch"
+        );
+        assert_eq!(
+            WslClient::install_command_preview(&InstallTarget::WslPlatform),
+            "wsl.exe --install --no-distribution"
+        );
     }
 }

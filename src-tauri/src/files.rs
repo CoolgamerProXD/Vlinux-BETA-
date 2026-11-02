@@ -20,13 +20,18 @@ use tauri::{AppHandle, Emitter, State};
 use vlinux_runtime::exec::{CancelToken, CommandRunner, SystemRunner};
 use vlinux_runtime::fs::filetype::open_policy;
 use vlinux_runtime::fs::{
-    ops, Conflict, FsError, FsErrorKind, FsResult, ListOptions, ListStore, ListingHead, Location, OpReport, Page, Progress, Runner, Spaces,
-    TransferMode, WindowsRoot,
+    ops, Conflict, FsError, FsErrorKind, FsResult, ListOptions, ListStore, ListingHead, Location,
+    OpReport, Page, Progress, Runner, Spaces, TransferMode, WindowsRoot,
 };
 use vlinux_runtime::parse::valid_distro_name;
 use vlinux_runtime::shared::engine::{self, same_path, Ctx};
-use vlinux_runtime::shared::{parse_wsl_conf, DistroOps, MappingStatus, MappingStore, Resolution, WslConf, WslDistroOps};
-use vlinux_runtime::storage::{windows_to_wsl, KnownFolder, KnownFolderResolver, StorageConfig, SystemDrives, SystemKnownFolders};
+use vlinux_runtime::shared::{
+    parse_wsl_conf, DistroOps, MappingStatus, MappingStore, Resolution, WslConf, WslDistroOps,
+};
+use vlinux_runtime::storage::{
+    windows_to_wsl, KnownFolder, KnownFolderResolver, StorageConfig, SystemDrives,
+    SystemKnownFolders,
+};
 use vlinux_runtime::unix_now;
 
 use crate::config::ConfigStore;
@@ -85,7 +90,10 @@ fn storage_of(cfg: &Cfg<'_>) -> Result<StorageConfig, FsError> {
 /// Host path of a distribution's file share.
 pub(crate) fn linux_root(distro: &str) -> FsResult<PathBuf> {
     if !valid_distro_name(distro) {
-        return Err(FsError::new(FsErrorKind::InvalidPath, format!("'{distro}' is not a valid distribution name.")));
+        return Err(FsError::new(
+            FsErrorKind::InvalidPath,
+            format!("'{distro}' is not a valid distribution name."),
+        ));
     }
     #[cfg(windows)]
     {
@@ -103,7 +111,9 @@ pub(crate) fn linux_root(distro: &str) -> FsResult<PathBuf> {
     }
     #[cfg(not(windows))]
     {
-        Err(unavailable("Linux files are reached through WSL, which is only available on Windows."))
+        Err(unavailable(
+            "Linux files are reached through WSL, which is only available on Windows.",
+        ))
     }
 }
 
@@ -114,10 +124,25 @@ fn windows_roots(cfg: &StorageConfig, mount_root: &str, automount: bool) -> Vec<
         .iter()
         .filter_map(|&f| {
             let c = cfg.folder(f);
-            let custom = if c.mode == vlinux_runtime::storage::MappingMode::Shared { c.windows_path.clone() } else { None };
+            let custom = if c.mode == vlinux_runtime::storage::MappingMode::Shared {
+                c.windows_path.clone()
+            } else {
+                None
+            };
             let path = custom.or_else(|| resolver.resolve(f))?;
-            let linux_mount = if automount { windows_to_wsl(&path, mount_root, &drives).wsl_path().map(|s| s.to_string()) } else { None };
-            Some(WindowsRoot { id: f.id().to_string(), label: f.label().to_string(), dir: PathBuf::from(path), linux_mount })
+            let linux_mount = if automount {
+                windows_to_wsl(&path, mount_root, &drives)
+                    .wsl_path()
+                    .map(|s| s.to_string())
+            } else {
+                None
+            };
+            Some(WindowsRoot {
+                id: f.id().to_string(),
+                label: f.label().to_string(),
+                dir: PathBuf::from(path),
+                linux_mount,
+            })
         })
         .collect()
 }
@@ -147,7 +172,8 @@ impl FilesState {
     }
 
     fn distro_ops(&self, distro: &str) -> FsResult<WslDistroOps> {
-        WslDistroOps::new(self.runner.clone(), self.rt.programs.wsl.clone(), distro).map_err(|e| unavailable(e.to_string()))
+        WslDistroOps::new(self.runner.clone(), self.rt.programs.wsl.clone(), distro)
+            .map_err(|e| unavailable(e.to_string()))
     }
 
     fn require_distro(&self, name: &str) -> FsResult<()> {
@@ -177,10 +203,12 @@ impl FilesState {
         self.require_distro(distro)?;
         let root = linux_root(distro)?;
         let ops = self.distro_ops(distro)?;
-        let home = ops
-            .home_dir()
-            .map_err(|e| unavailable(format!("Couldn't find the home folder of '{distro}': {e}")))?;
-        let conf = std::fs::read_to_string(root.join("etc").join("wsl.conf")).map(|t| parse_wsl_conf(&t)).unwrap_or_default();
+        let home = ops.home_dir().map_err(|e| {
+            unavailable(format!("Couldn't find the home folder of '{distro}': {e}"))
+        })?;
+        let conf = std::fs::read_to_string(root.join("etc").join("wsl.conf"))
+            .map(|t| parse_wsl_conf(&t))
+            .unwrap_or_default();
         let mut links = Vec::new();
         for r in self.store.for_distro(distro) {
             if let Ok(Some(t)) = ops.read_link(&r.linux_path) {
@@ -189,7 +217,12 @@ impl FilesState {
                 }
             }
         }
-        let info = Arc::new(DistroInfo { home, conf, root, links });
+        let info = Arc::new(DistroInfo {
+            home,
+            conf,
+            root,
+            links,
+        });
         if let Ok(mut g) = self.info.lock() {
             g.insert(distro.to_string(), info.clone());
         }
@@ -205,7 +238,14 @@ impl FilesState {
                 let mapped_links = i
                     .links
                     .iter()
-                    .filter(|(_, id, target)| windows.iter().any(|r| &r.id == id && r.linux_mount.as_deref().is_some_and(|m| same_path(m, target))))
+                    .filter(|(_, id, target)| {
+                        windows.iter().any(|r| {
+                            &r.id == id
+                                && r.linux_mount
+                                    .as_deref()
+                                    .is_some_and(|m| same_path(m, target))
+                        })
+                    })
                     .map(|(l, id, _)| (l.clone(), id.clone()))
                     .collect();
                 Spaces {
@@ -216,12 +256,23 @@ impl FilesState {
                     mapped_links,
                 }
             }
-            None => Spaces { linux_root: None, linux_home: None, mount_root: "/mnt".into(), windows: windows_roots(cfg, "/mnt", false), mapped_links: Vec::new() },
+            None => Spaces {
+                linux_root: None,
+                linux_home: None,
+                mount_root: "/mnt".into(),
+                windows: windows_roots(cfg, "/mnt", false),
+                mapped_links: Vec::new(),
+            },
         }
     }
 
     /// The spaces for one request. A Linux problem only matters if the request needs Linux.
-    fn spaces(&self, distro: Option<&str>, cfg: &StorageConfig, locs: &[&Location]) -> FsResult<Spaces> {
+    fn spaces(
+        &self,
+        distro: Option<&str>,
+        cfg: &StorageConfig,
+        locs: &[&Location],
+    ) -> FsResult<Spaces> {
         let needs_linux = uses_linux(locs);
         let info = match distro {
             Some(d) => match self.info(d, false) {
@@ -241,45 +292,71 @@ impl FilesState {
         let job_id = format!("fs-{}", self.counter.fetch_add(1, Ordering::SeqCst));
         let cancel = CancelToken::new();
         {
-            let mut jobs = self.jobs.lock().map_err(|_| FsError::new(FsErrorKind::Io, "internal state error"))?;
+            let mut jobs = self
+                .jobs
+                .lock()
+                .map_err(|_| FsError::new(FsErrorKind::Io, "internal state error"))?;
             if jobs.len() >= MAX_JOBS {
-                return Err(FsError::new(FsErrorKind::Refused, "Too many file operations are running. Wait for one to finish."));
+                return Err(FsError::new(
+                    FsErrorKind::Refused,
+                    "Too many file operations are running. Wait for one to finish.",
+                ));
             }
             jobs.insert(job_id.clone(), cancel.clone());
         }
         let me = self.clone();
         let id = job_id.clone();
-        let spawned = std::thread::Builder::new().name("vlinux-fs-job".into()).spawn(move || {
-            let app = me.app.clone();
-            let emit = |state: &'static str, progress: Option<Progress>, report: Option<OpReport>, error: Option<FsError>| {
-                let _ = app.emit(JOB_EVENT, JobEvent { job_id: id.clone(), kind, state, progress, report, error });
-            };
-            emit("running", None, None, None);
-            let mut last = Instant::now();
-            let mut on_progress = |p: &Progress| {
-                if last.elapsed() >= PROGRESS_EVERY {
-                    last = Instant::now();
-                    emit("running", Some(p.clone()), None, None);
+        let spawned = std::thread::Builder::new()
+            .name("vlinux-fs-job".into())
+            .spawn(move || {
+                let app = me.app.clone();
+                let emit = |state: &'static str,
+                            progress: Option<Progress>,
+                            report: Option<OpReport>,
+                            error: Option<FsError>| {
+                    let _ = app.emit(
+                        JOB_EVENT,
+                        JobEvent {
+                            job_id: id.clone(),
+                            kind,
+                            state,
+                            progress,
+                            report,
+                            error,
+                        },
+                    );
+                };
+                emit("running", None, None, None);
+                let mut last = Instant::now();
+                let mut on_progress = |p: &Progress| {
+                    if last.elapsed() >= PROGRESS_EVERY {
+                        last = Instant::now();
+                        emit("running", Some(p.clone()), None, None);
+                    }
+                };
+                let mut runner = Runner::new(&cancel, &mut on_progress);
+                let result = work(&mut runner);
+                let report = runner.finish();
+                match result {
+                    Err(e) if e.kind == FsErrorKind::Cancelled => {
+                        emit("cancelled", None, Some(report), None)
+                    }
+                    Err(e) => emit("failed", None, Some(report), Some(e)),
+                    Ok(()) if report.cancelled => emit("cancelled", None, Some(report), None),
+                    Ok(()) => emit("done", None, Some(report), None),
                 }
-            };
-            let mut runner = Runner::new(&cancel, &mut on_progress);
-            let result = work(&mut runner);
-            let report = runner.finish();
-            match result {
-                Err(e) if e.kind == FsErrorKind::Cancelled => emit("cancelled", None, Some(report), None),
-                Err(e) => emit("failed", None, Some(report), Some(e)),
-                Ok(()) if report.cancelled => emit("cancelled", None, Some(report), None),
-                Ok(()) => emit("done", None, Some(report), None),
-            }
-            if let Ok(mut jobs) = me.jobs.lock() {
-                jobs.remove(&id);
-            }
-        });
+                if let Ok(mut jobs) = me.jobs.lock() {
+                    jobs.remove(&id);
+                }
+            });
         if let Err(e) = spawned {
             if let Ok(mut jobs) = self.jobs.lock() {
                 jobs.remove(&job_id);
             }
-            return Err(FsError::new(FsErrorKind::Io, format!("couldn't start the operation: {e}")));
+            return Err(FsError::new(
+                FsErrorKind::Io,
+                format!("couldn't start the operation: {e}"),
+            ));
         }
         Ok(JobStarted { job_id })
     }
@@ -329,12 +406,23 @@ pub struct Places {
     shared: Vec<Place>,
 }
 
-const SIDEBAR_ORDER: [KnownFolder; 6] =
-    [KnownFolder::Desktop, KnownFolder::Documents, KnownFolder::Downloads, KnownFolder::Pictures, KnownFolder::Music, KnownFolder::Videos];
+const SIDEBAR_ORDER: [KnownFolder; 6] = [
+    KnownFolder::Desktop,
+    KnownFolder::Documents,
+    KnownFolder::Downloads,
+    KnownFolder::Pictures,
+    KnownFolder::Music,
+    KnownFolder::Videos,
+];
 
 /// The places for the sidebar. `refresh` re-reads the distribution (home folder, mappings).
 #[tauri::command]
-pub async fn fs_places(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, refresh: Option<bool>) -> Result<Places, FsError> {
+pub async fn fs_places(
+    fs: Fs<'_>,
+    cfg: Cfg<'_>,
+    distro: Option<String>,
+    refresh: Option<bool>,
+) -> Result<Places, FsError> {
     let fs = fs.inner().clone();
     let cfg = storage_of(&cfg)?;
     run(move || {
@@ -445,13 +533,23 @@ pub async fn fs_list_open(
     let cfg = storage_of(&cfg)?;
     run(move || {
         let spaces = fs.spaces(distro.as_deref(), &cfg, &[&location])?;
-        fs.lists.open_dir(&spaces, &location, &options.unwrap_or_default(), page_size.unwrap_or(200))
+        fs.lists.open_dir(
+            &spaces,
+            &location,
+            &options.unwrap_or_default(),
+            page_size.unwrap_or(200),
+        )
     })
     .await
 }
 
 #[tauri::command]
-pub async fn fs_list_page(fs: Fs<'_>, id: String, offset: usize, limit: Option<usize>) -> Result<Page, FsError> {
+pub async fn fs_list_page(
+    fs: Fs<'_>,
+    id: String,
+    offset: usize,
+    limit: Option<usize>,
+) -> Result<Page, FsError> {
     let fs = fs.inner().clone();
     run(move || fs.lists.page(&id, offset, limit.unwrap_or(200))).await
 }
@@ -474,7 +572,14 @@ pub enum CreateKind {
 }
 
 #[tauri::command]
-pub async fn fs_create(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, parent: Location, name: String, kind: CreateKind) -> Result<Location, FsError> {
+pub async fn fs_create(
+    fs: Fs<'_>,
+    cfg: Cfg<'_>,
+    distro: Option<String>,
+    parent: Location,
+    name: String,
+    kind: CreateKind,
+) -> Result<Location, FsError> {
     let fs = fs.inner().clone();
     let cfg = storage_of(&cfg)?;
     run(move || {
@@ -488,7 +593,13 @@ pub async fn fs_create(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, parent:
 }
 
 #[tauri::command]
-pub async fn fs_rename(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, location: Location, new_name: String) -> Result<Location, FsError> {
+pub async fn fs_rename(
+    fs: Fs<'_>,
+    cfg: Cfg<'_>,
+    distro: Option<String>,
+    location: Location,
+    new_name: String,
+) -> Result<Location, FsError> {
     let fs = fs.inner().clone();
     let cfg = storage_of(&cfg)?;
     run(move || {
@@ -501,16 +612,27 @@ pub async fn fs_rename(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, locatio
 /// Delete as a job. `confirmed` must be true: the UI shows a confirmation first, and the backend
 /// refuses without it. Links are removed, never followed.
 #[tauri::command]
-pub async fn fs_delete(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, targets: Vec<Location>, confirmed: bool) -> Result<JobStarted, FsError> {
+pub async fn fs_delete(
+    fs: Fs<'_>,
+    cfg: Cfg<'_>,
+    distro: Option<String>,
+    targets: Vec<Location>,
+    confirmed: bool,
+) -> Result<JobStarted, FsError> {
     let fs = fs.inner().clone();
     let cfg = storage_of(&cfg)?;
     run(move || {
         if !confirmed {
-            return Err(FsError::new(FsErrorKind::Refused, "Deleting needs your confirmation. Nothing was deleted."));
+            return Err(FsError::new(
+                FsErrorKind::Refused,
+                "Deleting needs your confirmation. Nothing was deleted.",
+            ));
         }
         let refs: Vec<&Location> = targets.iter().collect();
         let spaces = fs.spaces(distro.as_deref(), &cfg, &refs)?;
-        fs.start_job("delete", move |run| ops::delete(&spaces, &targets, true, run))
+        fs.start_job("delete", move |run| {
+            ops::delete(&spaces, &targets, true, run)
+        })
     })
     .await
 }
@@ -537,14 +659,19 @@ pub async fn fs_transfer(
             TransferMode::Copy => "copy",
             TransferMode::Move => "move",
         };
-        fs.start_job(kind, move |run| ops::transfer(&spaces, &sources, &dest, mode, conflict, run))
+        fs.start_job(kind, move |run| {
+            ops::transfer(&spaces, &sources, &dest, mode, conflict, run)
+        })
     })
     .await
 }
 
 #[tauri::command]
 pub async fn fs_job_cancel(fs: Fs<'_>, job_id: String) -> Result<bool, FsError> {
-    let g = fs.jobs.lock().map_err(|_| FsError::new(FsErrorKind::Io, "internal state error"))?;
+    let g = fs
+        .jobs
+        .lock()
+        .map_err(|_| FsError::new(FsErrorKind::Io, "internal state error"))?;
     match g.get(&job_id) {
         Some(c) => {
             c.cancel();
@@ -570,7 +697,10 @@ fn launch(path: &Path, select: bool) -> FsResult<()> {
     use std::os::windows::process::CommandExt;
     let text = path.display().to_string();
     if text.contains('"') {
-        return Err(FsError::new(FsErrorKind::InvalidPath, "That path contains characters that can't be passed to Windows safely."));
+        return Err(FsError::new(
+            FsErrorKind::InvalidPath,
+            "That path contains characters that can't be passed to Windows safely.",
+        ));
     }
     let mut cmd = std::process::Command::new(explorer());
     if select {
@@ -579,19 +709,31 @@ fn launch(path: &Path, select: bool) -> FsResult<()> {
         cmd.arg(path);
     }
     // explorer.exe reports failure through its exit code unreliably, so only launching is checked.
-    cmd.spawn().map(|_| ()).map_err(|e| FsError::new(FsErrorKind::Io, format!("Couldn't start Windows Explorer: {e}")))
+    cmd.spawn().map(|_| ()).map_err(|e| {
+        FsError::new(
+            FsErrorKind::Io,
+            format!("Couldn't start Windows Explorer: {e}"),
+        )
+    })
 }
 
 #[cfg(not(windows))]
 fn launch(_path: &Path, _select: bool) -> FsResult<()> {
     let _ = explorer();
-    Err(unavailable("Opening files in Windows is only available on Windows."))
+    Err(unavailable(
+        "Opening files in Windows is only available on Windows.",
+    ))
 }
 
 /// Open a file with its Windows default application. Programs and scripts are refused, folders
 /// open inside Files instead.
 #[tauri::command]
-pub async fn fs_open(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, location: Location) -> Result<(), FsError> {
+pub async fn fs_open(
+    fs: Fs<'_>,
+    cfg: Cfg<'_>,
+    distro: Option<String>,
+    location: Location,
+) -> Result<(), FsError> {
     let fs = fs.inner().clone();
     let cfg = storage_of(&cfg)?;
     run(move || {
@@ -601,12 +743,18 @@ pub async fn fs_open(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, location:
         if !policy.allowed {
             return Err(FsError::new(
                 FsErrorKind::Refused,
-                policy.reason.unwrap_or_else(|| "This type of file is not opened from VLINUX.".into()),
+                policy
+                    .reason
+                    .unwrap_or_else(|| "This type of file is not opened from VLINUX.".into()),
             ));
         }
-        let meta = std::fs::metadata(&entry.host).map_err(|e| FsError::from_io(&e, "open", &entry.name))?;
+        let meta = std::fs::metadata(&entry.host)
+            .map_err(|e| FsError::from_io(&e, "open", &entry.name))?;
         if meta.is_dir() {
-            return Err(FsError::new(FsErrorKind::IsADirectory, "Folders open inside Files."));
+            return Err(FsError::new(
+                FsErrorKind::IsADirectory,
+                "Folders open inside Files.",
+            ));
         }
         launch(&entry.host, false)
     })
@@ -615,14 +763,21 @@ pub async fn fs_open(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, location:
 
 /// Show an item (or a folder) in Windows Explorer.
 #[tauri::command]
-pub async fn fs_reveal(fs: Fs<'_>, cfg: Cfg<'_>, distro: Option<String>, location: Location) -> Result<(), FsError> {
+pub async fn fs_reveal(
+    fs: Fs<'_>,
+    cfg: Cfg<'_>,
+    distro: Option<String>,
+    location: Location,
+) -> Result<(), FsError> {
     let fs = fs.inner().clone();
     let cfg = storage_of(&cfg)?;
     run(move || {
         let spaces = fs.spaces(distro.as_deref(), &cfg, &[&location])?;
         match spaces.resolve_entry(&location) {
             Ok(entry) => {
-                let is_dir = std::fs::metadata(&entry.host).map(|m| m.is_dir()).unwrap_or(false);
+                let is_dir = std::fs::metadata(&entry.host)
+                    .map(|m| m.is_dir())
+                    .unwrap_or(false);
                 launch(&entry.host, !is_dir)
             }
             // A shared folder or the Linux root itself has no parent entry: open it as a folder.
@@ -658,14 +813,23 @@ pub struct MappingOutcome {
 }
 
 impl FilesState {
-    fn with_ctx<T>(&self, distro: &str, info: Option<&DistroInfo>, f: impl FnOnce(&Ctx<'_>) -> T) -> FsResult<T> {
+    fn with_ctx<T>(
+        &self,
+        distro: &str,
+        info: Option<&DistroInfo>,
+        f: impl FnOnce(&Ctx<'_>) -> T,
+    ) -> FsResult<T> {
         let ops = self.distro_ops(distro)?;
         let resolver = SystemKnownFolders;
         let drives = SystemDrives;
         let exists = |p: &str| Path::new(p).is_dir();
         let root = info.map(|i| i.root.clone()).unwrap_or_default();
         let (home, mount_root, automount) = match info {
-            Some(i) => (i.home.as_str(), i.conf.mount_root.as_str(), i.conf.automount_enabled),
+            Some(i) => (
+                i.home.as_str(),
+                i.conf.mount_root.as_str(),
+                i.conf.automount_enabled,
+            ),
             None => ("", "/mnt", true),
         };
         let ctx = Ctx {
@@ -684,16 +848,29 @@ impl FilesState {
     }
 
     fn report(&self, distro: &str, cfg: &StorageConfig, check: bool) -> FsResult<MappingReport> {
-        let info = if check { Some(self.info(distro, true)?) } else { self.cached_info(distro) };
+        let info = if check {
+            Some(self.info(distro, true)?)
+        } else {
+            self.cached_info(distro)
+        };
         let folders = self.with_ctx(distro, info.as_deref(), |ctx| {
-            KnownFolder::ALL.iter().map(|&f| engine::status(ctx, &self.store, f, cfg.folder(f), check)).collect::<Vec<_>>()
+            KnownFolder::ALL
+                .iter()
+                .map(|&f| engine::status(ctx, &self.store, f, cfg.folder(f), check))
+                .collect::<Vec<_>>()
         })?;
         Ok(MappingReport {
             distro: distro.to_string(),
             checked: check,
             home: info.as_ref().map(|i| i.home.clone()),
-            mount_root: info.as_ref().map(|i| i.conf.mount_root.clone()).unwrap_or_else(|| "/mnt".into()),
-            automount: info.as_ref().map(|i| i.conf.automount_enabled).unwrap_or(true),
+            mount_root: info
+                .as_ref()
+                .map(|i| i.conf.mount_root.clone())
+                .unwrap_or_else(|| "/mnt".into()),
+            automount: info
+                .as_ref()
+                .map(|i| i.conf.automount_enabled)
+                .unwrap_or(true),
             folders,
         })
     }
@@ -703,14 +880,22 @@ fn check_distro_name(distro: &str) -> FsResult<()> {
     if valid_distro_name(distro) {
         Ok(())
     } else {
-        Err(FsError::new(FsErrorKind::InvalidPath, format!("'{distro}' is not a valid distribution name.")))
+        Err(FsError::new(
+            FsErrorKind::InvalidPath,
+            format!("'{distro}' is not a valid distribution name."),
+        ))
     }
 }
 
 /// Where each folder stands. Without `check` no Linux process is started and nothing is claimed as
 /// connected; with `check` the distribution is inspected (and started if needed).
 #[tauri::command]
-pub async fn mapping_status(fs: Fs<'_>, cfg: Cfg<'_>, distro: String, check: Option<bool>) -> Result<MappingReport, FsError> {
+pub async fn mapping_status(
+    fs: Fs<'_>,
+    cfg: Cfg<'_>,
+    distro: String,
+    check: Option<bool>,
+) -> Result<MappingReport, FsError> {
     let fs = fs.inner().clone();
     let cfg = storage_of(&cfg)?;
     run(move || {
@@ -721,9 +906,16 @@ pub async fn mapping_status(fs: Fs<'_>, cfg: Cfg<'_>, distro: String, check: Opt
     .await
 }
 
-fn one_status(fs: &FilesState, distro: &str, cfg: &StorageConfig, folder: KnownFolder) -> FsResult<MappingStatus> {
+fn one_status(
+    fs: &FilesState,
+    distro: &str,
+    cfg: &StorageConfig,
+    folder: KnownFolder,
+) -> FsResult<MappingStatus> {
     let info = fs.info(distro, true)?;
-    fs.with_ctx(distro, Some(&*info), |ctx| engine::status(ctx, &fs.store, folder, cfg.folder(folder), true))
+    fs.with_ctx(distro, Some(&*info), |ctx| {
+        engine::status(ctx, &fs.store, folder, cfg.folder(folder), true)
+    })
 }
 
 /// Apply the saved preference of one folder. `resolution` is the user's explicit choice when the
@@ -742,7 +934,9 @@ pub async fn mapping_apply(
         check_distro_name(&distro)?;
         let _gate = fs.gate.lock().unwrap_or_else(|p| p.into_inner());
         let info = fs.info(&distro, true)?;
-        let result = fs.with_ctx(&distro, Some(&*info), |ctx| engine::apply(ctx, &fs.store, folder, cfg.folder(folder), resolution))?;
+        let result = fs.with_ctx(&distro, Some(&*info), |ctx| {
+            engine::apply(ctx, &fs.store, folder, cfg.folder(folder), resolution)
+        })?;
         fs.forget(&distro);
         let message = result.map_err(|m| FsError::new(FsErrorKind::Refused, m))?;
         let status = one_status(&fs, &distro, &cfg, folder)?;
@@ -753,14 +947,21 @@ pub async fn mapping_apply(
 
 /// Undo one folder's link and restore what was there before. Deletes nothing.
 #[tauri::command]
-pub async fn mapping_undo(fs: Fs<'_>, cfg: Cfg<'_>, distro: String, folder: KnownFolder) -> Result<MappingOutcome, FsError> {
+pub async fn mapping_undo(
+    fs: Fs<'_>,
+    cfg: Cfg<'_>,
+    distro: String,
+    folder: KnownFolder,
+) -> Result<MappingOutcome, FsError> {
     let fs = fs.inner().clone();
     let cfg = storage_of(&cfg)?;
     run(move || {
         check_distro_name(&distro)?;
         let _gate = fs.gate.lock().unwrap_or_else(|p| p.into_inner());
         let info = fs.info(&distro, true)?;
-        let result = fs.with_ctx(&distro, Some(&*info), |ctx| engine::undo(ctx, &fs.store, folder, cfg.folder(folder)))?;
+        let result = fs.with_ctx(&distro, Some(&*info), |ctx| {
+            engine::undo(ctx, &fs.store, folder, cfg.folder(folder))
+        })?;
         fs.forget(&distro);
         let message = result.map_err(|m| FsError::new(FsErrorKind::Refused, m))?;
         let status = one_status(&fs, &distro, &cfg, folder)?;

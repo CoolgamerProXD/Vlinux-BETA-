@@ -95,7 +95,13 @@ impl From<io::Error> for Stop {
 
 impl<'a> Runner<'a> {
     pub fn new(cancel: &'a CancelToken, on_progress: &'a mut dyn FnMut(&Progress)) -> Self {
-        Self { cancel, on_progress, progress: Progress::default(), report: OpReport::default(), counting: true }
+        Self {
+            cancel,
+            on_progress,
+            progress: Progress::default(),
+            report: OpReport::default(),
+            counting: true,
+        }
     }
 
     pub fn finish(mut self) -> OpReport {
@@ -141,14 +147,20 @@ impl<'a> Runner<'a> {
     }
 
     fn fail(&mut self, path: &Path, e: &io::Error, action: &str) {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
         self.fail_msg(&name, FsError::from_io(e, action, &name).message);
     }
 
     fn fail_msg(&mut self, name: &str, message: String) {
         self.progress.failed += 1;
         if self.report.failed.len() < 50 {
-            self.report.failed.push(ItemFailure { path: name.to_string(), message });
+            self.report.failed.push(ItemFailure {
+                path: name.to_string(),
+                message,
+            });
         }
         self.emit();
     }
@@ -162,13 +174,22 @@ fn exists_nofollow(p: &Path) -> bool {
 fn protect(spaces: &Spaces, e: &EntryRef) -> FsResult<()> {
     if let Location::Linux { path } = &e.location {
         if spaces.linux_home.as_deref() == Some(path.as_str()) {
-            return Err(FsError::new(FsErrorKind::Refused, "That is your Linux home folder; it cannot be removed, moved or renamed from here."));
+            return Err(FsError::new(
+                FsErrorKind::Refused,
+                "That is your Linux home folder; it cannot be removed, moved or renamed from here.",
+            ));
         }
         const SYSTEM: [&str; 18] = [
-            "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/mnt", "/opt", "/proc", "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var",
+            "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/mnt", "/opt", "/proc",
+            "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var",
         ];
         if SYSTEM.contains(&path.as_str()) {
-            return Err(FsError::new(FsErrorKind::Refused, format!("{path} is a system folder; it cannot be removed, moved or renamed from here.")));
+            return Err(FsError::new(
+                FsErrorKind::Refused,
+                format!(
+                    "{path} is a system folder; it cannot be removed, moved or renamed from here."
+                ),
+            ));
         }
     }
     Ok(())
@@ -207,11 +228,17 @@ pub fn rename(spaces: &Spaces, loc: &Location, new_name: &str) -> FsResult<Locat
     }
     let new = spaces.entry_in(old.parent.clone(), new_name.to_string())?;
     if !exists_nofollow(&old.host) {
-        return Err(FsError::new(FsErrorKind::NotFound, format!("\"{}\" no longer exists. Refresh the folder.", old.name)));
+        return Err(FsError::new(
+            FsErrorKind::NotFound,
+            format!("\"{}\" no longer exists. Refresh the folder.", old.name),
+        ));
     }
     let case_only = old.name.eq_ignore_ascii_case(new_name);
     if exists_nofollow(&new.host) && !(case_only && cfg!(windows)) {
-        return Err(FsError::new(FsErrorKind::AlreadyExists, format!("\"{new_name}\" already exists in this folder.")));
+        return Err(FsError::new(
+            FsErrorKind::AlreadyExists,
+            format!("\"{new_name}\" already exists in this folder."),
+        ));
     }
     fs::rename(&old.host, &new.host).map_err(|e| FsError::from_io(&e, "rename", &old.name))?;
     Ok(new.location)
@@ -268,12 +295,23 @@ fn remove_any(path: &Path, run: &mut Runner<'_>, depth: u32) -> Result<(), Stop>
 
 /// Delete `targets` (permanently). `confirmed` must be true: the UI sets it only after the user
 /// confirmed in a dialog that named what is about to be removed.
-pub fn delete(spaces: &Spaces, targets: &[Location], confirmed: bool, run: &mut Runner<'_>) -> FsResult<()> {
+pub fn delete(
+    spaces: &Spaces,
+    targets: &[Location],
+    confirmed: bool,
+    run: &mut Runner<'_>,
+) -> FsResult<()> {
     if !confirmed {
-        return Err(FsError::new(FsErrorKind::Refused, "Deleting needs confirmation. Nothing was deleted."));
+        return Err(FsError::new(
+            FsErrorKind::Refused,
+            "Deleting needs confirmation. Nothing was deleted.",
+        ));
     }
     if targets.is_empty() {
-        return Err(FsError::new(FsErrorKind::InvalidPath, "Nothing was selected."));
+        return Err(FsError::new(
+            FsErrorKind::InvalidPath,
+            "Nothing was selected.",
+        ));
     }
     // Validate everything first so a bad item cannot leave a half-done batch.
     let mut entries = Vec::new();
@@ -308,7 +346,10 @@ pub fn delete(spaces: &Spaces, targets: &[Location], confirmed: bool, run: &mut 
 fn copy_file(src: &Path, dst: &Path, run: &mut Runner<'_>) -> Result<(), Stop> {
     let mut input = fs::File::open(src)?;
     // `create_new`: an existing file is never overwritten, even if it appeared a moment ago.
-    let mut output = fs::OpenOptions::new().write(true).create_new(true).open(dst)?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dst)?;
     let mut buf = vec![0u8; CHUNK];
     let result: Result<(), Stop> = loop {
         if run.cancelled() {
@@ -348,7 +389,10 @@ fn copy_tree(src: &Path, dst: &Path, run: &mut Runner<'_>, depth: u32) -> Result
     }
     let m = fs::symlink_metadata(src)?;
     let ft = m.file_type();
-    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     if ft.is_symlink() {
         run.skip(&name, "a link (links are not copied)");
         return Err(Stop::Partial);
@@ -401,7 +445,16 @@ fn move_one(src: &Path, dst: &Path, run: &mut Runner<'_>) -> Result<(), Stop> {
             run.file_done();
             Ok(())
         }
-        Err(e) if matches!(e.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound | io::ErrorKind::AlreadyExists) => Err(e.into()),
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::PermissionDenied
+                    | io::ErrorKind::NotFound
+                    | io::ErrorKind::AlreadyExists
+            ) =>
+        {
+            Err(e.into())
+        }
         // Typically "different file system" (Linux <-> Windows, or across mounts).
         Err(_) => match move_by_copy(src, dst, run) {
             Err(Stop::Partial) => {
@@ -421,7 +474,11 @@ fn move_one(src: &Path, dst: &Path, run: &mut Runner<'_>) -> Result<(), Stop> {
 fn unique_name(dir: &Path, name: &str, is_dir: bool) -> Option<String> {
     let (stem, ext) = if is_dir { (name, "") } else { split_ext(name) };
     for n in 1..10_000u32 {
-        let candidate = if n == 1 { format!("{stem} (copy){ext}") } else { format!("{stem} (copy {n}){ext}") };
+        let candidate = if n == 1 {
+            format!("{stem} (copy){ext}")
+        } else {
+            format!("{stem} (copy {n}){ext}")
+        };
         if !exists_nofollow(&dir.join(&candidate)) {
             return Some(candidate);
         }
@@ -438,12 +495,19 @@ pub fn transfer(
     run: &mut Runner<'_>,
 ) -> FsResult<()> {
     if sources.is_empty() {
-        return Err(FsError::new(FsErrorKind::InvalidPath, "Nothing was selected."));
+        return Err(FsError::new(
+            FsErrorKind::InvalidPath,
+            "Nothing was selected.",
+        ));
     }
     let (dest_loc, dest_host) = spaces.resolve_dir(dest)?;
-    let dest_meta = fs::metadata(&dest_host).map_err(|e| FsError::from_io(&e, "open the destination folder", "destination"))?;
+    let dest_meta = fs::metadata(&dest_host)
+        .map_err(|e| FsError::from_io(&e, "open the destination folder", "destination"))?;
     if !dest_meta.is_dir() {
-        return Err(FsError::new(FsErrorKind::NotADirectory, "The destination is not a folder."));
+        return Err(FsError::new(
+            FsErrorKind::NotADirectory,
+            "The destination is not a folder.",
+        ));
     }
     let mut jobs: Vec<(EntryRef, fs::Metadata)> = Vec::new();
     for s in sources {
@@ -451,9 +515,16 @@ pub fn transfer(
         if mode == TransferMode::Move {
             protect(spaces, &e)?;
         }
-        let meta = fs::symlink_metadata(&e.host).map_err(|err| FsError::from_io(&err, "find", &e.name))?;
-        if meta.is_dir() && !meta.file_type().is_symlink() && (dest_host == e.host || dest_host.starts_with(&e.host)) {
-            return Err(FsError::new(FsErrorKind::InvalidPath, format!("\"{}\" cannot be placed inside itself.", e.name)));
+        let meta =
+            fs::symlink_metadata(&e.host).map_err(|err| FsError::from_io(&err, "find", &e.name))?;
+        if meta.is_dir()
+            && !meta.file_type().is_symlink()
+            && (dest_host == e.host || dest_host.starts_with(&e.host))
+        {
+            return Err(FsError::new(
+                FsErrorKind::InvalidPath,
+                format!("\"{}\" cannot be placed inside itself.", e.name),
+            ));
         }
         jobs.push((e, meta));
     }
@@ -484,7 +555,10 @@ pub fn transfer(
                     continue;
                 }
                 Conflict::Fail => {
-                    run.fail_msg(&e.name, format!("\"{}\" already exists in the destination.", e.name));
+                    run.fail_msg(
+                        &e.name,
+                        format!("\"{}\" already exists in the destination.", e.name),
+                    );
                     continue;
                 }
             }
@@ -507,7 +581,15 @@ pub fn transfer(
                 break;
             }
             Err(Stop::Partial) => {}
-            Err(Stop::Io(err)) => run.fail(&e.host, &err, if mode == TransferMode::Copy { "copy" } else { "move" }),
+            Err(Stop::Io(err)) => run.fail(
+                &e.host,
+                &err,
+                if mode == TransferMode::Copy {
+                    "copy"
+                } else {
+                    "move"
+                },
+            ),
         }
     }
     Ok(())
@@ -524,7 +606,12 @@ mod tests {
             linux_root: Some(linux.path().to_path_buf()),
             linux_home: Some("/home/me".into()),
             mount_root: "/mnt".into(),
-            windows: vec![WindowsRoot { id: "documents".into(), label: "Documents".into(), dir: win.path().to_path_buf(), linux_mount: None }],
+            windows: vec![WindowsRoot {
+                id: "documents".into(),
+                label: "Documents".into(),
+                dir: win.path().to_path_buf(),
+                linux_mount: None,
+            }],
             mapped_links: vec![],
         }
     }
@@ -564,12 +651,25 @@ mod tests {
         l.file("home/me/exists.txt", "keep me");
         let s = spaces(&l, &w);
         for bad in ["", "a/b", "..", "x:y", "nul"] {
-            assert_eq!(create_file(&s, &lin("/home/me"), bad).unwrap_err().kind, FsErrorKind::InvalidName, "{bad}");
+            assert_eq!(
+                create_file(&s, &lin("/home/me"), bad).unwrap_err().kind,
+                FsErrorKind::InvalidName,
+                "{bad}"
+            );
         }
         let e = create_file(&s, &lin("/home/me"), "exists.txt").unwrap_err();
         assert_eq!(e.kind, FsErrorKind::AlreadyExists);
-        assert_eq!(fs::read_to_string(l.join("home/me/exists.txt")).unwrap(), "keep me", "an existing file is never truncated");
-        assert_eq!(create_dir(&s, &lin("/home/me"), "exists.txt").unwrap_err().kind, FsErrorKind::AlreadyExists);
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/exists.txt")).unwrap(),
+            "keep me",
+            "an existing file is never truncated"
+        );
+        assert_eq!(
+            create_dir(&s, &lin("/home/me"), "exists.txt")
+                .unwrap_err()
+                .kind,
+            FsErrorKind::AlreadyExists
+        );
     }
 
     #[test]
@@ -577,7 +677,10 @@ mod tests {
         let l = TempDir::new("l");
         let w = TempDir::new("w");
         let s = spaces(&l, &w);
-        assert_eq!(create_dir(&s, &lin("/nope/deeper"), "x").unwrap_err().kind, FsErrorKind::NotFound);
+        assert_eq!(
+            create_dir(&s, &lin("/nope/deeper"), "x").unwrap_err().kind,
+            FsErrorKind::NotFound
+        );
     }
 
     #[test]
@@ -588,18 +691,45 @@ mod tests {
         l.file("home/me/b.txt", "B");
         l.dir("home/me/dir");
         let s = spaces(&l, &w);
-        assert_eq!(rename(&s, &lin("/home/me/a.txt"), "c.txt").unwrap(), lin("/home/me/c.txt"));
+        assert_eq!(
+            rename(&s, &lin("/home/me/a.txt"), "c.txt").unwrap(),
+            lin("/home/me/c.txt")
+        );
         assert!(!l.join("home/me/a.txt").exists() && l.join("home/me/c.txt").exists());
-        assert_eq!(rename(&s, &lin("/home/me/dir"), "folder").unwrap(), lin("/home/me/folder"));
+        assert_eq!(
+            rename(&s, &lin("/home/me/dir"), "folder").unwrap(),
+            lin("/home/me/folder")
+        );
         // Never over an existing name.
-        assert_eq!(rename(&s, &lin("/home/me/c.txt"), "b.txt").unwrap_err().kind, FsErrorKind::AlreadyExists);
+        assert_eq!(
+            rename(&s, &lin("/home/me/c.txt"), "b.txt")
+                .unwrap_err()
+                .kind,
+            FsErrorKind::AlreadyExists
+        );
         assert_eq!(fs::read_to_string(l.join("home/me/b.txt")).unwrap(), "B");
         // Same name is a no-op; bad names and the root are refused.
-        assert_eq!(rename(&s, &lin("/home/me/b.txt"), "b.txt").unwrap(), lin("/home/me/b.txt"));
-        assert_eq!(rename(&s, &lin("/home/me/b.txt"), "a/b").unwrap_err().kind, FsErrorKind::InvalidName);
-        assert_eq!(rename(&s, &lin("/"), "x").unwrap_err().kind, FsErrorKind::Refused);
-        assert_eq!(rename(&s, &lin("/home/me/missing"), "x").unwrap_err().kind, FsErrorKind::NotFound);
-        assert_eq!(rename(&s, &lin("/home/me"), "renamed").unwrap_err().kind, FsErrorKind::Refused, "the home folder is protected");
+        assert_eq!(
+            rename(&s, &lin("/home/me/b.txt"), "b.txt").unwrap(),
+            lin("/home/me/b.txt")
+        );
+        assert_eq!(
+            rename(&s, &lin("/home/me/b.txt"), "a/b").unwrap_err().kind,
+            FsErrorKind::InvalidName
+        );
+        assert_eq!(
+            rename(&s, &lin("/"), "x").unwrap_err().kind,
+            FsErrorKind::Refused
+        );
+        assert_eq!(
+            rename(&s, &lin("/home/me/missing"), "x").unwrap_err().kind,
+            FsErrorKind::NotFound
+        );
+        assert_eq!(
+            rename(&s, &lin("/home/me"), "renamed").unwrap_err().kind,
+            FsErrorKind::Refused,
+            "the home folder is protected"
+        );
     }
 
     #[test]
@@ -611,7 +741,12 @@ mod tests {
         let r = rename(&s, &Location::windows("documents", &["old.txt"]), "new.txt").unwrap();
         assert_eq!(r, Location::windows("documents", &["new.txt"]));
         assert!(w.join("new.txt").exists() && !w.join("old.txt").exists());
-        assert_eq!(rename(&s, &Location::windows("documents", &[]), "x").unwrap_err().kind, FsErrorKind::Refused);
+        assert_eq!(
+            rename(&s, &Location::windows("documents", &[]), "x")
+                .unwrap_err()
+                .kind,
+            FsErrorKind::Refused
+        );
     }
 
     #[test]
@@ -634,7 +769,14 @@ mod tests {
         l.file("home/me/proj/sub/b.txt", "22");
         l.file("home/me/single.txt", "x");
         let s = spaces(&l, &w);
-        let (r, rep, events) = run_with(|run| delete(&s, &[lin("/home/me/proj"), lin("/home/me/single.txt")], true, run));
+        let (r, rep, events) = run_with(|run| {
+            delete(
+                &s,
+                &[lin("/home/me/proj"), lin("/home/me/single.txt")],
+                true,
+                run,
+            )
+        });
         r.unwrap();
         assert!(!l.join("home/me/proj").exists() && !l.join("home/me/single.txt").exists());
         assert_eq!(rep.items_done, 2);
@@ -649,7 +791,14 @@ mod tests {
         let w = TempDir::new("w");
         let f = l.file("home/me/ok.txt", "x");
         let s = spaces(&l, &w);
-        let (r, _, _) = run_with(|run| delete(&s, &[lin("/home/me/ok.txt"), lin("/home/me/../etc")], true, run));
+        let (r, _, _) = run_with(|run| {
+            delete(
+                &s,
+                &[lin("/home/me/ok.txt"), lin("/home/me/../etc")],
+                true,
+                run,
+            )
+        });
         assert_eq!(r.unwrap_err().kind, FsErrorKind::InvalidPath);
         assert!(f.exists());
     }
@@ -667,8 +816,13 @@ mod tests {
             assert_eq!(r.unwrap_err().kind, FsErrorKind::Refused, "{p}");
         }
         assert!(l.join("home/me").exists() && l.join("etc").exists());
-        let (r, _, _) = run_with(|run| delete(&s, &[Location::windows("documents", &[])], true, run));
-        assert_eq!(r.unwrap_err().kind, FsErrorKind::Refused, "a shared folder root cannot be deleted");
+        let (r, _, _) =
+            run_with(|run| delete(&s, &[Location::windows("documents", &[])], true, run));
+        assert_eq!(
+            r.unwrap_err().kind,
+            FsErrorKind::Refused,
+            "a shared folder root cannot be deleted"
+        );
     }
 
     #[test]
@@ -696,10 +850,23 @@ mod tests {
         symlink(outside.path(), l.join("home/me/folder/link")).unwrap();
         symlink(outside.path(), l.join("home/me/toplink")).unwrap();
         let s = spaces(&l, &w);
-        let (r, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/folder"), lin("/home/me/toplink")], true, run));
+        let (r, rep, _) = run_with(|run| {
+            delete(
+                &s,
+                &[lin("/home/me/folder"), lin("/home/me/toplink")],
+                true,
+                run,
+            )
+        });
         r.unwrap();
-        assert!(!l.join("home/me/folder").exists() && fs::symlink_metadata(l.join("home/me/toplink")).is_err());
-        assert_eq!(fs::read_to_string(outside.join("precious.txt")).unwrap(), "do not delete");
+        assert!(
+            !l.join("home/me/folder").exists()
+                && fs::symlink_metadata(l.join("home/me/toplink")).is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(outside.join("precious.txt")).unwrap(),
+            "do not delete"
+        );
         assert!(rep.failed.is_empty());
     }
 
@@ -714,14 +881,33 @@ mod tests {
         l.file("home/me/free.txt", "x");
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
         let s = spaces(&l, &w);
-        let (r, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/locked"), lin("/home/me/free.txt")], true, run));
+        let (r, rep, _) = run_with(|run| {
+            delete(
+                &s,
+                &[lin("/home/me/locked"), lin("/home/me/free.txt")],
+                true,
+                run,
+            )
+        });
         let _ = fs::set_permissions(&locked, fs::Permissions::from_mode(0o755));
         r.unwrap();
-        assert!(!l.join("home/me/free.txt").exists(), "the other item was still deleted");
+        assert!(
+            !l.join("home/me/free.txt").exists(),
+            "the other item was still deleted"
+        );
         let root_user = !l.join("home/me/locked").exists();
         if !root_user {
-            assert!(l.join("home/me/locked/inner.txt").exists(), "nothing in the protected folder was removed");
-            assert!(rep.failed.iter().any(|f| f.message.contains("permission denied")), "{:?}", rep.failed);
+            assert!(
+                l.join("home/me/locked/inner.txt").exists(),
+                "nothing in the protected folder was removed"
+            );
+            assert!(
+                rep.failed
+                    .iter()
+                    .any(|f| f.message.contains("permission denied")),
+                "{:?}",
+                rep.failed
+            );
         }
     }
 
@@ -752,12 +938,28 @@ mod tests {
         l.dir("home/me/dest");
         let s = spaces(&l, &w);
         let (r, rep, _) = run_with(|run| {
-            transfer(&s, &[lin("/home/me/doc.txt"), lin("/home/me/tree")], &lin("/home/me/dest"), TransferMode::Copy, Conflict::KeepBoth, run)
+            transfer(
+                &s,
+                &[lin("/home/me/doc.txt"), lin("/home/me/tree")],
+                &lin("/home/me/dest"),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
         });
         r.unwrap();
-        assert_eq!(fs::read_to_string(l.join("home/me/dest/doc.txt")).unwrap(), "hello");
-        assert_eq!(fs::read_to_string(l.join("home/me/dest/tree/deep/b.txt")).unwrap(), "BB");
-        assert!(l.join("home/me/doc.txt").exists() && l.join("home/me/tree/a.txt").exists(), "copy leaves the originals");
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/dest/doc.txt")).unwrap(),
+            "hello"
+        );
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/dest/tree/deep/b.txt")).unwrap(),
+            "BB"
+        );
+        assert!(
+            l.join("home/me/doc.txt").exists() && l.join("home/me/tree/a.txt").exists(),
+            "copy leaves the originals"
+        );
         assert_eq!(rep.items_done, 2);
         assert_eq!(rep.bytes, 8);
         assert_eq!(rep.results.len(), 2);
@@ -770,12 +972,37 @@ mod tests {
         l.file("home/me/report.txt", "R");
         w.file("from-windows.txt", "W");
         let s = spaces(&l, &w);
-        let (r, _, _) = run_with(|run| transfer(&s, &[lin("/home/me/report.txt")], &Location::windows("documents", &[]), TransferMode::Copy, Conflict::KeepBoth, run));
+        let (r, _, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/home/me/report.txt")],
+                &Location::windows("documents", &[]),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         r.unwrap();
-        assert_eq!(fs::read_to_string(w.join("report.txt")).unwrap(), "R", "visible on the Windows side at once");
-        let (r, _, _) = run_with(|run| transfer(&s, &[Location::windows("documents", &["from-windows.txt"])], &lin("/home/me"), TransferMode::Copy, Conflict::KeepBoth, run));
+        assert_eq!(
+            fs::read_to_string(w.join("report.txt")).unwrap(),
+            "R",
+            "visible on the Windows side at once"
+        );
+        let (r, _, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[Location::windows("documents", &["from-windows.txt"])],
+                &lin("/home/me"),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         r.unwrap();
-        assert_eq!(fs::read_to_string(l.join("home/me/from-windows.txt")).unwrap(), "W");
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/from-windows.txt")).unwrap(),
+            "W"
+        );
     }
 
     #[test]
@@ -786,12 +1013,30 @@ mod tests {
         l.file("home/me/dest/a.txt", "precious");
         let s = spaces(&l, &w);
         for _ in 0..2 {
-            let (r, _, _) = run_with(|run| transfer(&s, &[lin("/home/me/a.txt")], &lin("/home/me/dest"), TransferMode::Copy, Conflict::KeepBoth, run));
+            let (r, _, _) = run_with(|run| {
+                transfer(
+                    &s,
+                    &[lin("/home/me/a.txt")],
+                    &lin("/home/me/dest"),
+                    TransferMode::Copy,
+                    Conflict::KeepBoth,
+                    run,
+                )
+            });
             r.unwrap();
         }
-        assert_eq!(fs::read_to_string(l.join("home/me/dest/a.txt")).unwrap(), "precious");
-        assert_eq!(fs::read_to_string(l.join("home/me/dest/a (copy).txt")).unwrap(), "source");
-        assert_eq!(fs::read_to_string(l.join("home/me/dest/a (copy 2).txt")).unwrap(), "source");
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/dest/a.txt")).unwrap(),
+            "precious"
+        );
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/dest/a (copy).txt")).unwrap(),
+            "source"
+        );
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/dest/a (copy 2).txt")).unwrap(),
+            "source"
+        );
     }
 
     #[test]
@@ -801,15 +1046,39 @@ mod tests {
         l.file("home/me/a.txt", "source");
         l.file("home/me/dest/a.txt", "precious");
         let s = spaces(&l, &w);
-        let (r, rep, _) = run_with(|run| transfer(&s, &[lin("/home/me/a.txt")], &lin("/home/me/dest"), TransferMode::Copy, Conflict::Skip, run));
+        let (r, rep, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/home/me/a.txt")],
+                &lin("/home/me/dest"),
+                TransferMode::Copy,
+                Conflict::Skip,
+                run,
+            )
+        });
         r.unwrap();
         assert_eq!(rep.skipped.len(), 1);
         assert_eq!(rep.items_done, 0);
-        let (r, rep, _) = run_with(|run| transfer(&s, &[lin("/home/me/a.txt")], &lin("/home/me/dest"), TransferMode::Move, Conflict::Fail, run));
+        let (r, rep, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/home/me/a.txt")],
+                &lin("/home/me/dest"),
+                TransferMode::Move,
+                Conflict::Fail,
+                run,
+            )
+        });
         r.unwrap();
         assert_eq!(rep.failed.len(), 1);
-        assert_eq!(fs::read_to_string(l.join("home/me/dest/a.txt")).unwrap(), "precious");
-        assert!(l.join("home/me/a.txt").exists(), "a failed move keeps the original");
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/dest/a.txt")).unwrap(),
+            "precious"
+        );
+        assert!(
+            l.join("home/me/a.txt").exists(),
+            "a failed move keeps the original"
+        );
     }
 
     #[test]
@@ -819,7 +1088,16 @@ mod tests {
         l.dir("home/me/tree/inner");
         let s = spaces(&l, &w);
         for dest in ["/home/me/tree", "/home/me/tree/inner"] {
-            let (r, _, _) = run_with(|run| transfer(&s, &[lin("/home/me/tree")], &lin(dest), TransferMode::Copy, Conflict::KeepBoth, run));
+            let (r, _, _) = run_with(|run| {
+                transfer(
+                    &s,
+                    &[lin("/home/me/tree")],
+                    &lin(dest),
+                    TransferMode::Copy,
+                    Conflict::KeepBoth,
+                    run,
+                )
+            });
             assert_eq!(r.unwrap_err().kind, FsErrorKind::InvalidPath, "{dest}");
         }
         assert!(!l.join("home/me/tree/tree").exists());
@@ -832,13 +1110,34 @@ mod tests {
         l.file("home/me/a.txt", "A");
         l.dir("home/me/dest");
         let s = spaces(&l, &w);
-        let (r, rep, _) = run_with(|run| transfer(&s, &[lin("/home/me/a.txt")], &lin("/home/me/dest"), TransferMode::Move, Conflict::KeepBoth, run));
+        let (r, rep, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/home/me/a.txt")],
+                &lin("/home/me/dest"),
+                TransferMode::Move,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         r.unwrap();
         assert!(!l.join("home/me/a.txt").exists());
-        assert_eq!(fs::read_to_string(l.join("home/me/dest/a.txt")).unwrap(), "A");
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/dest/a.txt")).unwrap(),
+            "A"
+        );
         assert_eq!(rep.results, vec![lin("/home/me/dest/a.txt")]);
         // Moving to where it already is does nothing.
-        let (r, rep, _) = run_with(|run| transfer(&s, &[lin("/home/me/dest/a.txt")], &lin("/home/me/dest"), TransferMode::Move, Conflict::KeepBoth, run));
+        let (r, rep, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/home/me/dest/a.txt")],
+                &lin("/home/me/dest"),
+                TransferMode::Move,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         r.unwrap();
         assert_eq!(rep.skipped.len(), 1);
         assert!(l.join("home/me/dest/a.txt").exists());
@@ -850,7 +1149,16 @@ mod tests {
         let w = TempDir::new("w");
         l.file("home/me/tree/x.txt", "X");
         let s = spaces(&l, &w);
-        let (r, _, _) = run_with(|run| transfer(&s, &[lin("/home/me/tree")], &Location::windows("documents", &[]), TransferMode::Move, Conflict::KeepBoth, run));
+        let (r, _, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/home/me/tree")],
+                &Location::windows("documents", &[]),
+                TransferMode::Move,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         r.unwrap();
         assert_eq!(fs::read_to_string(w.join("tree/x.txt")).unwrap(), "X");
         assert!(!l.join("home/me/tree").exists());
@@ -884,10 +1192,22 @@ mod tests {
         l.file("src/a.txt", "A");
         symlink(outside.path(), l.join("src/link")).unwrap();
         let s = spaces(&l, &w);
-        let (r, rep, _) = run_with(|run| transfer(&s, &[lin("/src")], &Location::windows("documents", &[]), TransferMode::Copy, Conflict::KeepBoth, run));
+        let (r, rep, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/src")],
+                &Location::windows("documents", &[]),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         r.unwrap();
         assert!(w.join("src/a.txt").exists());
-        assert!(!w.join("src/link").exists() && !w.join("src/link/secret.txt").exists(), "links are never followed");
+        assert!(
+            !w.join("src/link").exists() && !w.join("src/link/secret.txt").exists(),
+            "links are never followed"
+        );
         assert_eq!(rep.skipped.len(), 1);
         // moving by copy with a skipped item must keep the original
         let cancel = CancelToken::new();
@@ -907,7 +1227,16 @@ mod tests {
         fs::create_dir_all(l.join("d")).unwrap();
         fs::write(l.join("d/big.bin"), &data).unwrap();
         let s = spaces(&l, &w);
-        let (r, rep, events) = run_with(|run| transfer(&s, &[lin("/d/big.bin")], &Location::windows("documents", &[]), TransferMode::Copy, Conflict::KeepBoth, run));
+        let (r, rep, events) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/d/big.bin")],
+                &Location::windows("documents", &[]),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         r.unwrap();
         assert_eq!(fs::read(w.join("big.bin")).unwrap(), data);
         assert_eq!(rep.bytes, data.len() as u64);
@@ -930,7 +1259,15 @@ mod tests {
             }
         };
         let mut run = Runner::new(&cancel, &mut sink);
-        transfer(&s, &[lin("/d/big.bin")], &Location::windows("documents", &[]), TransferMode::Copy, Conflict::KeepBoth, &mut run).unwrap();
+        transfer(
+            &s,
+            &[lin("/d/big.bin")],
+            &Location::windows("documents", &[]),
+            TransferMode::Copy,
+            Conflict::KeepBoth,
+            &mut run,
+        )
+        .unwrap();
         let rep = run.finish();
         assert!(rep.cancelled);
         assert!(!w.join("big.bin").exists(), "the partial copy is removed");
@@ -944,11 +1281,38 @@ mod tests {
         l.file("a.txt", "a");
         l.file("file", "f");
         let s = spaces(&l, &w);
-        let (r, _, _) = run_with(|run| transfer(&s, &[], &lin("/"), TransferMode::Copy, Conflict::KeepBoth, run));
+        let (r, _, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[],
+                &lin("/"),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         assert_eq!(r.unwrap_err().kind, FsErrorKind::InvalidPath);
-        let (r, _, _) = run_with(|run| transfer(&s, &[lin("/a.txt")], &lin("/file"), TransferMode::Copy, Conflict::KeepBoth, run));
+        let (r, _, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/a.txt")],
+                &lin("/file"),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         assert!(r.is_err());
-        let (r, _, _) = run_with(|run| transfer(&s, &[lin("/a.txt")], &lin("/missing"), TransferMode::Copy, Conflict::KeepBoth, run));
+        let (r, _, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/a.txt")],
+                &lin("/missing"),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         assert_eq!(r.unwrap_err().kind, FsErrorKind::NotFound);
     }
 
@@ -961,10 +1325,22 @@ mod tests {
             fs::write(dir.join(format!("f{i}.txt")), i.to_string()).unwrap();
         }
         let s = spaces(&l, &w);
-        let (r, rep, _) = run_with(|run| transfer(&s, &[lin("/many")], &Location::windows("documents", &[]), TransferMode::Copy, Conflict::KeepBoth, run));
+        let (r, rep, _) = run_with(|run| {
+            transfer(
+                &s,
+                &[lin("/many")],
+                &Location::windows("documents", &[]),
+                TransferMode::Copy,
+                Conflict::KeepBoth,
+                run,
+            )
+        });
         r.unwrap();
         assert_eq!(rep.files, 1500);
         assert_eq!(fs::read_dir(w.join("many")).unwrap().count(), 1500);
-        assert_eq!(fs::read_to_string(w.join("many/f1234.txt")).unwrap(), "1234");
+        assert_eq!(
+            fs::read_to_string(w.join("many/f1234.txt")).unwrap(),
+            "1234"
+        );
     }
 }

@@ -36,7 +36,10 @@ pub struct Capability {
 
 impl Capability {
     fn new(support: Support, note: impl Into<String>) -> Self {
-        Self { support, note: note.into() }
+        Self {
+            support,
+            note: note.into(),
+        }
     }
 }
 
@@ -46,7 +49,9 @@ impl Capability {
 pub enum Availability {
     /// Not looked at yet (the distribution was not inspected).
     NotChecked,
-    Present { version: Option<String> },
+    Present {
+        version: Option<String>,
+    },
     Absent,
 }
 
@@ -107,14 +112,30 @@ pub const MAX_QUERY: usize = 64;
 
 impl PackageSupport {
     pub const fn none() -> Self {
-        Self { manager: PackageManager::Unknown, binary: "", search: None }
+        Self {
+            manager: PackageManager::Unknown,
+            binary: "",
+            search: None,
+        }
     }
 
     pub fn for_manager(pm: PackageManager) -> Self {
         match pm {
-            PackageManager::Apt => Self { manager: pm, binary: "apt-get", search: Some(SearchStyle::AptCache) },
-            PackageManager::Pacman => Self { manager: pm, binary: "pacman", search: Some(SearchStyle::PacmanSs) },
-            PackageManager::Dnf => Self { manager: pm, binary: "dnf", search: Some(SearchStyle::DnfSearch) },
+            PackageManager::Apt => Self {
+                manager: pm,
+                binary: "apt-get",
+                search: Some(SearchStyle::AptCache),
+            },
+            PackageManager::Pacman => Self {
+                manager: pm,
+                binary: "pacman",
+                search: Some(SearchStyle::PacmanSs),
+            },
+            PackageManager::Dnf => Self {
+                manager: pm,
+                binary: "dnf",
+                search: Some(SearchStyle::DnfSearch),
+            },
             PackageManager::Unknown => Self::none(),
         }
     }
@@ -133,7 +154,13 @@ impl PackageSupport {
         if !valid_search_query(query) {
             return None;
         }
-        let v = |parts: &[&str]| -> Vec<String> { parts.iter().map(|s| s.to_string()).chain(std::iter::once(query.to_string())).collect() };
+        let v = |parts: &[&str]| -> Vec<String> {
+            parts
+                .iter()
+                .map(|s| s.to_string())
+                .chain(std::iter::once(query.to_string()))
+                .collect()
+        };
         match self.search? {
             SearchStyle::AptCache => Some(v(&["apt-cache", "search", "--names-only"])),
             SearchStyle::PacmanSs => Some(v(&["pacman", "-Ss"])),
@@ -179,22 +206,45 @@ impl PackageSupport {
         let detect = if supported_manager {
             Capability::new(Support::Available, "VLINUX looks for the package manager inside the distribution; it is never assumed from the distribution's name.")
         } else {
-            Capability::new(Support::Unsupported, "VLINUX has no package-manager adapter for this distribution.")
+            Capability::new(
+                Support::Unsupported,
+                "VLINUX has no package-manager adapter for this distribution.",
+            )
         };
         let version = match (&availability, supported_manager) {
             (_, false) => Capability::new(Support::Unsupported, "No adapter."),
-            (Availability::Present { version: Some(_) }, _) => Capability::new(Support::Available, "Read from the package manager."),
-            (Availability::Present { version: None }, _) => Capability::new(Support::Unsupported, "The package manager did not report a version."),
-            (Availability::Absent, _) => Capability::new(Support::Unsupported, format!("{name} was not found in this distribution.")),
-            (Availability::NotChecked, _) => Capability::new(Support::Unsupported, "Inspect the distribution to find out."),
+            (Availability::Present { version: Some(_) }, _) => {
+                Capability::new(Support::Available, "Read from the package manager.")
+            }
+            (Availability::Present { version: None }, _) => Capability::new(
+                Support::Unsupported,
+                "The package manager did not report a version.",
+            ),
+            (Availability::Absent, _) => Capability::new(
+                Support::Unsupported,
+                format!("{name} was not found in this distribution."),
+            ),
+            (Availability::NotChecked, _) => Capability::new(
+                Support::Unsupported,
+                "Inspect the distribution to find out.",
+            ),
         };
         let gate = |ok_note: &str, plan: bool| -> Capability {
             if !supported_manager {
-                Capability::new(Support::Unsupported, "VLINUX has no adapter for this distribution's package manager.")
+                Capability::new(
+                    Support::Unsupported,
+                    "VLINUX has no adapter for this distribution's package manager.",
+                )
             } else if !checked {
-                Capability::new(Support::Unsupported, "Inspect the distribution first: availability is checked, not assumed.")
+                Capability::new(
+                    Support::Unsupported,
+                    "Inspect the distribution first: availability is checked, not assumed.",
+                )
             } else if !present {
-                Capability::new(Support::Unsupported, format!("{name} was not found in this distribution."))
+                Capability::new(
+                    Support::Unsupported,
+                    format!("{name} was not found in this distribution."),
+                )
             } else if plan {
                 Capability::new(Support::PlanOnly, ok_note)
             } else {
@@ -202,9 +252,15 @@ impl PackageSupport {
             }
         };
         let search = if self.search.is_none() && supported_manager {
-            Capability::new(Support::Unsupported, "Search is not implemented for this package manager.")
+            Capability::new(
+                Support::Unsupported,
+                "Search is not implemented for this package manager.",
+            )
         } else {
-            gate("Read-only search, run only when you ask. Nothing is installed or changed.", false)
+            gate(
+                "Read-only search, run only when you ask. Nothing is installed or changed.",
+                false,
+            )
         };
         let install = gate("VLINUX shows the exact command to review and run in your terminal. It never installs packages itself: that needs root, and VLINUX does not escalate privileges.", true);
         let update = gate("VLINUX shows the exact commands to run in your terminal. It never starts a system upgrade on its own.", true);
@@ -222,18 +278,28 @@ impl PackageSupport {
     }
 
     /// Build a reviewable plan. Validates every package name; never executes anything.
-    pub fn plan(&self, distro: &str, op: PackageOp, packages: &[String]) -> Result<PackagePlan, String> {
+    pub fn plan(
+        &self,
+        distro: &str,
+        op: PackageOp,
+        packages: &[String],
+    ) -> Result<PackagePlan, String> {
         let commands = match op {
             PackageOp::Install => {
                 if packages.is_empty() {
                     return Err("Enter at least one package name.".into());
                 }
                 if packages.len() > MAX_PACKAGES {
-                    return Err(format!("At most {MAX_PACKAGES} packages can be reviewed at once."));
+                    return Err(format!(
+                        "At most {MAX_PACKAGES} packages can be reviewed at once."
+                    ));
                 }
                 for p in packages {
                     if !valid_package_name(p) {
-                        return Err(format!("'{}' is not a valid package name.", p.chars().take(40).collect::<String>()));
+                        return Err(format!(
+                            "'{}' is not a valid package name.",
+                            p.chars().take(40).collect::<String>()
+                        ));
                     }
                 }
                 self.install_commands(packages)
@@ -247,7 +313,11 @@ impl PackageSupport {
             distro: distro.to_string(),
             op,
             manager_name: self.manager.display_name().to_string(),
-            packages: if op == PackageOp::Install { packages.to_vec() } else { Vec::new() },
+            packages: if op == PackageOp::Install {
+                packages.to_vec()
+            } else {
+                Vec::new()
+            },
             commands,
             requires_root: true,
             executed: false,
@@ -273,7 +343,11 @@ pub fn valid_search_query(q: &str) -> bool {
 
 /// Pick the first line that names a version out of a package manager's `--version` output.
 pub fn parse_version(binary: &str, text: &str) -> Option<String> {
-    let lines: Vec<&str> = text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = text
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
     let first = lines.first()?;
     let clean = |s: &str| -> Option<String> {
         let s: String = s.chars().take(80).collect();
@@ -287,7 +361,18 @@ pub fn parse_version(binary: &str, text: &str) -> Option<String> {
         // "apt 2.6.1 (amd64)"
         "apt-get" => clean(first),
         // The banner is ASCII art; the version is on the line containing "Pacman v7.0.0".
-        "pacman" => lines.iter().find_map(|l| l.find("Pacman v").map(|i| l[i..].split_whitespace().take(2).collect::<Vec<_>>().join(" "))).and_then(|s| clean(&s)),
+        "pacman" => lines
+            .iter()
+            .find_map(|l| {
+                l.find("Pacman v").map(|i| {
+                    l[i..]
+                        .split_whitespace()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+            })
+            .and_then(|s| clean(&s)),
         // "4.18.2" then plugin lines
         "dnf" => clean(first),
         // "apk-tools 2.14.4, compiled for x86_64."
@@ -315,7 +400,11 @@ pub fn parse_search(manager: PackageManager, text: &str) -> Vec<PackageHit> {
                 if let Some((name, desc)) = line.split_once(" - ") {
                     let name = name.trim();
                     if valid_package_name(name) {
-                        hits.push(PackageHit { name: name.to_string(), version: None, description: short(desc, 200) });
+                        hits.push(PackageHit {
+                            name: name.to_string(),
+                            version: None,
+                            description: short(desc, 200),
+                        });
                     }
                 }
                 if hits.len() >= MAX_HITS {
@@ -337,10 +426,16 @@ pub fn parse_search(manager: PackageManager, text: &str) -> Vec<PackageHit> {
                 }
                 let version = parts.next().map(|v| short(v, 40));
                 let description = match lines.peek() {
-                    Some(next) if next.starts_with(char::is_whitespace) => short(lines.next().unwrap_or(""), 200),
+                    Some(next) if next.starts_with(char::is_whitespace) => {
+                        short(lines.next().unwrap_or(""), 200)
+                    }
                     _ => String::new(),
                 };
-                hits.push(PackageHit { name: name.to_string(), version, description });
+                hits.push(PackageHit {
+                    name: name.to_string(),
+                    version,
+                    description,
+                });
                 if hits.len() >= MAX_HITS {
                     break;
                 }
@@ -352,9 +447,17 @@ pub fn parse_search(manager: PackageManager, text: &str) -> Vec<PackageHit> {
                     continue;
                 }
                 if let Some((name, desc)) = line.split_once(" : ") {
-                    let base = name.trim().rsplit_once('.').map(|(n, _arch)| n).unwrap_or(name.trim());
+                    let base = name
+                        .trim()
+                        .rsplit_once('.')
+                        .map(|(n, _arch)| n)
+                        .unwrap_or(name.trim());
                     if valid_package_name(base) {
-                        hits.push(PackageHit { name: base.to_string(), version: None, description: short(desc, 200) });
+                        hits.push(PackageHit {
+                            name: base.to_string(),
+                            version: None,
+                            description: short(desc, 200),
+                        });
                     }
                 }
                 if hits.len() >= MAX_HITS {
@@ -372,18 +475,26 @@ mod tests {
     use super::*;
 
     fn present() -> Availability {
-        Availability::Present { version: Some("1".into()) }
+        Availability::Present {
+            version: Some("1".into()),
+        }
     }
 
     #[test]
     fn manager_to_binary_and_search() {
         let apt = PackageSupport::for_manager(PackageManager::Apt);
         assert_eq!(apt.binary(), Some("apt-get"));
-        assert_eq!(apt.search_argv("git").unwrap(), ["apt-cache", "search", "--names-only", "git"]);
+        assert_eq!(
+            apt.search_argv("git").unwrap(),
+            ["apt-cache", "search", "--names-only", "git"]
+        );
         let pac = PackageSupport::for_manager(PackageManager::Pacman);
         assert_eq!(pac.search_argv("git").unwrap(), ["pacman", "-Ss", "git"]);
         let dnf = PackageSupport::for_manager(PackageManager::Dnf);
-        assert_eq!(dnf.search_argv("git").unwrap(), ["dnf", "--quiet", "search", "git"]);
+        assert_eq!(
+            dnf.search_argv("git").unwrap(),
+            ["dnf", "--quiet", "search", "git"]
+        );
         let none = PackageSupport::for_manager(PackageManager::Unknown);
         assert_eq!(none.binary(), None);
         assert!(none.search_argv("git").is_none());
@@ -393,7 +504,20 @@ mod tests {
     fn hostile_queries_never_become_argv() {
         let apt = PackageSupport::for_manager(PackageManager::Apt);
         let long = "x".repeat(65);
-        for bad in ["", "-h", "--version", "a b", "a;b", "$(x)", "a|b", "a`b`", "../x", "a\nb", "a\"b", long.as_str()] {
+        for bad in [
+            "",
+            "-h",
+            "--version",
+            "a b",
+            "a;b",
+            "$(x)",
+            "a|b",
+            "a`b`",
+            "../x",
+            "a\nb",
+            "a\"b",
+            long.as_str(),
+        ] {
             assert!(apt.search_argv(bad).is_none(), "{bad:?}");
         }
         assert!(apt.search_argv("g++").is_some());
@@ -422,37 +546,70 @@ mod tests {
         for c in [&g.detect, &g.version, &g.search, &g.install, &g.update] {
             assert_eq!(c.support, Support::Unsupported);
         }
-        assert!(PackageSupport::none().plan("X", PackageOp::Update, &[]).is_err());
+        assert!(PackageSupport::none()
+            .plan("X", PackageOp::Update, &[])
+            .is_err());
     }
 
     #[test]
     fn plans_show_exact_commands_and_never_execute() {
         let pac = PackageSupport::for_manager(PackageManager::Pacman);
-        let p = pac.plan("archlinux", PackageOp::Install, &["git".into(), "base-devel".into()]).unwrap();
+        let p = pac
+            .plan(
+                "archlinux",
+                PackageOp::Install,
+                &["git".into(), "base-devel".into()],
+            )
+            .unwrap();
         assert_eq!(p.commands, ["sudo pacman -S --needed git base-devel"]);
         assert!(!p.executed && p.requires_root);
         assert!(p.notes.iter().any(|n| n.contains("partial upgrades")));
         let apt = PackageSupport::for_manager(PackageManager::Apt);
-        assert_eq!(apt.plan("Debian", PackageOp::Update, &[]).unwrap().commands, ["sudo apt update", "sudo apt upgrade"]);
+        assert_eq!(
+            apt.plan("Debian", PackageOp::Update, &[]).unwrap().commands,
+            ["sudo apt update", "sudo apt upgrade"]
+        );
         let dnf = PackageSupport::for_manager(PackageManager::Dnf);
-        assert_eq!(dnf.plan("Fedora", PackageOp::Install, &["gcc".into()]).unwrap().commands, ["sudo dnf install gcc"]);
+        assert_eq!(
+            dnf.plan("Fedora", PackageOp::Install, &["gcc".into()])
+                .unwrap()
+                .commands,
+            ["sudo dnf install gcc"]
+        );
     }
 
     #[test]
     fn plans_reject_bad_names_and_empty_or_huge_lists() {
         let apt = PackageSupport::for_manager(PackageManager::Apt);
         assert!(apt.plan("D", PackageOp::Install, &[]).is_err());
-        assert!(apt.plan("D", PackageOp::Install, &["git; rm -rf /".into()]).is_err());
+        assert!(apt
+            .plan("D", PackageOp::Install, &["git; rm -rf /".into()])
+            .is_err());
         assert!(apt.plan("D", PackageOp::Install, &["-y".into()]).is_err());
-        assert!(apt.plan("D", PackageOp::Install, &vec!["a".to_string(); MAX_PACKAGES + 1]).is_err());
+        assert!(apt
+            .plan(
+                "D",
+                PackageOp::Install,
+                &vec!["a".to_string(); MAX_PACKAGES + 1]
+            )
+            .is_err());
     }
 
     #[test]
     fn version_parsing() {
-        assert_eq!(parse_version("apt-get", "apt 2.6.1 (amd64)\nUsing...").as_deref(), Some("apt 2.6.1 (amd64)"));
+        assert_eq!(
+            parse_version("apt-get", "apt 2.6.1 (amd64)\nUsing...").as_deref(),
+            Some("apt 2.6.1 (amd64)")
+        );
         let pac = "\n .--.                  Pacman v7.0.0 - libalpm v15.0.0\n/ _.-' .-.  .-.  .-.   Copyright (C) 2006-2024 Pacman Development Team\n";
-        assert_eq!(parse_version("pacman", pac).as_deref(), Some("Pacman v7.0.0"));
-        assert_eq!(parse_version("dnf", "4.18.2\n  Installed: dnf-0:4.18.2").as_deref(), Some("4.18.2"));
+        assert_eq!(
+            parse_version("pacman", pac).as_deref(),
+            Some("Pacman v7.0.0")
+        );
+        assert_eq!(
+            parse_version("dnf", "4.18.2\n  Installed: dnf-0:4.18.2").as_deref(),
+            Some("4.18.2")
+        );
         assert_eq!(parse_version("apt-get", ""), None);
         assert_eq!(parse_version("pacman", "something else"), None);
     }
@@ -468,7 +625,10 @@ mod tests {
         assert_eq!(pac[0].version.as_deref(), Some("2.45.2-1"));
         assert!(pac[1].description.contains("extension"));
         let dnf = parse_search(PackageManager::Dnf, "========== Name Matched: git ==========\ngit.x86_64 : Fast version control\ngit-lfs.x86_64 : Git LFS\n");
-        assert_eq!(dnf.iter().map(|h| h.name.as_str()).collect::<Vec<_>>(), ["git", "git-lfs"]);
+        assert_eq!(
+            dnf.iter().map(|h| h.name.as_str()).collect::<Vec<_>>(),
+            ["git", "git-lfs"]
+        );
         assert!(parse_search(PackageManager::Unknown, "a - b").is_empty());
     }
 

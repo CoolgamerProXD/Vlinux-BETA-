@@ -76,7 +76,9 @@ impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RunError::NotFound(p) => write!(f, "{p} was not found"),
-            RunError::Timeout(d) => write!(f, "the command did not finish within {} s", d.as_secs()),
+            RunError::Timeout(d) => {
+                write!(f, "the command did not finish within {} s", d.as_secs())
+            }
             RunError::Cancelled => write!(f, "the operation was cancelled"),
             RunError::Io(m) => write!(f, "could not run the command: {m}"),
         }
@@ -120,7 +122,11 @@ pub trait CommandRunner: Send + Sync {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemRunner;
 
-fn pump<R: Read + Send + 'static>(mut reader: R, is_err: bool, tx: Sender<(bool, Vec<u8>)>) -> JoinHandle<()> {
+fn pump<R: Read + Send + 'static>(
+    mut reader: R,
+    is_err: bool,
+    tx: Sender<(bool, Vec<u8>)>,
+) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut buf = [0u8; 4096];
         loop {
@@ -252,14 +258,25 @@ mod tests {
 
     #[test]
     fn missing_program_is_not_found() {
-        let spec = CommandSpec::new("vlinux-definitely-not-a-program", &[], Duration::from_secs(5));
-        assert!(matches!(SystemRunner.run_simple(&spec), Err(RunError::NotFound(_))));
+        let spec = CommandSpec::new(
+            "vlinux-definitely-not-a-program",
+            &[],
+            Duration::from_secs(5),
+        );
+        assert!(matches!(
+            SystemRunner.run_simple(&spec),
+            Err(RunError::NotFound(_))
+        ));
     }
 
     #[cfg(unix)]
     #[test]
     fn captures_output_and_exit_code() {
-        let spec = CommandSpec::new("sh", &["-c", "printf hello; printf oops >&2; exit 3"], Duration::from_secs(10));
+        let spec = CommandSpec::new(
+            "sh",
+            &["-c", "printf hello; printf oops >&2; exit 3"],
+            Duration::from_secs(10),
+        );
         let out = SystemRunner.run_simple(&spec).unwrap();
         assert_eq!(out.status, Some(3));
         assert_eq!(out.stdout, b"hello");
@@ -271,7 +288,10 @@ mod tests {
     fn times_out_and_kills() {
         let spec = CommandSpec::new("sleep", &["30"], Duration::from_millis(300));
         let t = Instant::now();
-        assert_eq!(SystemRunner.run_simple(&spec), Err(RunError::Timeout(Duration::from_millis(300))));
+        assert_eq!(
+            SystemRunner.run_simple(&spec),
+            Err(RunError::Timeout(Duration::from_millis(300)))
+        );
         assert!(t.elapsed() < Duration::from_secs(5));
     }
 
@@ -286,7 +306,10 @@ mod tests {
         });
         let spec = CommandSpec::new("sleep", &["30"], Duration::from_secs(30));
         let t = Instant::now();
-        assert_eq!(SystemRunner.run(&spec, &cancel, &mut |_| {}), Err(RunError::Cancelled));
+        assert_eq!(
+            SystemRunner.run(&spec, &cancel, &mut |_| {}),
+            Err(RunError::Cancelled)
+        );
         assert!(t.elapsed() < Duration::from_secs(5));
     }
 
@@ -295,7 +318,10 @@ mod tests {
     fn arguments_are_not_interpreted_by_a_shell() {
         let spec = CommandSpec::new("echo", &["$HOME; rm -rf /"], Duration::from_secs(5));
         let out = SystemRunner.run_simple(&spec).unwrap();
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "$HOME; rm -rf /");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "$HOME; rm -rf /"
+        );
     }
 
     #[test]

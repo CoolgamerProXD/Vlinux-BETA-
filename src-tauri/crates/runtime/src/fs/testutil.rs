@@ -15,7 +15,10 @@ impl TempDir {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let p = std::env::temp_dir().join(format!("vlinux-fs-{tag}-{}-{n}-{nanos}", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "vlinux-fs-{tag}-{}-{n}-{nanos}",
+            std::process::id()
+        ));
         fs::create_dir_all(&p).expect("create temp dir");
         // Resolve symlinked temp roots (macOS /var, Windows 8.3 names) so comparisons are stable.
         let p = fs::canonicalize(&p).unwrap_or(p);

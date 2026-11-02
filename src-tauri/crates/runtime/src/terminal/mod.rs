@@ -27,26 +27,52 @@ pub use session::{SessionInfo, SessionState, TerminalManager, TerminalSink, Tuni
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TerminalError {
     /// WSL itself is not usable (not installed, restart pending, unsupported host, ...).
-    WslUnavailable { reason: String },
+    WslUnavailable {
+        reason: String,
+    },
     /// WSL works but has no distributions.
     NoDistributions,
     /// Nothing is selected and nothing was requested.
     NoSelection,
     /// The name is not a valid WSL distribution name (never reaches `wsl.exe`).
-    InvalidDistro { name: String },
+    InvalidDistro {
+        name: String,
+    },
     /// A valid name that is not registered with WSL (for example it was removed).
-    DistroNotFound { name: String, available: Vec<String> },
+    DistroNotFound {
+        name: String,
+        available: Vec<String>,
+    },
     /// A distribution that belongs to another tool (Docker Desktop, ...).
-    DistroNotAllowed { name: String },
+    DistroNotAllowed {
+        name: String,
+    },
     /// The distribution is being installed, uninstalled or converted.
-    DistroBusy { name: String, state: String },
-    TooManySessions { max: usize },
+    DistroBusy {
+        name: String,
+        state: String,
+    },
+    TooManySessions {
+        max: usize,
+    },
     /// `wsl.exe` (or the PTY) could not be started.
-    StartFailed { detail: String },
-    UnknownSession { id: String },
-    SessionEnded { id: String },
-    InvalidSize { rows: u32, cols: u32 },
-    InputTooLarge { len: usize, max: usize },
+    StartFailed {
+        detail: String,
+    },
+    UnknownSession {
+        id: String,
+    },
+    SessionEnded {
+        id: String,
+    },
+    InvalidSize {
+        rows: u32,
+        cols: u32,
+    },
+    InputTooLarge {
+        len: usize,
+        max: usize,
+    },
 }
 
 impl fmt::Display for TerminalError {
@@ -62,7 +88,11 @@ impl fmt::Display for TerminalError {
                 write!(f, "No distribution is selected for VLINUX. Pick one in Linux Setup, or choose one from the terminal's new-tab menu.")
             }
             TerminalError::InvalidDistro { name } => {
-                write!(f, "'{}' is not a valid distribution name.", name.chars().take(40).collect::<String>())
+                write!(
+                    f,
+                    "'{}' is not a valid distribution name.",
+                    name.chars().take(40).collect::<String>()
+                )
             }
             TerminalError::DistroNotFound { name, available } => {
                 if available.is_empty() {
@@ -72,19 +102,38 @@ impl fmt::Display for TerminalError {
                 }
             }
             TerminalError::DistroNotAllowed { name } => {
-                write!(f, "'{name}' belongs to another application and is never opened by VLINUX.")
+                write!(
+                    f,
+                    "'{name}' belongs to another application and is never opened by VLINUX."
+                )
             }
             TerminalError::DistroBusy { name, state } => {
-                write!(f, "'{name}' is {state} right now. Try again when WSL has finished.")
+                write!(
+                    f,
+                    "'{name}' is {state} right now. Try again when WSL has finished."
+                )
             }
             TerminalError::TooManySessions { max } => {
-                write!(f, "Too many terminal sessions are open (limit {max}). Close one first.")
+                write!(
+                    f,
+                    "Too many terminal sessions are open (limit {max}). Close one first."
+                )
             }
-            TerminalError::StartFailed { detail } => write!(f, "The terminal could not be started: {detail}"),
-            TerminalError::UnknownSession { id } => write!(f, "There is no terminal session '{id}'."),
-            TerminalError::SessionEnded { id } => write!(f, "The terminal session '{id}' has ended."),
-            TerminalError::InvalidSize { rows, cols } => write!(f, "Invalid terminal size {cols}x{rows}."),
-            TerminalError::InputTooLarge { len, max } => write!(f, "Input of {len} bytes is too large (limit {max})."),
+            TerminalError::StartFailed { detail } => {
+                write!(f, "The terminal could not be started: {detail}")
+            }
+            TerminalError::UnknownSession { id } => {
+                write!(f, "There is no terminal session '{id}'.")
+            }
+            TerminalError::SessionEnded { id } => {
+                write!(f, "The terminal session '{id}' has ended.")
+            }
+            TerminalError::InvalidSize { rows, cols } => {
+                write!(f, "Invalid terminal size {cols}x{rows}.")
+            }
+            TerminalError::InputTooLarge { len, max } => {
+                write!(f, "Input of {len} bytes is too large (limit {max}).")
+            }
         }
     }
 }

@@ -84,15 +84,25 @@ pub struct DistroCard {
 pub enum PreferredStatus {
     /// Nothing chosen yet.
     None,
-    Ok { name: String },
+    Ok {
+        name: String,
+    },
     /// Chosen earlier but no longer registered with WSL.
-    Missing { name: String },
+    Missing {
+        name: String,
+    },
     /// Registered, but it belongs to another application.
-    Internal { name: String },
+    Internal {
+        name: String,
+    },
     /// Registered, but WSL is installing / converting / removing it.
-    Busy { name: String },
+    Busy {
+        name: String,
+    },
     /// WSL is not ready, so the choice cannot be checked.
-    Unchecked { name: String },
+    Unchecked {
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -109,7 +119,9 @@ pub struct Overview {
 }
 
 pub fn preferred_status(report: &WslReport, preferred: Option<&str>) -> PreferredStatus {
-    let Some(name) = preferred else { return PreferredStatus::None };
+    let Some(name) = preferred else {
+        return PreferredStatus::None;
+    };
     let name = name.to_string();
     if report.status != RuntimeStatus::Ready {
         return PreferredStatus::Unchecked { name };
@@ -117,7 +129,14 @@ pub fn preferred_status(report: &WslReport, preferred: Option<&str>) -> Preferre
     match report.distros.iter().find(|d| d.name == name) {
         None => PreferredStatus::Missing { name },
         Some(d) if d.kind == DistroKind::Internal => PreferredStatus::Internal { name },
-        Some(d) if matches!(d.state, DistroState::Installing | DistroState::Uninstalling | DistroState::Converting) => PreferredStatus::Busy { name },
+        Some(d)
+            if matches!(
+                d.state,
+                DistroState::Installing | DistroState::Uninstalling | DistroState::Converting
+            ) =>
+        {
+            PreferredStatus::Busy { name }
+        }
         Some(_) => PreferredStatus::Ok { name },
     }
 }
@@ -139,19 +158,51 @@ fn warning_for(p: &PreferredStatus, windows_default: Option<&str>) -> Option<Str
 }
 
 fn act(action: Action, enabled: bool, reason: &str) -> ActionState {
-    ActionState { action, enabled, reason: if enabled || reason.is_empty() { None } else { Some(reason.to_string()) } }
+    ActionState {
+        action,
+        enabled,
+        reason: if enabled || reason.is_empty() {
+            None
+        } else {
+            Some(reason.to_string())
+        },
+    }
 }
 
-fn actions_for(kind: DistroKind, wsl_state: DistroState, busy: Option<OpKind>, is_preferred: bool) -> Vec<ActionState> {
+fn actions_for(
+    kind: DistroKind,
+    wsl_state: DistroState,
+    busy: Option<OpKind>,
+    is_preferred: bool,
+) -> Vec<ActionState> {
     use Action::*;
-    let all = [OpenTerminal, OpenFiles, Start, Stop, Inspect, SetPreferred, Refresh, OpenConfig, ViewDiagnostics];
+    let all = [
+        OpenTerminal,
+        OpenFiles,
+        Start,
+        Stop,
+        Inspect,
+        SetPreferred,
+        Refresh,
+        OpenConfig,
+        ViewDiagnostics,
+    ];
     if kind == DistroKind::Internal {
         return all
             .iter()
-            .map(|a| act(*a, *a == Refresh, "This distribution belongs to another application; VLINUX never touches it."))
+            .map(|a| {
+                act(
+                    *a,
+                    *a == Refresh,
+                    "This distribution belongs to another application; VLINUX never touches it.",
+                )
+            })
             .collect();
     }
-    let changing = matches!(wsl_state, DistroState::Installing | DistroState::Uninstalling | DistroState::Converting);
+    let changing = matches!(
+        wsl_state,
+        DistroState::Installing | DistroState::Uninstalling | DistroState::Converting
+    );
     all.iter()
         .map(|a| {
             if *a == Refresh {
@@ -165,7 +216,11 @@ fn actions_for(kind: DistroKind, wsl_state: DistroState, busy: Option<OpKind>, i
             }
             match a {
                 Start => act(*a, wsl_state != DistroState::Running, "Already running."),
-                Stop => act(*a, wsl_state == DistroState::Running, "Only a running distribution can be stopped."),
+                Stop => act(
+                    *a,
+                    wsl_state == DistroState::Running,
+                    "Only a running distribution can be stopped.",
+                ),
                 SetPreferred => act(*a, !is_preferred, "Already your preferred distribution."),
                 _ => act(*a, true, ""),
             }
@@ -190,12 +245,19 @@ pub fn build_overview(
             let insp = inspections.iter().find(|i| i.distro == d.name);
             let busy = ops.iter().find(|(n, _)| *n == d.name).map(|(_, k)| *k);
             let failure = failures.get(&d.name).cloned();
-            let adapter = registry.by_id(&d.adapter.id).unwrap_or_else(|| registry.generic());
+            let adapter = registry
+                .by_id(&d.adapter.id)
+                .unwrap_or_else(|| registry.generic());
             let (packages, package_notes) = match insp {
                 Some(i) => i.package_caps(adapter.packages()),
-                None => (adapter.packages().capabilities(Availability::NotChecked), Vec::new()),
+                None => (
+                    adapter.packages().capabilities(Availability::NotChecked),
+                    Vec::new(),
+                ),
             };
-            let os = insp.and_then(|i| i.os_release.as_ref()).or(d.os_release.as_ref());
+            let os = insp
+                .and_then(|i| i.os_release.as_ref())
+                .or(d.os_release.as_ref());
             let state = if d.kind == DistroKind::Internal {
                 CardState::Unavailable
             } else if let Some(b) = busy {
@@ -282,8 +344,20 @@ mod tests {
         )
     }
 
-    fn build(preferred: Option<&str>, ops: &[(String, OpKind)], failures: &HashMap<String, String>) -> Overview {
-        build_overview(&report(), preferred, &[], ops, failures, &DistroRegistry::with_builtin(), 99)
+    fn build(
+        preferred: Option<&str>,
+        ops: &[(String, OpKind)],
+        failures: &HashMap<String, String>,
+    ) -> Overview {
+        build_overview(
+            &report(),
+            preferred,
+            &[],
+            ops,
+            failures,
+            &DistroRegistry::with_builtin(),
+            99,
+        )
     }
 
     fn card<'a>(o: &'a Overview, n: &str) -> &'a DistroCard {
@@ -306,7 +380,12 @@ mod tests {
         assert_eq!(card(&o, "Debian").wsl_version, 1);
         // Nothing was inspected: no kernel, user or version is shown.
         let c = card(&o, "archlinux");
-        assert!(c.kernel.is_none() && c.default_user.is_none() && c.arch.is_none() && c.inspected_at.is_none());
+        assert!(
+            c.kernel.is_none()
+                && c.default_user.is_none()
+                && c.arch.is_none()
+                && c.inspected_at.is_none()
+        );
         assert_eq!(c.packages.availability, Availability::NotChecked);
     }
 
@@ -314,8 +393,15 @@ mod tests {
     fn preferred_is_independent_of_the_windows_default() {
         let o = build(Some("Ubuntu-24.04"), &[], &HashMap::new());
         assert_eq!(o.windows_default.as_deref(), Some("archlinux"));
-        assert_eq!(o.preferred, PreferredStatus::Ok { name: "Ubuntu-24.04".into() });
-        assert!(card(&o, "Ubuntu-24.04").is_preferred && !card(&o, "Ubuntu-24.04").is_windows_default);
+        assert_eq!(
+            o.preferred,
+            PreferredStatus::Ok {
+                name: "Ubuntu-24.04".into()
+            }
+        );
+        assert!(
+            card(&o, "Ubuntu-24.04").is_preferred && !card(&o, "Ubuntu-24.04").is_windows_default
+        );
         assert!(card(&o, "archlinux").is_windows_default && !card(&o, "archlinux").is_preferred);
         assert!(o.warning.is_none());
     }
@@ -323,7 +409,12 @@ mod tests {
     #[test]
     fn missing_preferred_warns_and_never_switches() {
         let o = build(Some("Gone"), &[], &HashMap::new());
-        assert_eq!(o.preferred, PreferredStatus::Missing { name: "Gone".into() });
+        assert_eq!(
+            o.preferred,
+            PreferredStatus::Missing {
+                name: "Gone".into()
+            }
+        );
         assert_eq!(o.preferred_name.as_deref(), Some("Gone"));
         assert!(o.cards.iter().all(|c| !c.is_preferred));
         let w = o.warning.unwrap();
@@ -332,11 +423,20 @@ mod tests {
 
     #[test]
     fn internal_busy_and_not_ready_preferred() {
-        assert!(matches!(build(Some("docker-desktop"), &[], &HashMap::new()).preferred, PreferredStatus::Internal { .. }));
-        assert!(matches!(build(Some("Fedora"), &[], &HashMap::new()).preferred, PreferredStatus::Busy { .. }));
+        assert!(matches!(
+            build(Some("docker-desktop"), &[], &HashMap::new()).preferred,
+            PreferredStatus::Internal { .. }
+        ));
+        assert!(matches!(
+            build(Some("Fedora"), &[], &HashMap::new()).preferred,
+            PreferredStatus::Busy { .. }
+        ));
         let mut r = report();
         r.status = RuntimeStatus::NotInstalled;
-        assert!(matches!(preferred_status(&r, Some("archlinux")), PreferredStatus::Unchecked { .. }));
+        assert!(matches!(
+            preferred_status(&r, Some("archlinux")),
+            PreferredStatus::Unchecked { .. }
+        ));
         assert_eq!(preferred_status(&r, None), PreferredStatus::None);
     }
 
@@ -344,20 +444,44 @@ mod tests {
     fn actions_follow_state() {
         let o = build(Some("archlinux"), &[], &HashMap::new());
         let run = card(&o, "archlinux");
-        assert!(!enabled(run, Action::Start) && enabled(run, Action::Stop) && enabled(run, Action::OpenTerminal));
+        assert!(
+            !enabled(run, Action::Start)
+                && enabled(run, Action::Stop)
+                && enabled(run, Action::OpenTerminal)
+        );
         assert!(!enabled(run, Action::SetPreferred), "already preferred");
         let stopped = card(&o, "Ubuntu-24.04");
-        assert!(enabled(stopped, Action::Start) && !enabled(stopped, Action::Stop) && enabled(stopped, Action::SetPreferred));
+        assert!(
+            enabled(stopped, Action::Start)
+                && !enabled(stopped, Action::Stop)
+                && enabled(stopped, Action::SetPreferred)
+        );
         let internal = card(&o, "docker-desktop");
-        assert!(internal.actions.iter().all(|a| a.action == Action::Refresh || !a.enabled));
-        assert!(internal.actions.iter().find(|a| a.action == Action::Start).unwrap().reason.is_some());
+        assert!(internal
+            .actions
+            .iter()
+            .all(|a| a.action == Action::Refresh || !a.enabled));
+        assert!(internal
+            .actions
+            .iter()
+            .find(|a| a.action == Action::Start)
+            .unwrap()
+            .reason
+            .is_some());
         let changing = card(&o, "Fedora");
-        assert!(changing.actions.iter().all(|a| a.action == Action::Refresh || !a.enabled));
+        assert!(changing
+            .actions
+            .iter()
+            .all(|a| a.action == Action::Refresh || !a.enabled));
     }
 
     #[test]
     fn in_flight_operations_set_state_and_block_actions() {
-        let ops = vec![("Ubuntu-24.04".to_string(), OpKind::Start), ("Debian".to_string(), OpKind::Inspect), ("archlinux".to_string(), OpKind::Stop)];
+        let ops = vec![
+            ("Ubuntu-24.04".to_string(), OpKind::Start),
+            ("Debian".to_string(), OpKind::Inspect),
+            ("archlinux".to_string(), OpKind::Stop),
+        ];
         let o = build(None, &ops, &HashMap::new());
         assert_eq!(card(&o, "Ubuntu-24.04").state, CardState::Starting);
         assert_eq!(card(&o, "Debian").state, CardState::Inspecting);
@@ -370,7 +494,10 @@ mod tests {
     #[test]
     fn failures_show_as_failed_until_cleared() {
         let mut f = HashMap::new();
-        f.insert("Ubuntu-24.04".to_string(), "WSL could not start it".to_string());
+        f.insert(
+            "Ubuntu-24.04".to_string(),
+            "WSL could not start it".to_string(),
+        );
         let o = build(None, &[], &f);
         let c = card(&o, "Ubuntu-24.04");
         assert_eq!(c.state, CardState::Failed);
@@ -385,21 +512,38 @@ mod tests {
             at: 55,
             was_running: true,
             started_by_inspection: false,
-            os_release: Some(crate::osrelease::parse_os_release("NAME=\"Arch Linux\"\nID=arch\nPRETTY_NAME=\"Arch Linux\"\nBUILD_ID=rolling\n")),
+            os_release: Some(crate::osrelease::parse_os_release(
+                "NAME=\"Arch Linux\"\nID=arch\nPRETTY_NAME=\"Arch Linux\"\nBUILD_ID=rolling\n",
+            )),
             kernel: Some("5.15".into()),
             arch: Some("x86_64".into()),
             default_user: Some("dana".into()),
             uid: Some(1000),
-            managers: vec![crate::inspect::ManagerProbe { binary: "pacman".into(), present: true, version: Some("Pacman v7".into()) }],
+            managers: vec![crate::inspect::ManagerProbe {
+                binary: "pacman".into(),
+                present: true,
+                version: Some("Pacman v7".into()),
+            }],
             notes: vec![],
         };
-        let o = build_overview(&report(), None, &[insp], &[], &HashMap::new(), &DistroRegistry::with_builtin(), 99);
+        let o = build_overview(
+            &report(),
+            None,
+            &[insp],
+            &[],
+            &HashMap::new(),
+            &DistroRegistry::with_builtin(),
+            99,
+        );
         let c = card(&o, "archlinux");
         assert_eq!(c.inspected_at, Some(55));
         assert_eq!(c.kernel.as_deref(), Some("5.15"));
         assert_eq!(c.default_user.as_deref(), Some("dana"));
         assert_eq!(c.os_pretty.as_deref(), Some("Arch Linux"));
-        assert!(matches!(c.packages.availability, Availability::Present { .. }));
+        assert!(matches!(
+            c.packages.availability,
+            Availability::Present { .. }
+        ));
         // Other cards are not given this data.
         assert!(card(&o, "Debian").kernel.is_none());
     }

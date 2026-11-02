@@ -154,7 +154,11 @@ impl Config {
         self.shell.workspace_count = self.shell.workspace_count.clamp(2, 9);
         self.appearance.glass = self.appearance.glass.min(100);
         self.dock.icon_size = self.dock.icon_size.clamp(32, 72);
-        self.runtime.selected_distro = self.runtime.selected_distro.take().filter(|n| valid_distro_name(n));
+        self.runtime.selected_distro = self
+            .runtime
+            .selected_distro
+            .take()
+            .filter(|n| valid_distro_name(n));
         self.storage = self.storage.sanitized();
         self
     }
@@ -171,18 +175,26 @@ pub fn load(path: &Path) -> Loaded {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Loaded { config: Config::default(), warning: None };
+            return Loaded {
+                config: Config::default(),
+                warning: None,
+            };
         }
         Err(e) => {
             return Loaded {
                 config: Config::default(),
-                warning: Some(format!("Could not read configuration ({e}); using defaults.")),
+                warning: Some(format!(
+                    "Could not read configuration ({e}); using defaults."
+                )),
             };
         }
     };
 
     match toml::from_str::<Config>(&text) {
-        Ok(cfg) => Loaded { config: cfg.sanitized(), warning: None },
+        Ok(cfg) => Loaded {
+            config: cfg.sanitized(),
+            warning: None,
+        },
         Err(parse_err) => {
             let note = match preserve_invalid(path) {
                 Ok(p) => format!(
@@ -195,7 +207,10 @@ pub fn load(path: &Path) -> Loaded {
                     first_line(&parse_err.to_string())
                 ),
             };
-            Loaded { config: Config::default(), warning: Some(note) }
+            Loaded {
+                config: Config::default(),
+                warning: Some(note),
+            }
         }
     }
 }
@@ -212,7 +227,9 @@ fn preserve_invalid(path: &Path) -> std::io::Result<PathBuf> {
         .unwrap_or(0);
     let name = format!(
         "{}.invalid-{ts}",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or(CONFIG_FILE)
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(CONFIG_FILE)
     );
     let dest = path.with_file_name(name);
     fs::rename(path, &dest)?;
@@ -237,7 +254,9 @@ fn carry_unknown(existing: &toml::Table, fresh: &mut toml::Table, path: &mut Vec
     for (key, old) in existing {
         path.push(key.clone());
         if fresh.contains_key(key) {
-            if let (Some(toml::Value::Table(new_table)), toml::Value::Table(old_table)) = (fresh.get_mut(key), old) {
+            if let (Some(toml::Value::Table(new_table)), toml::Value::Table(old_table)) =
+                (fresh.get_mut(key), old)
+            {
                 carried += carry_unknown(old_table, new_table, path);
             }
         } else if !is_optional_known(path) {
@@ -253,7 +272,10 @@ fn carry_unknown(existing: &toml::Table, fresh: &mut toml::Table, path: &mut Vec
 /// (so saving never discards what a newer or older VLINUX wrote). Comments are not preserved.
 fn render(path: &Path, cfg: &Config) -> Result<(String, usize), AppError> {
     let plain = toml::to_string_pretty(cfg).map_err(|e| AppError::Config(e.to_string()))?;
-    let Some(old) = fs::read_to_string(path).ok().and_then(|t| t.parse::<toml::Table>().ok()) else {
+    let Some(old) = fs::read_to_string(path)
+        .ok()
+        .and_then(|t| t.parse::<toml::Table>().ok())
+    else {
         return Ok((plain, 0));
     };
     let Ok(toml::Value::Table(mut fresh)) = toml::Value::try_from(cfg) else {
@@ -265,7 +287,10 @@ fn render(path: &Path, cfg: &Config) -> Result<(String, usize), AppError> {
     }
     match toml::to_string_pretty(&fresh) {
         Ok(text) => Ok((text, carried)),
-        Err(e) => Err(AppError::Config(format!("could not keep the unknown settings in {} ({e}); nothing was written", path.display()))),
+        Err(e) => Err(AppError::Config(format!(
+            "could not keep the unknown settings in {} ({e}); nothing was written",
+            path.display()
+        ))),
     }
 }
 
@@ -397,7 +422,11 @@ mod tests {
     fn version_1_files_load_with_new_sections_defaulted() {
         let dir = temp_dir("v1");
         let path = dir.join(CONFIG_FILE);
-        fs::write(&path, "schema_version = 1\n[appearance]\naccent = \"cyan\"\n").unwrap();
+        fs::write(
+            &path,
+            "schema_version = 1\n[appearance]\naccent = \"cyan\"\n",
+        )
+        .unwrap();
         let l = load(&path);
         assert!(l.warning.is_none());
         assert_eq!(l.config.appearance.accent, Accent::Cyan);
@@ -425,7 +454,9 @@ mod tests {
         let mut none = Config::default();
         none.runtime.selected_distro = None;
         save(&path, &none).unwrap();
-        assert!(!fs::read_to_string(&path).unwrap().contains("selected_distro"));
+        assert!(!fs::read_to_string(&path)
+            .unwrap()
+            .contains("selected_distro"));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -436,7 +467,10 @@ mod tests {
         assert_eq!(c.sanitized().runtime.selected_distro, None);
         let mut c = Config::default();
         c.runtime.selected_distro = Some("Ubuntu-24.04".into());
-        assert_eq!(c.sanitized().runtime.selected_distro.as_deref(), Some("Ubuntu-24.04"));
+        assert_eq!(
+            c.sanitized().runtime.selected_distro.as_deref(),
+            Some("Ubuntu-24.04")
+        );
     }
 
     #[test]
@@ -471,7 +505,13 @@ mod tests {
         assert_eq!(table["shell"]["future_shell_flag"].as_bool(), Some(true));
         assert_eq!(table["shell"]["workspace_count"].as_integer(), Some(6));
         // A known optional key that was cleared really is cleared (it is not resurrected).
-        assert!(table.get("runtime").and_then(|r| r.get("selected_distro")).is_none(), "{text}");
+        assert!(
+            table
+                .get("runtime")
+                .and_then(|r| r.get("selected_distro"))
+                .is_none(),
+            "{text}"
+        );
         // The result still loads as a normal config.
         assert_eq!(load(&path).config.shell.workspace_count, 6);
         let _ = fs::remove_dir_all(&dir);

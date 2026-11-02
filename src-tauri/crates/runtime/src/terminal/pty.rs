@@ -19,7 +19,10 @@ pub struct PtySize {
 }
 
 impl PtySize {
-    pub const DEFAULT: PtySize = PtySize { rows: 30, cols: 100 };
+    pub const DEFAULT: PtySize = PtySize {
+        rows: 30,
+        cols: 100,
+    };
     pub const MAX_DIMENSION: u32 = 1000;
 
     /// `None` for zero or absurd sizes.
@@ -27,7 +30,10 @@ impl PtySize {
         if rows == 0 || cols == 0 || rows > Self::MAX_DIMENSION || cols > Self::MAX_DIMENSION {
             None
         } else {
-            Some(PtySize { rows: rows as u16, cols: cols as u16 })
+            Some(PtySize {
+                rows: rows as u16,
+                cols: cols as u16,
+            })
         }
     }
 }
@@ -97,9 +103,17 @@ impl PtyControl for NativeControl {
     fn resize(&self, size: PtySize) -> io::Result<()> {
         match lock(&self.master).as_ref() {
             Some(m) => m
-                .resize(portable_pty::PtySize { rows: size.rows, cols: size.cols, pixel_width: 0, pixel_height: 0 })
+                .resize(portable_pty::PtySize {
+                    rows: size.rows,
+                    cols: size.cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
                 .map_err(|e| io::Error::other(format!("{e:#}"))),
-            None => Err(io::Error::new(io::ErrorKind::BrokenPipe, "the terminal is closed")),
+            None => Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "the terminal is closed",
+            )),
         }
     }
 
@@ -124,7 +138,12 @@ impl PtyBackend for NativePty {
     fn spawn(&self, spec: &PtySpawn) -> Result<PtyHandles, PtyError> {
         let err = |what: &str, e: anyhow_like::Error| PtyError(format!("{what}: {e}"));
         let pair = portable_pty::native_pty_system()
-            .openpty(portable_pty::PtySize { rows: spec.size.rows, cols: spec.size.cols, pixel_width: 0, pixel_height: 0 })
+            .openpty(portable_pty::PtySize {
+                rows: spec.size.rows,
+                cols: spec.size.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|e| err("could not create a pseudoterminal", anyhow_like::from(e)))?;
 
         let mut cmd = portable_pty::CommandBuilder::new(&spec.program);
@@ -138,10 +157,12 @@ impl PtyBackend for NativePty {
             cmd.cwd(cwd);
         }
 
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| err(&format!("could not start '{}'", spec.program), anyhow_like::from(e)))?;
+        let child = pair.slave.spawn_command(cmd).map_err(|e| {
+            err(
+                &format!("could not start '{}'", spec.program),
+                anyhow_like::from(e),
+            )
+        })?;
         // The parent must not keep the slave side open, otherwise the reader never sees EOF on Unix.
         drop(pair.slave);
 
@@ -158,7 +179,10 @@ impl PtyBackend for NativePty {
         Ok(PtyHandles {
             reader,
             writer,
-            control: Arc::new(NativeControl { master: Mutex::new(Some(pair.master)), killer: Mutex::new(killer) }),
+            control: Arc::new(NativeControl {
+                master: Mutex::new(Some(pair.master)),
+                killer: Mutex::new(killer),
+            }),
             child: Box::new(NativeChild(child)),
         })
     }
@@ -185,10 +209,22 @@ mod tests {
 
     #[test]
     fn sizes_are_bounded() {
-        assert_eq!(PtySize::checked(30, 100), Some(PtySize { rows: 30, cols: 100 }));
+        assert_eq!(
+            PtySize::checked(30, 100),
+            Some(PtySize {
+                rows: 30,
+                cols: 100
+            })
+        );
         assert_eq!(PtySize::checked(0, 80), None);
         assert_eq!(PtySize::checked(24, 0), None);
         assert_eq!(PtySize::checked(1001, 80), None);
-        assert_eq!(PtySize::checked(24, 1000), Some(PtySize { rows: 24, cols: 1000 }));
+        assert_eq!(
+            PtySize::checked(24, 1000),
+            Some(PtySize {
+                rows: 24,
+                cols: 1000
+            })
+        );
     }
 }

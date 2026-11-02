@@ -44,7 +44,9 @@ pub fn valid_distro_name(name: &str) -> bool {
         && name.len() <= 64
         && !name.starts_with('-')
         && !name.starts_with('.')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
 pub fn parse_state(word: &str) -> DistroState {
@@ -78,10 +80,18 @@ pub fn parse_list_verbose(text: &str) -> (Vec<ListRow>, Vec<String>) {
         let mut parsed = None;
         if marker_col && toks.len() >= 3 && toks.len() <= 6 {
             let name = toks[0];
-            let version: Option<u8> = toks[toks.len() - 1].parse().ok().filter(|v| *v == 1 || *v == 2);
+            let version: Option<u8> = toks[toks.len() - 1]
+                .parse()
+                .ok()
+                .filter(|v| *v == 1 || *v == 2);
             if let (true, Some(version)) = (valid_distro_name(name), version) {
                 let state = parse_state(&toks[1..toks.len() - 1].join(" "));
-                parsed = Some(ListRow { name: name.to_string(), state, version, is_default });
+                parsed = Some(ListRow {
+                    name: name.to_string(),
+                    state,
+                    version,
+                    is_default,
+                });
             }
         }
         match parsed {
@@ -104,7 +114,9 @@ pub fn parse_status(text: &str) -> StatusInfo {
     let mut info = StatusInfo::default();
     let mut numeric_fallback: Option<u8> = None;
     for line in text.lines() {
-        let Some((k, v)) = split_kv(line) else { continue };
+        let Some((k, v)) = split_kv(line) else {
+            continue;
+        };
         let kl = k.to_lowercase();
         if kl.contains("default") && kl.contains("distribution") {
             if valid_distro_name(v) {
@@ -137,7 +149,9 @@ pub fn parse_version(text: &str) -> VersionInfo {
     let mut info = VersionInfo::default();
     let mut ordered: Vec<String> = Vec::new();
     for line in text.lines() {
-        let Some((k, v)) = split_kv(line) else { continue };
+        let Some((k, v)) = split_kv(line) else {
+            continue;
+        };
         let Some(ver) = first_token(v) else { continue };
         ordered.push(ver.clone());
         let kl = k.to_lowercase();
@@ -177,7 +191,10 @@ pub fn parse_online_list(text: &str) -> Vec<OnlineRow> {
         if name.len() >= 2 && name.chars().all(|c| c.is_ascii_uppercase()) {
             continue;
         }
-        rows.push(OnlineRow { name: name.to_string(), friendly_name: friendly.to_string() });
+        rows.push(OnlineRow {
+            name: name.to_string(),
+            friendly_name: friendly.to_string(),
+        });
     }
     rows
 }
@@ -190,7 +207,10 @@ pub enum Failure {
     /// WSL works but has no distributions registered.
     NoDistributions,
     /// A recognised actionable error code.
-    Code { code: &'static str, hint: &'static str },
+    Code {
+        code: &'static str,
+        hint: &'static str,
+    },
 }
 
 const CODES: &[(&str, &str)] = &[
@@ -220,7 +240,9 @@ pub fn classify_failure(text: &str) -> Option<Failure> {
         }
     }
     // The 'not installed' stub message links to aka.ms/wslinstall in every language.
-    if lc.contains("aka.ms/wslinstall") || lc.contains("is not installed") && lc.contains("wsl.exe --install") {
+    if lc.contains("aka.ms/wslinstall")
+        || lc.contains("is not installed") && lc.contains("wsl.exe --install")
+    {
         return Some(Failure::NotInstalled);
     }
     // The 'no distributions' message links to the Store page / suggests --list --online.
@@ -243,7 +265,15 @@ mod tests {
     fn list_rows_state_default_and_version() {
         let (rows, unparsed) = parse_list_verbose(LIST);
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0], ListRow { name: "archlinux".into(), state: DistroState::Running, version: 2, is_default: true });
+        assert_eq!(
+            rows[0],
+            ListRow {
+                name: "archlinux".into(),
+                state: DistroState::Running,
+                version: 2,
+                is_default: true
+            }
+        );
         assert_eq!(rows[1].state, DistroState::Stopped);
         assert!(!rows[1].is_default);
         assert_eq!(rows[2].version, 1);
@@ -252,7 +282,9 @@ mod tests {
 
     #[test]
     fn localised_state_words_with_spaces_are_unknown_not_guessed() {
-        let (rows, _) = parse_list_verbose("  NOM   ÉTAT   VERSION\n* Ubuntu   En cours d'exécution   2\n  Debian   Arrêté   2\n");
+        let (rows, _) = parse_list_verbose(
+            "  NOM   ÉTAT   VERSION\n* Ubuntu   En cours d'exécution   2\n  Debian   Arrêté   2\n",
+        );
         assert_eq!(rows.len(), 2);
         assert!(rows[0].is_default);
         assert_eq!(rows[0].state, DistroState::Unknown);
@@ -269,7 +301,9 @@ mod tests {
 
     #[test]
     fn malformed_rows_are_reported_not_fatal() {
-        let (rows, unparsed) = parse_list_verbose("* Ubuntu Running\n  Bad/Name Stopped 2\n  Good Stopped 2\n  Weird Stopped 7\n");
+        let (rows, unparsed) = parse_list_verbose(
+            "* Ubuntu Running\n  Bad/Name Stopped 2\n  Good Stopped 2\n  Weird Stopped 7\n",
+        );
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "Good");
         assert_eq!(unparsed.len(), 3);
@@ -285,7 +319,13 @@ mod tests {
     #[test]
     fn status_english_and_localised() {
         let s = parse_status("Default Distribution: Ubuntu\nDefault Version: 2\n");
-        assert_eq!(s, StatusInfo { default_version: Some(2), default_distro: Some("Ubuntu".into()) });
+        assert_eq!(
+            s,
+            StatusInfo {
+                default_version: Some(2),
+                default_distro: Some("Ubuntu".into())
+            }
+        );
         let de = parse_status("Standarddistribution: Ubuntu\nStandardversion: 2\n");
         assert_eq!(de.default_version, Some(2));
         assert_eq!(parse_status("Default Version: 2\n").default_distro, None);
@@ -295,8 +335,17 @@ mod tests {
     #[test]
     fn version_output() {
         let v = parse_version("WSL version: 2.4.13.0\nKernel version: 5.15.167.4-1\nWSLg version: 1.0.65\nMSRDC version: 1.2.5716\nWindows version: 10.0.26100.1\n");
-        assert_eq!(v, VersionInfo { wsl: Some("2.4.13.0".into()), kernel: Some("5.15.167.4-1".into()), wslg: Some("1.0.65".into()) });
-        let de = parse_version("WSL-Version: 2.1.5.0\nKernelversion: 5.15.146.1\nWSLg-Version: 1.0.60\n");
+        assert_eq!(
+            v,
+            VersionInfo {
+                wsl: Some("2.4.13.0".into()),
+                kernel: Some("5.15.167.4-1".into()),
+                wslg: Some("1.0.65".into())
+            }
+        );
+        let de = parse_version(
+            "WSL-Version: 2.1.5.0\nKernelversion: 5.15.146.1\nWSLg-Version: 1.0.60\n",
+        );
         assert_eq!(de.wsl.as_deref(), Some("2.1.5.0"));
         assert_eq!(de.kernel.as_deref(), Some("5.15.146.1"));
         assert_eq!(parse_version("garbage"), VersionInfo::default());
@@ -307,16 +356,42 @@ mod tests {
         let text = "The following is a list of valid distributions that can be installed.\nInstall using 'wsl.exe --install <Distro>'.\n\nNAME                            FRIENDLY NAME\nUbuntu                          Ubuntu\nDebian                          Debian GNU/Linux\nkali-linux                      Kali Linux Rolling\nFedoraLinux-42                  Fedora Linux 42\narchlinux                       Arch Linux\n";
         let rows = parse_online_list(text);
         let names: Vec<_> = rows.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, vec!["Ubuntu", "Debian", "kali-linux", "FedoraLinux-42", "archlinux"]);
+        assert_eq!(
+            names,
+            vec![
+                "Ubuntu",
+                "Debian",
+                "kali-linux",
+                "FedoraLinux-42",
+                "archlinux"
+            ]
+        );
         assert_eq!(rows[1].friendly_name, "Debian GNU/Linux");
     }
 
     #[test]
     fn failure_classification() {
-        assert_eq!(classify_failure("The Windows Subsystem for Linux is not installed. ... https://aka.ms/wslinstall"), Some(Failure::NotInstalled));
+        assert_eq!(
+            classify_failure(
+                "The Windows Subsystem for Linux is not installed. ... https://aka.ms/wslinstall"
+            ),
+            Some(Failure::NotInstalled)
+        );
         assert_eq!(classify_failure("Windows Subsystem for Linux has no installed distributions.\nhttps://aka.ms/wslstore"), Some(Failure::NoDistributions));
-        assert!(matches!(classify_failure("Error: 0x80370102 The virtual machine could not be started"), Some(Failure::Code { code: "0x80370102", .. })));
-        assert!(matches!(classify_failure("WSL2 ERROR: 0X8007019E"), Some(Failure::Code { code: "0x8007019e", .. })));
+        assert!(matches!(
+            classify_failure("Error: 0x80370102 The virtual machine could not be started"),
+            Some(Failure::Code {
+                code: "0x80370102",
+                ..
+            })
+        ));
+        assert!(matches!(
+            classify_failure("WSL2 ERROR: 0X8007019E"),
+            Some(Failure::Code {
+                code: "0x8007019e",
+                ..
+            })
+        ));
         assert_eq!(classify_failure("something else entirely"), None);
     }
 

@@ -34,7 +34,9 @@ pub struct ManagedStore {
 
 impl ManagedStore {
     pub fn new(dir: &Path) -> Self {
-        Self { path: dir.join(MANAGED_FILE) }
+        Self {
+            path: dir.join(MANAGED_FILE),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -51,11 +53,15 @@ impl ManagedStore {
 
     /// Registered names VLINUX installed. Unreadable/corrupt file = nobody is claimed as ours.
     pub fn names(&self) -> HashSet<String> {
-        self.read().map(|d| d.installed_by_vlinux.into_iter().map(|e| e.name).collect()).unwrap_or_default()
+        self.read()
+            .map(|d| d.installed_by_vlinux.into_iter().map(|e| e.name).collect())
+            .unwrap_or_default()
     }
 
     pub fn entries(&self) -> Vec<ManagedEntry> {
-        self.read().map(|d| d.installed_by_vlinux).unwrap_or_default()
+        self.read()
+            .map(|d| d.installed_by_vlinux)
+            .unwrap_or_default()
     }
 
     /// Remember that VLINUX installed `name`. Idempotent (case-insensitive).
@@ -64,16 +70,26 @@ impl ManagedStore {
             Ok(d) => d,
             Err(_) => {
                 // Keep the unreadable file for the user; start a fresh record.
-                let aside = self.path.with_file_name(format!("{MANAGED_FILE}.invalid-{now}"));
+                let aside = self
+                    .path
+                    .with_file_name(format!("{MANAGED_FILE}.invalid-{now}"));
                 fs::rename(&self.path, aside)?;
                 FileData::default()
             }
         };
-        if data.installed_by_vlinux.iter().any(|e| e.name.eq_ignore_ascii_case(name)) {
+        if data
+            .installed_by_vlinux
+            .iter()
+            .any(|e| e.name.eq_ignore_ascii_case(name))
+        {
             return Ok(());
         }
         data.version = 1;
-        data.installed_by_vlinux.push(ManagedEntry { name: name.to_string(), installed_at: now, source: source.to_string() });
+        data.installed_by_vlinux.push(ManagedEntry {
+            name: name.to_string(),
+            installed_at: now,
+            source: source.to_string(),
+        });
         if let Some(dir) = self.path.parent() {
             fs::create_dir_all(dir)?;
         }
@@ -92,7 +108,10 @@ mod tests {
         let p = std::env::temp_dir().join(format!(
             "vlinux-managed-{tag}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir_all(&p).unwrap();
         p
@@ -127,7 +146,10 @@ mod tests {
         let s = ManagedStore::new(&d);
         assert!(s.names().is_empty());
         s.record("Debian", "Debian", 42).unwrap();
-        assert_eq!(fs::read_to_string(d.join("distros.json.invalid-42")).unwrap(), "{ not json");
+        assert_eq!(
+            fs::read_to_string(d.join("distros.json.invalid-42")).unwrap(),
+            "{ not json"
+        );
         assert!(s.names().contains("Debian"));
         let _ = fs::remove_dir_all(d);
     }

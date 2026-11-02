@@ -74,7 +74,12 @@ impl InstallPlan {
 }
 
 fn existing_names(report: &WslReport) -> Vec<String> {
-    report.distros.iter().filter(|d| d.kind == DistroKind::Regular).map(|d| d.name.clone()).collect()
+    report
+        .distros
+        .iter()
+        .filter(|d| d.kind == DistroKind::Regular)
+        .map(|d| d.name.clone())
+        .collect()
 }
 
 /// Why the current WSL state does not allow installing a *distribution*, if it does not.
@@ -82,14 +87,23 @@ fn distribution_blocker(status: &RuntimeStatus) -> Option<String> {
     match status {
         RuntimeStatus::Ready | RuntimeStatus::NoDistributions => None,
         RuntimeStatus::NotInstalled => Some("WSL is not installed yet. Set up WSL first.".into()),
-        RuntimeStatus::RestartRequired => Some("Windows needs a restart before WSL can be used. Restart Windows, then try again.".into()),
+        RuntimeStatus::RestartRequired => Some(
+            "Windows needs a restart before WSL can be used. Restart Windows, then try again."
+                .into(),
+        ),
         RuntimeStatus::FeatureProblem { hint, .. } => Some(hint.clone()),
-        RuntimeStatus::Error { message } => Some(format!("WSL is not responding properly: {message}")),
+        RuntimeStatus::Error { message } => {
+            Some(format!("WSL is not responding properly: {message}"))
+        }
         RuntimeStatus::UnsupportedHost { reason } => Some(reason.clone()),
     }
 }
 
-pub fn prepare_distribution_plan(wsl_name: &str, report: &WslReport, catalog: &Catalog) -> InstallPlan {
+pub fn prepare_distribution_plan(
+    wsl_name: &str,
+    report: &WslReport,
+    catalog: &Catalog,
+) -> InstallPlan {
     let mut blockers = Vec::new();
     let entry = catalog.entries.iter().find(|e| e.wsl_name == wsl_name);
     match entry {
@@ -105,14 +119,20 @@ pub fn prepare_distribution_plan(wsl_name: &str, report: &WslReport, catalog: &C
     if let Some(b) = distribution_blocker(&report.status) {
         blockers.push(b);
     }
-    if report.distros.iter().any(|d| d.name.eq_ignore_ascii_case(wsl_name)) {
+    if report
+        .distros
+        .iter()
+        .any(|d| d.name.eq_ignore_ascii_case(wsl_name))
+    {
         blockers.push(format!(
             "A distribution named '{wsl_name}' is already installed. VLINUX never overwrites, resets or replaces an existing distribution; use it instead."
         ));
     }
 
     let target = InstallTarget::Distribution(wsl_name.to_string());
-    let display_name = entry.map(|e| e.friendly_name.clone()).unwrap_or_else(|| wsl_name.to_string());
+    let display_name = entry
+        .map(|e| e.friendly_name.clone())
+        .unwrap_or_else(|| wsl_name.to_string());
     InstallPlan {
         plan_id: String::new(),
         kind: PlanKind::Distribution,
@@ -204,7 +224,11 @@ impl Default for PlanStore {
 
 impl PlanStore {
     pub fn with_ttl(ttl: Duration) -> Self {
-        Self { plans: Mutex::new(HashMap::new()), counter: AtomicU64::new(1), ttl }
+        Self {
+            plans: Mutex::new(HashMap::new()),
+            counter: AtomicU64::new(1),
+            ttl,
+        }
     }
 
     /// Assign an id and remember the plan for later approval.
@@ -219,7 +243,12 @@ impl PlanStore {
 
     /// Consume a plan for execution. Requires explicit approval and re-validates against the
     /// current WSL state.
-    pub fn take_approved(&self, plan_id: &str, approved: bool, current: &WslReport) -> Result<InstallPlan, InstallError> {
+    pub fn take_approved(
+        &self,
+        plan_id: &str,
+        approved: bool,
+        current: &WslReport,
+    ) -> Result<InstallPlan, InstallError> {
         if !approved {
             return Err(InstallError::NotApproved);
         }
@@ -238,7 +267,11 @@ impl PlanStore {
         match plan.kind {
             PlanKind::Distribution => {
                 if let Some(name) = &plan.wsl_name {
-                    if current.distros.iter().any(|d| d.name.eq_ignore_ascii_case(name)) {
+                    if current
+                        .distros
+                        .iter()
+                        .any(|d| d.name.eq_ignore_ascii_case(name))
+                    {
                         return Err(InstallError::AlreadyExists(name.clone()));
                     }
                 }
@@ -271,15 +304,25 @@ pub struct InstallEvent {
 pub enum InstallOutcome {
     Succeeded,
     /// The installer finished (or needs to finish) after a Windows restart.
-    RestartRequired { message: String },
-    Failed { exit_code: Option<i32>, message: String, hint: String },
+    RestartRequired {
+        message: String,
+    },
+    Failed {
+        exit_code: Option<i32>,
+        message: String,
+        hint: String,
+    },
     Cancelled,
     TimedOut,
 }
 
 /// Latest human message and percentage from (decoded) installer output, which uses `\r` redraws.
 pub fn latest_progress(text: &str) -> (String, Option<f32>) {
-    let line = text.split(['\r', '\n']).map(|l| l.trim()).rfind(|l| !l.is_empty()).unwrap_or("");
+    let line = text
+        .split(['\r', '\n'])
+        .map(|l| l.trim())
+        .rfind(|l| !l.is_empty())
+        .unwrap_or("");
     let percent = line.rfind('%').and_then(|idx| {
         let digits: String = line[..idx]
             .chars()
@@ -289,9 +332,15 @@ pub fn latest_progress(text: &str) -> (String, Option<f32>) {
             .into_iter()
             .rev()
             .collect();
-        digits.parse::<f32>().ok().filter(|p| (0.0..=100.0).contains(p))
+        digits
+            .parse::<f32>()
+            .ok()
+            .filter(|p| (0.0..=100.0).contains(p))
     });
-    let cleaned: String = line.chars().filter(|c| !matches!(*c, '[' | ']' | '=' | '#' | '>')).collect();
+    let cleaned: String = line
+        .chars()
+        .filter(|c| !matches!(*c, '[' | ']' | '=' | '#' | '>'))
+        .collect();
     let message = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     (message, percent)
 }
@@ -326,10 +375,20 @@ pub fn run_install(
     emit: &mut dyn FnMut(InstallEvent),
 ) -> InstallOutcome {
     let Some(target) = plan.target() else {
-        return InstallOutcome::Failed { exit_code: None, message: "The installation plan is incomplete.".into(), hint: GENERIC_FAILURE_HINT.into() };
+        return InstallOutcome::Failed {
+            exit_code: None,
+            message: "The installation plan is incomplete.".into(),
+            hint: GENERIC_FAILURE_HINT.into(),
+        };
     };
     let mut progress = |message: String, percent: Option<f32>| {
-        emit(InstallEvent { job_id: job_id.to_string(), kind: "progress", message, percent, outcome: None });
+        emit(InstallEvent {
+            job_id: job_id.to_string(),
+            kind: "progress",
+            message,
+            percent,
+            outcome: None,
+        });
     };
     progress(format!("Running {}", plan.command_preview), None);
 
@@ -352,7 +411,11 @@ pub fn run_install(
             message: "wsl.exe was not found on this PC.".to_string(),
             hint: "WSL is not available. Use 'Set up WSL' first.".to_string(),
         },
-        Err(RunError::Io(m)) => InstallOutcome::Failed { exit_code: None, message: m, hint: GENERIC_FAILURE_HINT.to_string() },
+        Err(RunError::Io(m)) => InstallOutcome::Failed {
+            exit_code: None,
+            message: m,
+            hint: GENERIC_FAILURE_HINT.to_string(),
+        },
         Ok(out) => {
             let mut text = decode_wsl_output(&out.stdout);
             let err = decode_wsl_output(&out.stderr);
@@ -361,7 +424,9 @@ pub fn run_install(
                 text.push_str(&err);
             }
             let lc = text.to_lowercase();
-            if out.status == Some(SUCCESS_REBOOT_REQUIRED) || (out.status != Some(0) && strict_reboot_marker(&lc)) {
+            if out.status == Some(SUCCESS_REBOOT_REQUIRED)
+                || (out.status != Some(0) && strict_reboot_marker(&lc))
+            {
                 return InstallOutcome::RestartRequired { message: "Windows needs to restart to finish the installation. Save your work and restart Windows, then reopen VLINUX.".into() };
             }
             if out.status == Some(0) {
@@ -373,14 +438,21 @@ pub fn run_install(
             }
             let hint = match classify_failure(&text) {
                 Some(Failure::Code { hint, .. }) => hint.to_string(),
-                Some(Failure::NotInstalled) => "WSL is not installed. Use 'Set up WSL' first.".to_string(),
+                Some(Failure::NotInstalled) => {
+                    "WSL is not installed. Use 'Set up WSL' first.".to_string()
+                }
                 _ => GENERIC_FAILURE_HINT.to_string(),
             };
             let msg = last_message(&text);
             InstallOutcome::Failed {
                 exit_code: out.status,
                 message: if msg.is_empty() {
-                    format!("wsl.exe exited with code {}.", out.status.map(|c| c.to_string()).unwrap_or_else(|| "unknown".into()))
+                    format!(
+                        "wsl.exe exited with code {}.",
+                        out.status
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "unknown".into())
+                    )
                 } else {
                     msg
                 },
@@ -407,18 +479,33 @@ mod tests {
 
     #[test]
     fn progress_extraction() {
-        assert_eq!(latest_progress("Installing: Ubuntu [=====     ] 45.5%"), ("Installing: Ubuntu 45.5%".to_string(), Some(45.5)));
-        assert_eq!(latest_progress("Downloading: Ubuntu\n"), ("Downloading: Ubuntu".to_string(), None));
-        assert_eq!(latest_progress("a\nInstalling 10%\nInstalling 20%\n").1, Some(20.0));
+        assert_eq!(
+            latest_progress("Installing: Ubuntu [=====     ] 45.5%"),
+            ("Installing: Ubuntu 45.5%".to_string(), Some(45.5))
+        );
+        assert_eq!(
+            latest_progress("Downloading: Ubuntu\n"),
+            ("Downloading: Ubuntu".to_string(), None)
+        );
+        assert_eq!(
+            latest_progress("a\nInstalling 10%\nInstalling 20%\n").1,
+            Some(20.0)
+        );
         assert_eq!(latest_progress(""), (String::new(), None));
         assert_eq!(latest_progress("100%").1, Some(100.0));
         assert_eq!(latest_progress("weird 1000%").1, None);
         // Console redraws use a bare carriage return.
-        assert_eq!(latest_progress("Downloading 30%\rDownloading 60%\r"), ("Downloading 60%".to_string(), Some(60.0)));
+        assert_eq!(
+            latest_progress("Downloading 30%\rDownloading 60%\r"),
+            ("Downloading 60%".to_string(), Some(60.0))
+        );
     }
 
     #[test]
     fn last_message_skips_progress_lines() {
-        assert_eq!(last_message("Installing 5%\nError code: Wsl/InstallDistro/Failed\nInstalling 9%"), "Error code: Wsl/InstallDistro/Failed");
+        assert_eq!(
+            last_message("Installing 5%\nError code: Wsl/InstallDistro/Failed\nInstalling 9%"),
+            "Error code: Wsl/InstallDistro/Failed"
+        );
     }
 }

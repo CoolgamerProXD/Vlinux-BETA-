@@ -54,7 +54,9 @@ pub struct MappingStore {
 
 impl MappingStore {
     pub fn new(dir: &Path) -> Self {
-        Self { path: dir.join(MAPPINGS_FILE) }
+        Self {
+            path: dir.join(MAPPINGS_FILE),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -85,32 +87,43 @@ impl MappingStore {
     }
 
     pub fn for_distro(&self, distro: &str) -> Vec<MappingRecord> {
-        self.all().into_iter().filter(|r| r.distro == distro).collect()
+        self.all()
+            .into_iter()
+            .filter(|r| r.distro == distro)
+            .collect()
     }
 
     pub fn find(&self, distro: &str, folder: &str) -> Option<MappingRecord> {
-        self.all().into_iter().find(|r| r.distro == distro && r.folder == folder)
+        self.all()
+            .into_iter()
+            .find(|r| r.distro == distro && r.folder == folder)
     }
 
     pub fn upsert(&self, rec: MappingRecord, now: u64) -> io::Result<()> {
         let mut data = match self.read() {
             Ok(d) => d,
             Err(_) => {
-                let aside = self.path.with_file_name(format!("{MAPPINGS_FILE}.invalid-{now}"));
+                let aside = self
+                    .path
+                    .with_file_name(format!("{MAPPINGS_FILE}.invalid-{now}"));
                 fs::rename(&self.path, aside)?;
                 FileData::default()
             }
         };
         data.version = 1;
-        data.mappings.retain(|r| !(r.distro == rec.distro && r.folder == rec.folder));
+        data.mappings
+            .retain(|r| !(r.distro == rec.distro && r.folder == rec.folder));
         data.mappings.push(rec);
         self.write(&data)
     }
 
     pub fn remove(&self, distro: &str, folder: &str) -> io::Result<()> {
-        let Ok(mut data) = self.read() else { return Ok(()) };
+        let Ok(mut data) = self.read() else {
+            return Ok(());
+        };
         let before = data.mappings.len();
-        data.mappings.retain(|r| !(r.distro == distro && r.folder == folder));
+        data.mappings
+            .retain(|r| !(r.distro == distro && r.folder == folder));
         if data.mappings.len() == before {
             return Ok(());
         }
@@ -126,7 +139,10 @@ mod tests {
         let p = std::env::temp_dir().join(format!(
             "vlinux-mappings-{tag}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir_all(&p).unwrap();
         p
@@ -155,16 +171,48 @@ mod tests {
     fn roundtrip_upsert_find_remove() {
         let d = temp_dir("rt");
         let s = MappingStore::new(&d);
-        s.upsert(rec("Debian", "downloads", Replaced::Nothing), 1).unwrap();
-        s.upsert(rec("Debian", "documents", Replaced::MovedAside { backup: "/home/me/Documents.vlinux-backup".into() }), 2).unwrap();
-        s.upsert(rec("Arch", "downloads", Replaced::EmptyDir), 3).unwrap();
+        s.upsert(rec("Debian", "downloads", Replaced::Nothing), 1)
+            .unwrap();
+        s.upsert(
+            rec(
+                "Debian",
+                "documents",
+                Replaced::MovedAside {
+                    backup: "/home/me/Documents.vlinux-backup".into(),
+                },
+            ),
+            2,
+        )
+        .unwrap();
+        s.upsert(rec("Arch", "downloads", Replaced::EmptyDir), 3)
+            .unwrap();
         assert_eq!(s.all().len(), 3);
         assert_eq!(s.for_distro("Debian").len(), 2);
-        assert_eq!(s.find("Debian", "documents").unwrap().replaced, Replaced::MovedAside { backup: "/home/me/Documents.vlinux-backup".into() });
+        assert_eq!(
+            s.find("Debian", "documents").unwrap().replaced,
+            Replaced::MovedAside {
+                backup: "/home/me/Documents.vlinux-backup".into()
+            }
+        );
         // upsert replaces, it does not duplicate
-        s.upsert(rec("Debian", "downloads", Replaced::Link { old_target: "/x".into() }), 4).unwrap();
+        s.upsert(
+            rec(
+                "Debian",
+                "downloads",
+                Replaced::Link {
+                    old_target: "/x".into(),
+                },
+            ),
+            4,
+        )
+        .unwrap();
         assert_eq!(s.for_distro("Debian").len(), 2);
-        assert_eq!(s.find("Debian", "downloads").unwrap().replaced, Replaced::Link { old_target: "/x".into() });
+        assert_eq!(
+            s.find("Debian", "downloads").unwrap().replaced,
+            Replaced::Link {
+                old_target: "/x".into()
+            }
+        );
         s.remove("Debian", "downloads").unwrap();
         s.remove("Debian", "downloads").unwrap();
         assert!(s.find("Debian", "downloads").is_none());
@@ -179,8 +227,12 @@ mod tests {
         fs::write(d.join(MAPPINGS_FILE), "{ nope").unwrap();
         let s = MappingStore::new(&d);
         assert!(s.all().is_empty());
-        s.upsert(rec("Debian", "music", Replaced::Nothing), 42).unwrap();
-        assert_eq!(fs::read_to_string(d.join("mappings.json.invalid-42")).unwrap(), "{ nope");
+        s.upsert(rec("Debian", "music", Replaced::Nothing), 42)
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(d.join("mappings.json.invalid-42")).unwrap(),
+            "{ nope"
+        );
         assert!(s.find("Debian", "music").is_some());
         let _ = fs::remove_dir_all(d);
     }

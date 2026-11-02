@@ -53,7 +53,11 @@ pub struct ListOptions {
 
 impl Default for ListOptions {
     fn default() -> Self {
-        Self { show_hidden: false, sort: SortKey::Name, descending: false }
+        Self {
+            show_hidden: false,
+            sort: SortKey::Name,
+            descending: false,
+        }
     }
 }
 
@@ -124,7 +128,9 @@ pub struct ListStore {
 }
 
 fn secs(t: std::io::Result<std::time::SystemTime>) -> Option<u64> {
-    t.ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs())
+    t.ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
 }
 
 #[cfg(windows)]
@@ -154,11 +160,17 @@ fn describe(host_dir: &Path, raw: &Raw) -> Entry {
     let path = host_dir.join(&raw.name);
     let meta = fs::symlink_metadata(&path).ok();
     let (size, modified, readonly) = match &meta {
-        Some(m) => (if m.is_file() { Some(m.len()) } else { None }, secs(m.modified()), m.permissions().readonly()),
+        Some(m) => (
+            if m.is_file() { Some(m.len()) } else { None },
+            secs(m.modified()),
+            m.permissions().readonly(),
+        ),
         None => (raw.size, raw.modified, false),
     };
     let (link_target, link_is_dir) = if raw.kind == EntryKind::Symlink {
-        let target = fs::read_link(&path).ok().map(|t| t.to_string_lossy().replace('\\', "/"));
+        let target = fs::read_link(&path)
+            .ok()
+            .map(|t| t.to_string_lossy().replace('\\', "/"));
         let is_dir = fs::metadata(&path).ok().map(|m| m.is_dir());
         (target, is_dir)
     } else {
@@ -184,7 +196,14 @@ fn describe(host_dir: &Path, raw: &Raw) -> Entry {
         hidden: raw.hidden,
         readonly,
         class,
-        open: if raw.kind == EntryKind::File { open_policy(&raw.name) } else { OpenPolicy { allowed: false, reason: None } },
+        open: if raw.kind == EntryKind::File {
+            open_policy(&raw.name)
+        } else {
+            OpenPolicy {
+                allowed: false,
+                reason: None,
+            }
+        },
         link_target,
         link_is_dir,
     }
@@ -194,20 +213,56 @@ fn crumbs_for(resolved_request: &Location, spaces: &Spaces) -> (Vec<Crumb>, Opti
     match resolved_request {
         Location::Linux { path } => {
             let comps = linux_components(path).unwrap_or_default();
-            let mut crumbs = vec![Crumb { label: "/".into(), location: Location::Linux { path: "/".into() } }];
+            let mut crumbs = vec![Crumb {
+                label: "/".into(),
+                location: Location::Linux { path: "/".into() },
+            }];
             for i in 0..comps.len() {
-                crumbs.push(Crumb { label: comps[i].clone(), location: Location::Linux { path: linux_join(&comps[..=i]) } });
+                crumbs.push(Crumb {
+                    label: comps[i].clone(),
+                    location: Location::Linux {
+                        path: linux_join(&comps[..=i]),
+                    },
+                });
             }
-            let parent = if comps.is_empty() { None } else { Some(Location::Linux { path: linux_join(&comps[..comps.len() - 1]) }) };
+            let parent = if comps.is_empty() {
+                None
+            } else {
+                Some(Location::Linux {
+                    path: linux_join(&comps[..comps.len() - 1]),
+                })
+            };
             (crumbs, parent)
         }
         Location::Windows { root, rel } => {
-            let label = spaces.root(root).map(|r| r.label.clone()).unwrap_or_else(|| root.clone());
-            let mut crumbs = vec![Crumb { label, location: Location::Windows { root: root.clone(), rel: vec![] } }];
+            let label = spaces
+                .root(root)
+                .map(|r| r.label.clone())
+                .unwrap_or_else(|| root.clone());
+            let mut crumbs = vec![Crumb {
+                label,
+                location: Location::Windows {
+                    root: root.clone(),
+                    rel: vec![],
+                },
+            }];
             for i in 0..rel.len() {
-                crumbs.push(Crumb { label: rel[i].clone(), location: Location::Windows { root: root.clone(), rel: rel[..=i].to_vec() } });
+                crumbs.push(Crumb {
+                    label: rel[i].clone(),
+                    location: Location::Windows {
+                        root: root.clone(),
+                        rel: rel[..=i].to_vec(),
+                    },
+                });
             }
-            let parent = if rel.is_empty() { None } else { Some(Location::Windows { root: root.clone(), rel: rel[..rel.len() - 1].to_vec() }) };
+            let parent = if rel.is_empty() {
+                None
+            } else {
+                Some(Location::Windows {
+                    root: root.clone(),
+                    rel: rel[..rel.len() - 1].to_vec(),
+                })
+            };
             (crumbs, parent)
         }
     }
@@ -223,11 +278,19 @@ impl ListStore {
     }
 
     /// Read `location`, sort, remember the listing and return its first page.
-    pub fn open_dir(&self, spaces: &Spaces, location: &Location, opts: &ListOptions, page_size: usize) -> FsResult<ListingHead> {
+    pub fn open_dir(
+        &self,
+        spaces: &Spaces,
+        location: &Location,
+        opts: &ListOptions,
+        page_size: usize,
+    ) -> FsResult<ListingHead> {
         let page_size = page_size.clamp(1, MAX_PAGE);
         // Normalise what was asked for (this is what crumbs and "up" are built from).
         let requested = match location {
-            Location::Linux { path } => Location::Linux { path: linux_join(&linux_components(path)?) },
+            Location::Linux { path } => Location::Linux {
+                path: linux_join(&linux_components(path)?),
+            },
             other => other.clone(),
         };
         let (resolved, host) = spaces.resolve_dir(&requested)?;
@@ -271,7 +334,13 @@ impl ListStore {
                 truncated = true;
                 break;
             }
-            raws.push(Raw { name, kind: kind_of(&ft), hidden, size, modified });
+            raws.push(Raw {
+                name,
+                kind: kind_of(&ft),
+                hidden,
+                size,
+                modified,
+            });
         }
 
         raws.sort_by(|a, b| {
@@ -281,16 +350,30 @@ impl ListStore {
                 SortKey::Size => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
                 SortKey::Modified => a.modified.unwrap_or(0).cmp(&b.modified.unwrap_or(0)),
             };
-            let primary = if opts.descending { primary.reverse() } else { primary };
+            let primary = if opts.descending {
+                primary.reverse()
+            } else {
+                primary
+            };
             dirs_first.then(primary).then_with(|| a.name.cmp(&b.name))
         });
 
         let total = raws.len();
-        let first: Vec<Entry> = raws.iter().take(page_size).map(|r| describe(&host, r)).collect();
+        let first: Vec<Entry> = raws
+            .iter()
+            .take(page_size)
+            .map(|r| describe(&host, r))
+            .collect();
         let id = format!("l{}", self.next.fetch_add(1, Ordering::SeqCst) + 1);
         {
             let mut g = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
-            g.0.insert(id.clone(), Session { host: host.clone(), entries: raws });
+            g.0.insert(
+                id.clone(),
+                Session {
+                    host: host.clone(),
+                    entries: raws,
+                },
+            );
             g.1.push_back(id.clone());
             while g.1.len() > MAX_SESSIONS {
                 if let Some(old) = g.1.pop_front() {
@@ -308,7 +391,11 @@ impl ListStore {
             total,
             truncated,
             unreadable,
-            page: Page { offset: 0, total, entries: first },
+            page: Page {
+                offset: 0,
+                total,
+                entries: first,
+            },
         })
     }
 
@@ -317,21 +404,33 @@ impl ListStore {
         // Describe outside the lock: each entry costs a `stat`.
         let (host, total, slice) = {
             let g = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
-            let s = g
-                .0
-                .get(id)
-                .ok_or_else(|| FsError::new(FsErrorKind::NotFound, "That folder view has expired. Refresh to load it again."))?;
+            let s = g.0.get(id).ok_or_else(|| {
+                FsError::new(
+                    FsErrorKind::NotFound,
+                    "That folder view has expired. Refresh to load it again.",
+                )
+            })?;
             let slice: Vec<Raw> = s
                 .entries
                 .iter()
                 .skip(offset)
                 .take(limit)
-                .map(|r| Raw { name: r.name.clone(), kind: r.kind, hidden: r.hidden, size: r.size, modified: r.modified })
+                .map(|r| Raw {
+                    name: r.name.clone(),
+                    kind: r.kind,
+                    hidden: r.hidden,
+                    size: r.size,
+                    modified: r.modified,
+                })
                 .collect();
             (s.host.clone(), s.entries.len(), slice)
         };
         let entries = slice.iter().map(|r| describe(&host, r)).collect();
-        Ok(Page { offset, total, entries })
+        Ok(Page {
+            offset,
+            total,
+            entries,
+        })
     }
 
     pub fn close(&self, id: &str) {
@@ -341,7 +440,11 @@ impl ListStore {
     }
 
     pub fn open_sessions(&self) -> usize {
-        self.sessions.lock().unwrap_or_else(|p| p.into_inner()).0.len()
+        self.sessions
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .0
+            .len()
     }
 }
 
@@ -369,7 +472,12 @@ mod tests {
             linux_root: Some(linux.path().to_path_buf()),
             linux_home: Some("/home/me".into()),
             mount_root: "/mnt".into(),
-            windows: vec![WindowsRoot { id: "documents".into(), label: "Documents".into(), dir: win.path().to_path_buf(), linux_mount: None }],
+            windows: vec![WindowsRoot {
+                id: "documents".into(),
+                label: "Documents".into(),
+                dir: win.path().to_path_buf(),
+                linux_mount: None,
+            }],
             mapped_links: vec![],
         }
     }
@@ -387,10 +495,22 @@ mod tests {
         l.dir("home/me/zdir");
         l.dir("home/me/adir");
         let store = ListStore::new();
-        let head = store.open_dir(&spaces(&l, &w), &Location::linux("/home/me"), &ListOptions::default(), 50).unwrap();
+        let head = store
+            .open_dir(
+                &spaces(&l, &w),
+                &Location::linux("/home/me"),
+                &ListOptions::default(),
+                50,
+            )
+            .unwrap();
         assert_eq!(names(&head.page), ["adir", "zdir", "A.md", "b.txt"]);
         assert_eq!(head.total, 4);
-        let file = head.page.entries.iter().find(|e| e.name == "b.txt").unwrap();
+        let file = head
+            .page
+            .entries
+            .iter()
+            .find(|e| e.name == "b.txt")
+            .unwrap();
         assert_eq!(file.size, Some(2));
         assert!(file.modified.is_some());
         assert_eq!(file.class.id, "text");
@@ -405,12 +525,26 @@ mod tests {
         let w = TempDir::new("w");
         l.dir("home/me/docs");
         let store = ListStore::new();
-        let head = store.open_dir(&spaces(&l, &w), &Location::linux("//home/me/./docs/"), &ListOptions::default(), 10).unwrap();
+        let head = store
+            .open_dir(
+                &spaces(&l, &w),
+                &Location::linux("//home/me/./docs/"),
+                &ListOptions::default(),
+                10,
+            )
+            .unwrap();
         assert_eq!(head.location, Location::linux("/home/me/docs"));
         let labels: Vec<&str> = head.crumbs.iter().map(|c| c.label.as_str()).collect();
         assert_eq!(labels, ["/", "home", "me", "docs"]);
         assert_eq!(head.parent, Some(Location::linux("/home/me")));
-        let root = store.open_dir(&spaces(&l, &w), &Location::linux("/"), &ListOptions::default(), 10).unwrap();
+        let root = store
+            .open_dir(
+                &spaces(&l, &w),
+                &Location::linux("/"),
+                &ListOptions::default(),
+                10,
+            )
+            .unwrap();
         assert_eq!(root.parent, None);
     }
 
@@ -422,10 +556,22 @@ mod tests {
         l.file("home/me/visible", "");
         let store = ListStore::new();
         let s = spaces(&l, &w);
-        let hidden_off = store.open_dir(&s, &Location::linux("/home/me"), &ListOptions::default(), 10).unwrap();
+        let hidden_off = store
+            .open_dir(
+                &s,
+                &Location::linux("/home/me"),
+                &ListOptions::default(),
+                10,
+            )
+            .unwrap();
         assert_eq!(names(&hidden_off.page), ["visible"]);
-        let on = ListOptions { show_hidden: true, ..ListOptions::default() };
-        let hidden_on = store.open_dir(&s, &Location::linux("/home/me"), &on, 10).unwrap();
+        let on = ListOptions {
+            show_hidden: true,
+            ..ListOptions::default()
+        };
+        let hidden_on = store
+            .open_dir(&s, &Location::linux("/home/me"), &on, 10)
+            .unwrap();
         assert_eq!(names(&hidden_on.page), [".bashrc", "visible"]);
         assert!(hidden_on.page.entries[0].hidden);
     }
@@ -439,10 +585,33 @@ mod tests {
         l.file("d/mid", "123");
         let store = ListStore::new();
         let s = spaces(&l, &w);
-        let asc = ListOptions { sort: SortKey::Size, ..ListOptions::default() };
-        assert_eq!(names(&store.open_dir(&s, &Location::linux("/d"), &asc, 10).unwrap().page), ["small", "mid", "big"]);
-        let desc = ListOptions { sort: SortKey::Size, descending: true, ..ListOptions::default() };
-        assert_eq!(names(&store.open_dir(&s, &Location::linux("/d"), &desc, 10).unwrap().page), ["big", "mid", "small"]);
+        let asc = ListOptions {
+            sort: SortKey::Size,
+            ..ListOptions::default()
+        };
+        assert_eq!(
+            names(
+                &store
+                    .open_dir(&s, &Location::linux("/d"), &asc, 10)
+                    .unwrap()
+                    .page
+            ),
+            ["small", "mid", "big"]
+        );
+        let desc = ListOptions {
+            sort: SortKey::Size,
+            descending: true,
+            ..ListOptions::default()
+        };
+        assert_eq!(
+            names(
+                &store
+                    .open_dir(&s, &Location::linux("/d"), &desc, 10)
+                    .unwrap()
+                    .page
+            ),
+            ["big", "mid", "small"]
+        );
     }
 
     #[test]
@@ -455,9 +624,15 @@ mod tests {
         }
         let store = ListStore::new();
         let s = spaces(&l, &w);
-        let head = store.open_dir(&s, &Location::linux("/big"), &ListOptions::default(), 200).unwrap();
+        let head = store
+            .open_dir(&s, &Location::linux("/big"), &ListOptions::default(), 200)
+            .unwrap();
         assert_eq!(head.total, 3000);
-        assert_eq!(head.page.entries.len(), 200, "only the first page is described");
+        assert_eq!(
+            head.page.entries.len(),
+            200,
+            "only the first page is described"
+        );
         assert_eq!(head.page.entries[0].name, "file-00000.txt");
         let p2 = store.page(&head.id, 200, 200).unwrap();
         assert_eq!(p2.entries.len(), 200);
@@ -467,7 +642,10 @@ mod tests {
         assert_eq!(last.entries.last().unwrap().name, "file-02999.txt");
         assert!(store.page(&head.id, 5000, 10).unwrap().entries.is_empty());
         // limits are clamped
-        assert_eq!(store.page(&head.id, 0, 100_000).unwrap().entries.len(), MAX_PAGE);
+        assert_eq!(
+            store.page(&head.id, 0, 100_000).unwrap().entries.len(),
+            MAX_PAGE
+        );
     }
 
     #[test]
@@ -477,15 +655,27 @@ mod tests {
         l.dir("d");
         let store = ListStore::new();
         let s = spaces(&l, &w);
-        let first = store.open_dir(&s, &Location::linux("/d"), &ListOptions::default(), 10).unwrap();
+        let first = store
+            .open_dir(&s, &Location::linux("/d"), &ListOptions::default(), 10)
+            .unwrap();
         for _ in 0..MAX_SESSIONS {
-            store.open_dir(&s, &Location::linux("/d"), &ListOptions::default(), 10).unwrap();
+            store
+                .open_dir(&s, &Location::linux("/d"), &ListOptions::default(), 10)
+                .unwrap();
         }
         assert_eq!(store.open_sessions(), MAX_SESSIONS);
-        assert_eq!(store.page(&first.id, 0, 10).unwrap_err().kind, FsErrorKind::NotFound);
-        let keep = store.open_dir(&s, &Location::linux("/d"), &ListOptions::default(), 10).unwrap();
+        assert_eq!(
+            store.page(&first.id, 0, 10).unwrap_err().kind,
+            FsErrorKind::NotFound
+        );
+        let keep = store
+            .open_dir(&s, &Location::linux("/d"), &ListOptions::default(), 10)
+            .unwrap();
         store.close(&keep.id);
-        assert_eq!(store.page(&keep.id, 0, 10).unwrap_err().kind, FsErrorKind::NotFound);
+        assert_eq!(
+            store.page(&keep.id, 0, 10).unwrap_err().kind,
+            FsErrorKind::NotFound
+        );
     }
 
     #[test]
@@ -495,12 +685,39 @@ mod tests {
         l.file("home/me/file.txt", "x");
         let store = ListStore::new();
         let s = spaces(&l, &w);
-        let e = store.open_dir(&s, &Location::linux("/home/nope"), &ListOptions::default(), 10).map(|_| ()).unwrap_err();
+        let e = store
+            .open_dir(
+                &s,
+                &Location::linux("/home/nope"),
+                &ListOptions::default(),
+                10,
+            )
+            .map(|_| ())
+            .unwrap_err();
         assert_eq!(e.kind, FsErrorKind::NotFound);
         assert!(e.message.contains("/home/nope"));
-        let e = store.open_dir(&s, &Location::linux("/home/me/file.txt"), &ListOptions::default(), 10).map(|_| ()).unwrap_err();
-        assert!(matches!(e.kind, FsErrorKind::NotADirectory | FsErrorKind::Io), "{e:?}");
-        let e = store.open_dir(&s, &Location::linux("relative"), &ListOptions::default(), 10).map(|_| ()).unwrap_err();
+        let e = store
+            .open_dir(
+                &s,
+                &Location::linux("/home/me/file.txt"),
+                &ListOptions::default(),
+                10,
+            )
+            .map(|_| ())
+            .unwrap_err();
+        assert!(
+            matches!(e.kind, FsErrorKind::NotADirectory | FsErrorKind::Io),
+            "{e:?}"
+        );
+        let e = store
+            .open_dir(
+                &s,
+                &Location::linux("relative"),
+                &ListOptions::default(),
+                10,
+            )
+            .map(|_| ())
+            .unwrap_err();
         assert_eq!(e.kind, FsErrorKind::InvalidPath);
     }
 
@@ -511,11 +728,25 @@ mod tests {
         w.file("report.docx", "x");
         w.dir("Sub");
         let store = ListStore::new();
-        let head = store.open_dir(&spaces(&l, &w), &Location::windows("documents", &[]), &ListOptions::default(), 10).unwrap();
+        let head = store
+            .open_dir(
+                &spaces(&l, &w),
+                &Location::windows("documents", &[]),
+                &ListOptions::default(),
+                10,
+            )
+            .unwrap();
         assert_eq!(names(&head.page), ["Sub", "report.docx"]);
         assert_eq!(head.crumbs[0].label, "Documents");
         assert_eq!(head.parent, None);
-        let sub = store.open_dir(&spaces(&l, &w), &Location::windows("documents", &["Sub"]), &ListOptions::default(), 10).unwrap();
+        let sub = store
+            .open_dir(
+                &spaces(&l, &w),
+                &Location::windows("documents", &["Sub"]),
+                &ListOptions::default(),
+                10,
+            )
+            .unwrap();
         assert_eq!(sub.parent, Some(Location::windows("documents", &[])));
     }
 
@@ -531,14 +762,28 @@ mod tests {
         symlink("f.txt", l.join("home/me/filelink")).unwrap();
         symlink("nowhere", l.join("home/me/broken")).unwrap();
         let store = ListStore::new();
-        let head = store.open_dir(&spaces(&l, &w), &Location::linux("/home/me"), &ListOptions::default(), 20).unwrap();
+        let head = store
+            .open_dir(
+                &spaces(&l, &w),
+                &Location::linux("/home/me"),
+                &ListOptions::default(),
+                20,
+            )
+            .unwrap();
         let get = |n: &str| head.page.entries.iter().find(|e| e.name == n).unwrap();
         assert_eq!(get("dirlink").kind, EntryKind::Symlink);
         assert_eq!(get("dirlink").link_is_dir, Some(true));
         assert_eq!(get("dirlink").link_target.as_deref(), Some("real"));
         assert_eq!(get("filelink").link_is_dir, Some(false));
-        assert_eq!(get("broken").link_is_dir, None, "a broken link is shown, not hidden");
-        assert!(!get("filelink").open.allowed, "links are not opened directly");
+        assert_eq!(
+            get("broken").link_is_dir,
+            None,
+            "a broken link is shown, not hidden"
+        );
+        assert!(
+            !get("filelink").open.allowed,
+            "links are not opened directly"
+        );
     }
 
     #[cfg(unix)]
@@ -551,7 +796,12 @@ mod tests {
         l.file("locked/inner", "x");
         fs::set_permissions(&d, fs::Permissions::from_mode(0o000)).unwrap();
         let store = ListStore::new();
-        let r = store.open_dir(&spaces(&l, &w), &Location::linux("/locked"), &ListOptions::default(), 10);
+        let r = store.open_dir(
+            &spaces(&l, &w),
+            &Location::linux("/locked"),
+            &ListOptions::default(),
+            10,
+        );
         fs::set_permissions(&d, fs::Permissions::from_mode(0o755)).unwrap();
         // (Running as root, e.g. in some containers, bypasses permissions; then there is nothing to assert.)
         if let Err(e) = r {

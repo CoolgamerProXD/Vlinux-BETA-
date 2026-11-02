@@ -12,9 +12,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use vlinux_runtime::terminal::launch::LaunchPlan;
 use vlinux_runtime::terminal::session::{SessionState, TerminalManager};
 use vlinux_runtime::terminal::testing::Collector;
-use vlinux_runtime::terminal::launch::LaunchPlan;
 use vlinux_runtime::terminal::{NativePty, PtySize};
 
 const T: Duration = Duration::from_secs(60);
@@ -39,7 +39,9 @@ fn shell_plan() -> LaunchPlan {
 }
 
 fn open(m: &TerminalManager, size: PtySize) -> String {
-    m.open_plan("local-test-shell", "Local test shell", shell_plan(), size).expect("a real PTY session starts").id
+    m.open_plan("local-test-shell", "Local test shell", shell_plan(), size)
+        .expect("a real PTY session starts")
+        .id
 }
 
 fn send(m: &TerminalManager, id: &str, text: &str) {
@@ -55,23 +57,47 @@ fn commands_run_and_the_shell_sees_a_real_tty() {
     let id = open(&m, PtySize { rows: 24, cols: 80 });
     // `$((20+22))` is expanded by the shell, so "vlinux-42" can only appear if the command ran.
     send(&m, &id, "echo vlinux-$((20+22))\n");
-    assert!(s.wait_text(&id, "vlinux-42", T), "output was: {:?}", s.text(&id));
+    assert!(
+        s.wait_text(&id, "vlinux-42", T),
+        "output was: {:?}",
+        s.text(&id)
+    );
     send(&m, &id, "[ -t 0 ] && [ -t 1 ] && echo tty-$((1+1))\n");
-    assert!(s.wait_text(&id, "tty-2", T), "stdin/stdout must be a terminal; output: {:?}", s.text(&id));
+    assert!(
+        s.wait_text(&id, "tty-2", T),
+        "stdin/stdout must be a terminal; output: {:?}",
+        s.text(&id)
+    );
     send(&m, &id, "exit 0\n");
-    assert!(s.wait_state(&id, T, |st| matches!(st, SessionState::Exited { code: Some(0) })).is_some());
+    assert!(s
+        .wait_state(&id, T, |st| matches!(
+            st,
+            SessionState::Exited { code: Some(0) }
+        ))
+        .is_some());
 }
 
 #[cfg(windows)]
 #[test]
 fn commands_run_under_conpty() {
     let (m, s) = manager();
-    let id = open(&m, PtySize { rows: 30, cols: 100 });
+    let id = open(
+        &m,
+        PtySize {
+            rows: 30,
+            cols: 100,
+        },
+    );
     // `set /a` prints the *result*; the typed text does not contain it.
     send(&m, &id, "set /a 1234*5+7\n");
     assert!(s.wait_text(&id, "6177", T), "output was: {:?}", s.text(&id));
     send(&m, &id, "exit 0\n");
-    assert!(s.wait_state(&id, T, |st| matches!(st, SessionState::Exited { code: Some(0) })).is_some());
+    assert!(s
+        .wait_state(&id, T, |st| matches!(
+            st,
+            SessionState::Exited { code: Some(0) }
+        ))
+        .is_some());
 }
 
 #[test]
@@ -79,7 +105,9 @@ fn the_shells_exit_code_is_reported() {
     let (m, s) = manager();
     let id = open(&m, PtySize::DEFAULT);
     send(&m, &id, "exit 7\n");
-    let st = s.wait_state(&id, T, |st| matches!(st, SessionState::Exited { .. })).expect("exit reported");
+    let st = s
+        .wait_state(&id, T, |st| matches!(st, SessionState::Exited { .. }))
+        .expect("exit reported");
     assert_eq!(st, SessionState::Exited { code: Some(7) });
     // The ended session refuses further input and can be closed.
     assert!(m.write(&id, b"x").is_err());
@@ -104,7 +132,13 @@ fn resizing_changes_the_size_the_program_sees() {
 #[test]
 fn resizing_changes_the_size_the_program_sees_conpty() {
     let (m, s) = manager();
-    let id = open(&m, PtySize { rows: 30, cols: 100 });
+    let id = open(
+        &m,
+        PtySize {
+            rows: 30,
+            cols: 100,
+        },
+    );
     send(&m, &id, "mode con\n");
     assert!(s.wait_text(&id, "100", T), "output: {:?}", s.text(&id));
     m.resize(&id, 41, 133).unwrap();
@@ -122,7 +156,11 @@ fn ctrl_c_interrupts_the_running_command_and_the_shell_survives() {
     std::thread::sleep(Duration::from_millis(500));
     m.write(&id, b"\x03").unwrap(); // Ctrl+C, delivered by the terminal as SIGINT
     send(&m, &id, "echo after-$((40+2))\n");
-    assert!(s.wait_text(&id, "after-42", Duration::from_secs(20)), "the shell must be usable right after Ctrl+C; output: {:?}", s.text(&id));
+    assert!(
+        s.wait_text(&id, "after-42", Duration::from_secs(20)),
+        "the shell must be usable right after Ctrl+C; output: {:?}",
+        s.text(&id)
+    );
     m.close(&id).unwrap();
 }
 
@@ -133,7 +171,11 @@ fn unicode_survives_the_round_trip() {
     let id = open(&m, PtySize::DEFAULT);
     // Typed as UTF-8 by the "user"; the shell prints it back via printf with octal escapes too.
     send(&m, &id, "printf 'u1:%s\\n' 'héllo ✓ 日本語 🦀'\n");
-    assert!(s.wait_text(&id, "u1:héllo ✓ 日本語 🦀", T), "output: {:?}", s.text(&id));
+    assert!(
+        s.wait_text(&id, "u1:héllo ✓ 日本語 🦀", T),
+        "output: {:?}",
+        s.text(&id)
+    );
     send(&m, &id, "printf 'u2:\\303\\251\\342\\234\\223\\n'\n");
     assert!(s.wait_text(&id, "u2:é✓", T), "output: {:?}", s.text(&id));
     m.close(&id).unwrap();
@@ -145,7 +187,11 @@ fn large_output_arrives_complete_under_flow_control() {
     let (m, s) = manager();
     let id = open(&m, PtySize::DEFAULT);
     // 6 MB of 'x' with no newline, then a marker that is computed (not typed).
-    send(&m, &id, "head -c 6000000 /dev/zero | tr '\\0' x; echo; echo big-$((6*7))\n");
+    send(
+        &m,
+        &id,
+        "head -c 6000000 /dev/zero | tr '\\0' x; echo; echo big-$((6*7))\n",
+    );
     assert!(s.wait_text(&id, "big-42", Duration::from_secs(120)));
     let x = s.bytes(&id).iter().filter(|b| **b == b'x').count();
     assert!(x >= 6_000_000, "expected 6,000,000 x's, saw {x}");
@@ -157,11 +203,25 @@ fn large_output_arrives_complete_under_flow_control() {
 fn large_output_arrives_complete_under_flow_control_conpty() {
     let (m, s) = manager();
     let id = open(&m, PtySize::DEFAULT);
-    send(&m, &id, "for /L %i in (1,1,15000) do @echo vlinux-line-%i\n");
-    assert!(s.wait_text(&id, "vlinux-line-15000", Duration::from_secs(120)), "tail: {:?}", {
-        let t = s.text(&id);
-        t.chars().rev().take(200).collect::<String>().chars().rev().collect::<String>()
-    });
+    send(
+        &m,
+        &id,
+        "for /L %i in (1,1,15000) do @echo vlinux-line-%i\n",
+    );
+    assert!(
+        s.wait_text(&id, "vlinux-line-15000", Duration::from_secs(120)),
+        "tail: {:?}",
+        {
+            let t = s.text(&id);
+            t.chars()
+                .rev()
+                .take(200)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect::<String>()
+        }
+    );
     m.close(&id).unwrap();
 }
 
@@ -180,7 +240,11 @@ fn several_sessions_run_side_by_side_and_close_independently() {
         let needle = format!("session-{i}-{}", 10 + i);
         #[cfg(windows)]
         let needle = format!("{}", 100 + i);
-        assert!(s.wait_text(id, &needle, T), "session {i} output: {:?}", s.text(id));
+        assert!(
+            s.wait_text(id, &needle, T),
+            "session {i} output: {:?}",
+            s.text(id)
+        );
     }
     // Output stays separate.
     #[cfg(unix)]
@@ -214,7 +278,10 @@ fn closing_a_session_stops_its_process_without_waiting_for_it() {
     std::thread::sleep(Duration::from_millis(500));
     let started = Instant::now();
     m.close(&id).unwrap();
-    assert!(started.elapsed() < Duration::from_secs(5), "close must return promptly");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "close must return promptly"
+    );
     assert!(m.list().is_empty());
     assert!(m.write(&id, b"x").is_err());
     // A closed session never reports an exit to a UI that already dropped it.
@@ -227,7 +294,10 @@ fn a_program_that_does_not_exist_is_a_clean_error() {
     let (m, _s) = manager();
     let plan = LaunchPlan::single("missing", "vlinux-definitely-not-a-program", &[]);
     let err = m.open_plan("x", "x", plan, PtySize::DEFAULT);
-    assert!(err.is_err(), "starting a missing program must fail, not hang");
+    assert!(
+        err.is_err(),
+        "starting a missing program must fail, not hang"
+    );
     assert!(m.list().is_empty());
 }
 
@@ -242,7 +312,10 @@ fn real_wsl_exe_for_an_unregistered_distribution_ends_cleanly() {
     use vlinux_runtime::wsl::Programs;
 
     let (m, s) = manager();
-    let target = Target { name: "VlinuxNoSuchDistro".into(), label: "none".into() };
+    let target = Target {
+        name: "VlinuxNoSuchDistro".into(),
+        label: "none".into(),
+    };
     let plan = build_plan(&Programs::system(), &target).unwrap();
     let info = match m.open_plan(&target.name, &target.label, plan, PtySize::DEFAULT) {
         Ok(i) => i,
@@ -252,8 +325,13 @@ fn real_wsl_exe_for_an_unregistered_distribution_ends_cleanly() {
             return;
         }
     };
-    let end = s.wait_state(&info.id, Duration::from_secs(60), |st| !matches!(st, SessionState::Running));
-    println!("real wsl.exe, unregistered distro -> {end:?}; output: {:?}", s.text(&info.id));
+    let end = s.wait_state(&info.id, Duration::from_secs(60), |st| {
+        !matches!(st, SessionState::Running)
+    });
+    println!(
+        "real wsl.exe, unregistered distro -> {end:?}; output: {:?}",
+        s.text(&info.id)
+    );
     if end.is_none() {
         // Still running (for example waiting for input): closing must still work promptly.
         let started = Instant::now();

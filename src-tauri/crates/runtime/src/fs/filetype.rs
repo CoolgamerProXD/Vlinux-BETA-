@@ -35,7 +35,9 @@ pub fn extension(name: &str) -> Option<String> {
 pub fn classify_file(name: &str) -> FileClass {
     let Some(ext) = extension(name) else {
         return match name {
-            "Makefile" | "Dockerfile" | "LICENSE" | "README" | "PKGBUILD" => c("code", "Source or config"),
+            "Makefile" | "Dockerfile" | "LICENSE" | "README" | "PKGBUILD" => {
+                c("code", "Source or config")
+            }
             _ => GENERIC,
         };
     };
@@ -46,17 +48,22 @@ pub fn classify_file(name: &str) -> FileClass {
         "doc" | "docx" | "odt" | "pages" => c("document", "Word-processing document"),
         "xls" | "xlsx" | "ods" | "csv" | "tsv" => c("spreadsheet", "Spreadsheet"),
         "ppt" | "pptx" | "odp" | "key" => c("presentation", "Presentation"),
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tif" | "tiff" | "heic" | "avif" => c("image", "Image"),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tif" | "tiff"
+        | "heic" | "avif" => c("image", "Image"),
         "mp3" | "flac" | "wav" | "ogg" | "opus" | "m4a" | "aac" | "wma" => c("audio", "Audio"),
         "mp4" | "mkv" | "webm" | "avi" | "mov" | "wmv" | "m4v" | "flv" => c("video", "Video"),
-        "zip" | "7z" | "rar" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "zst" | "cab" => c("archive", "Archive"),
-        "iso" | "img" | "vhd" | "vhdx" | "vmdk" | "qcow2" => c("disk", "Disk image"),
-        "rs" | "c" | "h" | "cpp" | "hpp" | "cc" | "go" | "java" | "kt" | "swift" | "cs" | "py" | "rb" | "php" | "lua" | "pl"
-        | "js" | "mjs" | "ts" | "tsx" | "jsx" | "svelte" | "vue" | "html" | "htm" | "css" | "scss" | "sql" | "sh" | "bash" | "zsh"
-        | "fish" | "ps1" | "bat" | "cmd" | "toml" | "yaml" | "yml" | "json" | "xml" | "ini" | "conf" | "cfg" | "lock" | "diff" | "patch" => {
-            c("code", "Source or config")
+        "zip" | "7z" | "rar" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "zst" | "cab" => {
+            c("archive", "Archive")
         }
-        "exe" | "msi" | "com" | "scr" | "dll" | "sys" | "appx" | "msix" => c("program", "Windows program"),
+        "iso" | "img" | "vhd" | "vhdx" | "vmdk" | "qcow2" => c("disk", "Disk image"),
+        "rs" | "c" | "h" | "cpp" | "hpp" | "cc" | "go" | "java" | "kt" | "swift" | "cs" | "py"
+        | "rb" | "php" | "lua" | "pl" | "js" | "mjs" | "ts" | "tsx" | "jsx" | "svelte" | "vue"
+        | "html" | "htm" | "css" | "scss" | "sql" | "sh" | "bash" | "zsh" | "fish" | "ps1"
+        | "bat" | "cmd" | "toml" | "yaml" | "yml" | "json" | "xml" | "ini" | "conf" | "cfg"
+        | "lock" | "diff" | "patch" => c("code", "Source or config"),
+        "exe" | "msi" | "com" | "scr" | "dll" | "sys" | "appx" | "msix" => {
+            c("program", "Windows program")
+        }
         "ttf" | "otf" | "woff" | "woff2" => c("font", "Font"),
         "db" | "sqlite" | "sqlite3" | "mdb" => c("database", "Database"),
         "lnk" | "url" => c("shortcut", "Windows shortcut"),
@@ -66,9 +73,49 @@ pub fn classify_file(name: &str) -> FileClass {
 
 /// Extensions Windows would execute, install or merge into the system when opened.
 const BLOCKED: &[&str] = &[
-    "exe", "com", "scr", "pif", "bat", "cmd", "ps1", "psm1", "ps1xml", "psc1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta",
-    "msi", "msp", "mst", "lnk", "url", "reg", "inf", "scf", "cpl", "dll", "sys", "jar", "appx", "msix", "appinstaller",
-    "application", "gadget", "msc", "py", "pyw", "pyz", "ocx", "drv", "vb", "wsc", "theme",
+    "exe",
+    "com",
+    "scr",
+    "pif",
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "ps1xml",
+    "psc1",
+    "vbs",
+    "vbe",
+    "js",
+    "jse",
+    "wsf",
+    "wsh",
+    "hta",
+    "msi",
+    "msp",
+    "mst",
+    "lnk",
+    "url",
+    "reg",
+    "inf",
+    "scf",
+    "cpl",
+    "dll",
+    "sys",
+    "jar",
+    "appx",
+    "msix",
+    "appinstaller",
+    "application",
+    "gadget",
+    "msc",
+    "py",
+    "pyw",
+    "pyz",
+    "ocx",
+    "drv",
+    "vb",
+    "wsc",
+    "theme",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -108,7 +155,21 @@ mod tests {
 
     #[test]
     fn programs_and_scripts_are_never_launched() {
-        for n in ["setup.exe", "run.BAT", "x.cmd", "a.ps1", "b.vbs", "c.js", "d.msi", "e.lnk", "f.reg", "g.py", "evil.pdf.exe", "trailing.exe. ", "h.jar"] {
+        for n in [
+            "setup.exe",
+            "run.BAT",
+            "x.cmd",
+            "a.ps1",
+            "b.vbs",
+            "c.js",
+            "d.msi",
+            "e.lnk",
+            "f.reg",
+            "g.py",
+            "evil.pdf.exe",
+            "trailing.exe. ",
+            "h.jar",
+        ] {
             assert!(!open_policy(n).allowed, "{n}");
             assert!(open_policy(n).reason.is_some());
         }

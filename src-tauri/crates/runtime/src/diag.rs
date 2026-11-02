@@ -28,13 +28,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::exec::{CancelToken, CommandRunner};
 use crate::fs::path::linux_components;
-use crate::fs::{ops, Conflict, EntryKind, FsErrorKind, ListOptions, ListStore, Location, Progress, Runner, Spaces, TransferMode};
+use crate::fs::{
+    ops, Conflict, EntryKind, FsErrorKind, ListOptions, ListStore, Location, Progress, Runner,
+    Spaces, TransferMode,
+};
 use crate::lifecycle::check_target;
 use crate::model::{DistroKind, DistroState, RuntimeStatus, WslReport};
 use crate::probe::{valid_token, Probed, Prober};
 use crate::shared::engine::{self, Ctx};
 use crate::shared::{parse_wsl_conf, DistroOps, MappingState, MappingStore};
-use crate::storage::{windows_to_wsl, DriveInspector, KnownFolder, KnownFolderResolver, StorageConfig, Verdict};
+use crate::storage::{
+    windows_to_wsl, DriveInspector, KnownFolder, KnownFolderResolver, StorageConfig, Verdict,
+};
 use crate::terminal::{PtySize, SessionState, Target, TerminalManager, TerminalSink};
 use crate::wsl::{Programs, WslClient};
 
@@ -58,7 +63,13 @@ pub enum Category {
 }
 
 impl Category {
-    pub const ALL: [Category; 5] = [Category::Runtime, Category::Terminal, Category::Filesystem, Category::SharedFolders, Category::Desktop];
+    pub const ALL: [Category; 5] = [
+        Category::Runtime,
+        Category::Terminal,
+        Category::Filesystem,
+        Category::SharedFolders,
+        Category::Desktop,
+    ];
     pub fn title(&self) -> &'static str {
         match self {
             Category::Runtime => "Runtime",
@@ -196,14 +207,27 @@ impl DiagSink {
     }
 
     pub fn text(&self, id: &str) -> String {
-        self.inner.lock().ok().and_then(|g| g.out.get(id).map(|b| String::from_utf8_lossy(b).into_owned())).unwrap_or_default()
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|g| {
+                g.out
+                    .get(id)
+                    .map(|b| String::from_utf8_lossy(b).into_owned())
+            })
+            .unwrap_or_default()
     }
 
     pub fn wait_text(&self, id: &str, needle: &str, timeout: Duration) -> bool {
         let end = Instant::now() + timeout;
-        let Ok(mut g) = self.inner.lock() else { return false };
+        let Ok(mut g) = self.inner.lock() else {
+            return false;
+        };
         loop {
-            if g.out.get(id).is_some_and(|b| String::from_utf8_lossy(b).contains(needle)) {
+            if g.out
+                .get(id)
+                .is_some_and(|b| String::from_utf8_lossy(b).contains(needle))
+            {
                 return true;
             }
             let now = Instant::now();
@@ -218,7 +242,10 @@ impl DiagSink {
     }
 
     pub fn ended(&self, id: &str) -> Option<SessionState> {
-        self.inner.lock().ok().and_then(|g| g.ended.get(id).cloned())
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|g| g.ended.get(id).cloned())
     }
 }
 
@@ -278,19 +305,44 @@ fn parse_identity(text: &str) -> Option<(String, String)> {
 }
 
 fn pass(m: impl Into<String>) -> Res {
-    Res { outcome: Outcome::Passed, message: m.into(), guidance: None, modified: false }
+    Res {
+        outcome: Outcome::Passed,
+        message: m.into(),
+        guidance: None,
+        modified: false,
+    }
 }
 fn fail(m: impl Into<String>, g: impl Into<String>) -> Res {
-    Res { outcome: Outcome::Failed, message: m.into(), guidance: Some(g.into()), modified: false }
+    Res {
+        outcome: Outcome::Failed,
+        message: m.into(),
+        guidance: Some(g.into()),
+        modified: false,
+    }
 }
 fn skip(m: impl Into<String>) -> Res {
-    Res { outcome: Outcome::Skipped, message: m.into(), guidance: None, modified: false }
+    Res {
+        outcome: Outcome::Skipped,
+        message: m.into(),
+        guidance: None,
+        modified: false,
+    }
 }
 fn unsupported(m: impl Into<String>) -> Res {
-    Res { outcome: Outcome::Unsupported, message: m.into(), guidance: None, modified: false }
+    Res {
+        outcome: Outcome::Unsupported,
+        message: m.into(),
+        guidance: None,
+        modified: false,
+    }
 }
 fn not_tested(m: impl Into<String>) -> Res {
-    Res { outcome: Outcome::NotTested, message: m.into(), guidance: None, modified: false }
+    Res {
+        outcome: Outcome::NotTested,
+        message: m.into(),
+        guidance: None,
+        modified: false,
+    }
 }
 impl Res {
     fn modified(mut self) -> Self {
@@ -311,15 +363,38 @@ struct Spec {
 }
 
 fn spec(id: &'static str, category: Category, title: &'static str, checked: &'static str) -> Spec {
-    Spec { id, category, title, checked, writes: false, host_only: false }
+    Spec {
+        id,
+        category,
+        title,
+        checked,
+        writes: false,
+        host_only: false,
+    }
 }
 
-fn write_spec(id: &'static str, category: Category, title: &'static str, checked: &'static str) -> Spec {
-    Spec { writes: true, ..spec(id, category, title, checked) }
+fn write_spec(
+    id: &'static str,
+    category: Category,
+    title: &'static str,
+    checked: &'static str,
+) -> Spec {
+    Spec {
+        writes: true,
+        ..spec(id, category, title, checked)
+    }
 }
 
-fn host_spec(id: &'static str, category: Category, title: &'static str, checked: &'static str) -> Spec {
-    Spec { host_only: true, ..spec(id, category, title, checked) }
+fn host_spec(
+    id: &'static str,
+    category: Category,
+    title: &'static str,
+    checked: &'static str,
+) -> Spec {
+    Spec {
+        host_only: true,
+        ..spec(id, category, title, checked)
+    }
 }
 
 struct Run<'a, 'p> {
@@ -353,7 +428,9 @@ impl<'a, 'p> Run<'a, 'p> {
         let gate = if self.cancel.is_cancelled() {
             Some(not_tested("The run was cancelled before this check."))
         } else if self.started.elapsed() > self.env.budget {
-            Some(not_tested("The time budget for this run was used up before this check."))
+            Some(not_tested(
+                "The time budget for this run was used up before this check.",
+            ))
         } else if sp.writes && !self.opts.allow_write {
             Some(not_tested("Needs your permission to create files in a temporary folder inside the distribution (not given for this run)."))
         } else {
@@ -364,7 +441,10 @@ impl<'a, 'p> Run<'a, 'p> {
             None => f(self),
         };
         // A check that did not actually run (precondition, permission, unsupported) carries no evidence.
-        let executed = !matches!(v.outcome, Outcome::NotTested | Outcome::Skipped | Outcome::Unsupported);
+        let executed = !matches!(
+            v.outcome,
+            Outcome::NotTested | Outcome::Skipped | Outcome::Unsupported
+        );
         let evidence = if !executed {
             Evidence::None
         } else if self.env.mode == Mode::Simulated {
@@ -379,7 +459,11 @@ impl<'a, 'p> Run<'a, 'p> {
             category: sp.category,
             title: sp.title.to_string(),
             checked: sp.checked.to_string(),
-            distro: if sp.host_only { None } else { self.distro.clone() },
+            distro: if sp.host_only {
+                None
+            } else {
+                self.distro.clone()
+            },
             outcome: v.outcome,
             evidence,
             modified: executed && v.modified,
@@ -392,7 +476,9 @@ impl<'a, 'p> Run<'a, 'p> {
     }
 
     fn passed(&self, id: &str) -> bool {
-        self.results.iter().any(|r| r.id == id && r.outcome == Outcome::Passed)
+        self.results
+            .iter()
+            .any(|r| r.id == id && r.outcome == Outcome::Passed)
     }
 
     /// Common gate for checks that need the distribution to be running.
@@ -404,10 +490,14 @@ impl<'a, 'p> Run<'a, 'p> {
             return Some(skip("WSL is not ready (see the Runtime checks)."));
         }
         if !self.passed("runtime.distro_state") {
-            return Some(skip("The selected distribution is not usable (see the Runtime checks)."));
+            return Some(skip(
+                "The selected distribution is not usable (see the Runtime checks).",
+            ));
         }
         if !self.running {
-            return Some(not_tested("The distribution is stopped, and starting it was not allowed for this run."));
+            return Some(not_tested(
+                "The distribution is stopped, and starting it was not allowed for this run.",
+            ));
         }
         None
     }
@@ -417,7 +507,9 @@ impl<'a, 'p> Run<'a, 'p> {
             return Some(v);
         }
         if !self.share_ok || self.spaces.is_none() {
-            return Some(skip("The distribution's file share is not reachable (see the Filesystem checks)."));
+            return Some(skip(
+                "The distribution's file share is not reachable (see the Filesystem checks).",
+            ));
         }
         None
     }
@@ -427,7 +519,9 @@ impl<'a, 'p> Run<'a, 'p> {
             return Some(v);
         }
         if self.diag_dir.is_none() {
-            return Some(skip("The temporary diagnostic folder could not be created."));
+            return Some(skip(
+                "The temporary diagnostic folder could not be created.",
+            ));
         }
         None
     }
@@ -448,15 +542,38 @@ impl<'a, 'p> Run<'a, 'p> {
 
     fn runtime(&mut self) {
         let report = self.env.report;
-        self.check(spec("runtime.wsl_available", Category::Runtime, "WSL is available", "Whether wsl.exe answered and reports a usable WSL."), |_| match &report.status {
-            RuntimeStatus::Ready | RuntimeStatus::NoDistributions => pass("WSL answered."),
-            RuntimeStatus::UnsupportedHost { reason } => unsupported(reason.clone()),
-            RuntimeStatus::NotInstalled => fail("WSL is not installed.", "Open Linux Setup to install it (it asks for your approval first)."),
-            RuntimeStatus::RestartRequired => fail("Windows needs a restart before WSL can be used.", "Restart Windows, then run the diagnostics again."),
-            RuntimeStatus::FeatureProblem { hint, .. } => fail("A Windows feature WSL needs is missing or disabled.", hint.clone()),
-            RuntimeStatus::Error { message } => fail(format!("WSL did not respond sensibly: {message}"), "Run `wsl --status` in a terminal to see what it says."),
-        });
-        let answered = matches!(report.status, RuntimeStatus::Ready | RuntimeStatus::NoDistributions);
+        self.check(
+            spec(
+                "runtime.wsl_available",
+                Category::Runtime,
+                "WSL is available",
+                "Whether wsl.exe answered and reports a usable WSL.",
+            ),
+            |_| match &report.status {
+                RuntimeStatus::Ready | RuntimeStatus::NoDistributions => pass("WSL answered."),
+                RuntimeStatus::UnsupportedHost { reason } => unsupported(reason.clone()),
+                RuntimeStatus::NotInstalled => fail(
+                    "WSL is not installed.",
+                    "Open Linux Setup to install it (it asks for your approval first).",
+                ),
+                RuntimeStatus::RestartRequired => fail(
+                    "Windows needs a restart before WSL can be used.",
+                    "Restart Windows, then run the diagnostics again.",
+                ),
+                RuntimeStatus::FeatureProblem { hint, .. } => fail(
+                    "A Windows feature WSL needs is missing or disabled.",
+                    hint.clone(),
+                ),
+                RuntimeStatus::Error { message } => fail(
+                    format!("WSL did not respond sensibly: {message}"),
+                    "Run `wsl --status` in a terminal to see what it says.",
+                ),
+            },
+        );
+        let answered = matches!(
+            report.status,
+            RuntimeStatus::Ready | RuntimeStatus::NoDistributions
+        );
         self.wsl_ready = report.status == RuntimeStatus::Ready;
 
         self.check(spec("runtime.wsl_version", Category::Runtime, "WSL version", "Whether `wsl --version` reports the WSL and kernel versions."), |_| {
@@ -469,40 +586,78 @@ impl<'a, 'p> Run<'a, 'p> {
             }
         });
 
-        self.check(spec("runtime.distros_listed", Category::Runtime, "Distributions listed", "Whether WSL lists at least one distribution that VLINUX may use."), |_| {
-            if !answered {
-                return skip("WSL is not available.");
-            }
-            let n = report.distros.iter().filter(|d| d.kind == DistroKind::Regular).count();
-            if n > 0 {
-                pass(format!("{n} usable distribution(s) listed."))
-            } else {
-                fail("No usable distribution is registered.", "Open Linux Setup to install one.")
-            }
-        });
+        self.check(
+            spec(
+                "runtime.distros_listed",
+                Category::Runtime,
+                "Distributions listed",
+                "Whether WSL lists at least one distribution that VLINUX may use.",
+            ),
+            |_| {
+                if !answered {
+                    return skip("WSL is not available.");
+                }
+                let n = report
+                    .distros
+                    .iter()
+                    .filter(|d| d.kind == DistroKind::Regular)
+                    .count();
+                if n > 0 {
+                    pass(format!("{n} usable distribution(s) listed."))
+                } else {
+                    fail(
+                        "No usable distribution is registered.",
+                        "Open Linux Setup to install one.",
+                    )
+                }
+            },
+        );
 
         let want = self.opts.distro.clone();
         self.distro = want.clone();
-        self.check(spec("runtime.distro_state", Category::Runtime, "Selected distribution", "Whether the selected distribution is registered, usable, and what state it is in."), |s| {
-            let Some(name) = &want else { return not_tested("No distribution was selected for this run.") };
-            if !s.wsl_ready {
-                return skip("WSL is not ready.");
-            }
-            match check_target(report, name) {
-                Ok(d) => {
-                    s.running = d.state == DistroState::Running;
-                    pass(format!("'{name}' is {}.", if s.running { "running" } else { "stopped" }))
+        self.check(
+            spec(
+                "runtime.distro_state",
+                Category::Runtime,
+                "Selected distribution",
+                "Whether the selected distribution is registered, usable, and what state it is in.",
+            ),
+            |s| {
+                let Some(name) = &want else {
+                    return not_tested("No distribution was selected for this run.");
+                };
+                if !s.wsl_ready {
+                    return skip("WSL is not ready.");
                 }
-                Err(e) => fail(e.to_string(), "Choose another distribution, or wait for WSL to finish."),
-            }
-        });
+                match check_target(report, name) {
+                    Ok(d) => {
+                        s.running = d.state == DistroState::Running;
+                        pass(format!(
+                            "'{name}' is {}.",
+                            if s.running { "running" } else { "stopped" }
+                        ))
+                    }
+                    Err(e) => fail(
+                        e.to_string(),
+                        "Choose another distribution, or wait for WSL to finish.",
+                    ),
+                }
+            },
+        );
 
         let usable = self.passed("runtime.distro_state");
-        let sp = spec("runtime.distro_start", Category::Runtime, "Distribution starts", "Whether WSL can start the distribution and it is then listed as running.");
+        let sp = spec(
+            "runtime.distro_start",
+            Category::Runtime,
+            "Distribution starts",
+            "Whether WSL can start the distribution and it is then listed as running.",
+        );
         if !usable {
             self.check(sp, |_| skip("The distribution was not usable (see above)."));
         } else if self.running {
-            self.check(sp, |_| skip("Already running, so starting it was not exercised."));
+            self.check(sp, |_| {
+                skip("Already running, so starting it was not exercised.")
+            });
         } else {
             let allow_start = self.opts.allow_start;
             let wsl = WslClient::new(self.env.runner.clone(), self.env.programs.wsl.clone());
@@ -563,7 +718,10 @@ impl<'a, 'p> Run<'a, 'p> {
 
     fn terminal(&mut self) {
         let cat = Category::Terminal;
-        let target = self.distro.clone().map(|name| Target { label: name.clone(), name });
+        let target = self.distro.clone().map(|name| Target {
+            label: name.clone(),
+            name,
+        });
         self.check(
             write_spec("terminal.pty_create", cat, "Terminal session opens", "A throw-away pseudo-terminal session is opened in the distribution (as its default user, never root)."),
             |s| {
@@ -583,21 +741,45 @@ impl<'a, 'p> Run<'a, 'p> {
         );
 
         fn step(s: &mut Run<'_, '_>, send: &str, expect: &str, what: &str, hint: &str) -> Res {
-            let Some(id) = s.session.clone() else { return skip("No terminal session is open.") };
-            let Some((mgr, sink)) = s.env.terminal else { return not_tested("No terminal backend.") };
+            let Some(id) = s.session.clone() else {
+                return skip("No terminal session is open.");
+            };
+            let Some((mgr, sink)) = s.env.terminal else {
+                return not_tested("No terminal backend.");
+            };
             if let Err(e) = mgr.write(&id, send.as_bytes()) {
                 return fail(format!("Could not send input: {e}"), hint);
             }
             if sink.wait_text(&id, expect, s.env.step_timeout) {
                 pass(what).modified()
             } else {
-                fail(format!("The expected output did not appear within {} ms.", s.env.step_timeout.as_millis()), hint)
+                fail(
+                    format!(
+                        "The expected output did not appear within {} ms.",
+                        s.env.step_timeout.as_millis()
+                    ),
+                    hint,
+                )
             }
         }
 
-        self.check(write_spec("terminal.io", cat, "Input and output", "Typed input reaches the shell and its output comes back (`printf 'VLX%sEND' 42`)."), |s| {
-            step(s, "printf 'VLX%sEND\\n' 42\r", "VLX42END", "Input reached the shell and output came back.", "The shell may be slow to start or has an unusual prompt; try again.")
-        });
+        self.check(
+            write_spec(
+                "terminal.io",
+                cat,
+                "Input and output",
+                "Typed input reaches the shell and its output comes back (`printf 'VLX%sEND' 42`).",
+            ),
+            |s| {
+                step(
+                    s,
+                    "printf 'VLX%sEND\\n' 42\r",
+                    "VLX42END",
+                    "Input reached the shell and output came back.",
+                    "The shell may be slow to start or has an unusual prompt; try again.",
+                )
+            },
+        );
         self.check(
             write_spec("terminal.identity", cat, "Runs as your normal user", "The terminal's shell reports its user and HOME (`id -un`, `$HOME`); it must not be root and HOME must be set. The user name is not shown or put in the report."),
             |s| {
@@ -617,12 +799,40 @@ impl<'a, 'p> Run<'a, 'p> {
                 }
             },
         );
-        self.check(write_spec("terminal.ansi", cat, "Colour and control sequences", "ANSI escape sequences pass through unchanged (a red text sequence is printed)."), |s| {
-            step(s, "printf '\\033[31mVLXRED\\033[0m\\n'\r", "\u{1b}[31mVLXRED", "ANSI sequences arrived intact.", "Something between the shell and the terminal is rewriting escape sequences.")
-        });
-        self.check(write_spec("terminal.unicode", cat, "Unicode", "A non-ASCII character (a check mark) survives the round trip."), |s| {
-            step(s, "printf '\\342\\234\\223VLXU\\n'\r", "\u{2713}VLXU", "A non-ASCII character arrived intact.", "Check the distribution's locale (UTF-8) and the terminal encoding.")
-        });
+        self.check(
+            write_spec(
+                "terminal.ansi",
+                cat,
+                "Colour and control sequences",
+                "ANSI escape sequences pass through unchanged (a red text sequence is printed).",
+            ),
+            |s| {
+                step(
+                    s,
+                    "printf '\\033[31mVLXRED\\033[0m\\n'\r",
+                    "\u{1b}[31mVLXRED",
+                    "ANSI sequences arrived intact.",
+                    "Something between the shell and the terminal is rewriting escape sequences.",
+                )
+            },
+        );
+        self.check(
+            write_spec(
+                "terminal.unicode",
+                cat,
+                "Unicode",
+                "A non-ASCII character (a check mark) survives the round trip.",
+            ),
+            |s| {
+                step(
+                    s,
+                    "printf '\\342\\234\\223VLXU\\n'\r",
+                    "\u{2713}VLXU",
+                    "A non-ASCII character arrived intact.",
+                    "Check the distribution's locale (UTF-8) and the terminal encoding.",
+                )
+            },
+        );
         self.check(write_spec("terminal.resize", cat, "Resize", "Resizing the terminal to 41 rows by 123 columns is seen by the shell (`stty size`)."), |s| {
             let Some(id) = s.session.clone() else { return skip("No terminal session is open.") };
             let Some((mgr, _)) = s.env.terminal else { return not_tested("No terminal backend.") };
@@ -631,15 +841,32 @@ impl<'a, 'p> Run<'a, 'p> {
             }
             step(s, "stty size\r", "41 123", "The shell saw the new size.", "The pseudo-terminal did not pass the new size on.")
         });
-        self.check(write_spec("terminal.close", cat, "Session closes", "The session ends and no process of the diagnostics terminal is left."), |s| {
-            let Some(id) = s.session.take() else { return skip("No terminal session is open.") };
-            let Some((mgr, _)) = s.env.terminal else { return not_tested("No terminal backend.") };
-            match mgr.close(&id) {
-                Ok(()) if mgr.live_count() == 0 => pass("The session closed and nothing was left running."),
-                Ok(()) => fail("The session closed but the manager still reports a live session.", "Report this."),
-                Err(e) => fail(format!("Closing failed: {e}"), "Report this."),
-            }
-        });
+        self.check(
+            write_spec(
+                "terminal.close",
+                cat,
+                "Session closes",
+                "The session ends and no process of the diagnostics terminal is left.",
+            ),
+            |s| {
+                let Some(id) = s.session.take() else {
+                    return skip("No terminal session is open.");
+                };
+                let Some((mgr, _)) = s.env.terminal else {
+                    return not_tested("No terminal backend.");
+                };
+                match mgr.close(&id) {
+                    Ok(()) if mgr.live_count() == 0 => {
+                        pass("The session closed and nothing was left running.")
+                    }
+                    Ok(()) => fail(
+                        "The session closed but the manager still reports a live session.",
+                        "Report this.",
+                    ),
+                    Err(e) => fail(format!("Closing failed: {e}"), "Report this."),
+                }
+            },
+        );
         // Whatever happened above, never leave a diagnostics session behind.
         if let (Some(id), Some((mgr, _))) = (self.session.take(), self.env.terminal) {
             let _ = mgr.close(&id);
@@ -709,7 +936,10 @@ impl<'a, 'p> Run<'a, 'p> {
             });
         }
 
-        let name = format!("{DIAG_PREFIX}{}", self.env.token.strip_prefix("vlx-").unwrap_or("x"));
+        let name = format!(
+            "{DIAG_PREFIX}{}",
+            self.env.token.strip_prefix("vlx-").unwrap_or("x")
+        );
         self.check(
             write_spec("fs.create_dir", cat, "Create a folder", "Creates a temporary folder /tmp/vlinux-diag-<token> (all other write checks happen inside it)."),
             |s| {
@@ -734,103 +964,180 @@ impl<'a, 'p> Run<'a, 'p> {
             return;
         }
 
-        self.check(write_spec("fs.create_file", cat, "Create a file", "Creates an empty file in the diagnostic folder."), |s| {
-            if let Some(v) = s.need_dir() {
-                return v;
-            }
-            let Some(spaces) = s.spaces() else { return skip("No file share.") };
-            match ops::create_file(spaces, &Location::linux(&s.dir()), "a.txt") {
-                Ok(_) => pass("Created a.txt.").modified(),
-                Err(e) => fail(e.message, "File creation through the file share failed."),
-            }
-        });
-
-        self.check(write_spec("fs.read_file", cat, "Write and read a file", "Writes a short text to the new file and reads it back unchanged."), |s| {
-            if let Some(v) = s.need_dir() {
-                return v;
-            }
-            if !s.passed("fs.create_file") {
-                return skip("The file could not be created.");
-            }
-            let Some(spaces) = s.spaces() else { return skip("No file share.") };
-            let entry = match spaces.resolve_entry(&s.loc("a.txt")) {
-                Ok(e) => e,
-                Err(e) => return fail(e.message, "Could not resolve the test file."),
-            };
-            let text = "vlinux diagnostics \u{2713}";
-            if let Err(e) = fs::write(&entry.host, text) {
-                return fail(format!("Writing failed: {e}"), "The file share rejected the write.");
-            }
-            match fs::read_to_string(&entry.host) {
-                Ok(t) if t == text => pass("The text read back unchanged.").modified(),
-                Ok(_) => fail("The text read back differently from what was written.", "The file share is altering file content (encoding or line endings).").modified(),
-                Err(e) => fail(format!("Reading failed: {e}"), "The file share rejected the read.").modified(),
-            }
-        });
-
-        self.check(write_spec("fs.rename", cat, "Rename", "Renames a.txt to b.txt and checks the old name is gone."), |s| {
-            if let Some(v) = s.need_dir() {
-                return v;
-            }
-            if !s.passed("fs.create_file") {
-                return skip("The file could not be created.");
-            }
-            let Some(spaces) = s.spaces() else { return skip("No file share.") };
-            match ops::rename(spaces, &s.loc("a.txt"), "b.txt") {
-                Ok(_) => {
-                    let names = s.names_in("");
-                    if names.contains(&"b.txt".to_string()) && !names.contains(&"a.txt".to_string()) {
-                        pass("Renamed; the old name is gone.").modified()
-                    } else {
-                        fail("The rename reported success but the listing disagrees.", "The file share may be caching directory contents.").modified()
-                    }
+        self.check(
+            write_spec(
+                "fs.create_file",
+                cat,
+                "Create a file",
+                "Creates an empty file in the diagnostic folder.",
+            ),
+            |s| {
+                if let Some(v) = s.need_dir() {
+                    return v;
                 }
-                Err(e) => fail(e.message, "Renaming through the file share failed."),
-            }
-        });
+                let Some(spaces) = s.spaces() else {
+                    return skip("No file share.");
+                };
+                match ops::create_file(spaces, &Location::linux(&s.dir()), "a.txt") {
+                    Ok(_) => pass("Created a.txt.").modified(),
+                    Err(e) => fail(e.message, "File creation through the file share failed."),
+                }
+            },
+        );
 
-        self.check(write_spec("fs.copy", cat, "Copy", "Copies b.txt into a sub-folder and compares the content."), |s| {
-            if let Some(v) = s.need_dir() {
-                return v;
-            }
-            if !s.passed("fs.rename") {
-                return skip("The file was not renamed.");
-            }
-            let Some(spaces) = s.spaces() else { return skip("No file share.") };
-            if let Err(e) = ops::create_dir(spaces, &Location::linux(&s.dir()), "sub") {
-                return fail(e.message, "Could not create the sub-folder.");
-            }
-            if let Err(m) = s.run_transfer(&s.loc("b.txt"), &s.loc("sub"), TransferMode::Copy) {
-                return fail(m, "Copying through the file share failed.").modified();
-            }
-            let (a, b) = (s.read_rel("sub/b.txt"), s.read_rel("b.txt"));
-            if a.is_some() && a == b {
-                pass("The copy exists and matches the original.").modified()
-            } else {
-                fail("The copy is missing or differs from the original.", "The file share did not copy the content correctly.").modified()
-            }
-        });
+        self.check(
+            write_spec(
+                "fs.read_file",
+                cat,
+                "Write and read a file",
+                "Writes a short text to the new file and reads it back unchanged.",
+            ),
+            |s| {
+                if let Some(v) = s.need_dir() {
+                    return v;
+                }
+                if !s.passed("fs.create_file") {
+                    return skip("The file could not be created.");
+                }
+                let Some(spaces) = s.spaces() else {
+                    return skip("No file share.");
+                };
+                let entry = match spaces.resolve_entry(&s.loc("a.txt")) {
+                    Ok(e) => e,
+                    Err(e) => return fail(e.message, "Could not resolve the test file."),
+                };
+                let text = "vlinux diagnostics \u{2713}";
+                if let Err(e) = fs::write(&entry.host, text) {
+                    return fail(
+                        format!("Writing failed: {e}"),
+                        "The file share rejected the write.",
+                    );
+                }
+                match fs::read_to_string(&entry.host) {
+                    Ok(t) if t == text => pass("The text read back unchanged.").modified(),
+                    Ok(_) => fail(
+                        "The text read back differently from what was written.",
+                        "The file share is altering file content (encoding or line endings).",
+                    )
+                    .modified(),
+                    Err(e) => fail(
+                        format!("Reading failed: {e}"),
+                        "The file share rejected the read.",
+                    )
+                    .modified(),
+                }
+            },
+        );
 
-        self.check(write_spec("fs.move", cat, "Move", "Moves the copy into another sub-folder and checks it left the first one."), |s| {
-            if let Some(v) = s.need_dir() {
-                return v;
-            }
-            if !s.passed("fs.copy") {
-                return skip("The copy did not work.");
-            }
-            let Some(spaces) = s.spaces() else { return skip("No file share.") };
-            if let Err(e) = ops::create_dir(spaces, &Location::linux(&s.dir()), "sub2") {
-                return fail(e.message, "Could not create the second sub-folder.");
-            }
-            if let Err(m) = s.run_transfer(&s.loc("sub/b.txt"), &s.loc("sub2"), TransferMode::Move) {
-                return fail(m, "Moving through the file share failed.").modified();
-            }
-            if s.read_rel("sub2/b.txt").is_some() && s.read_rel("sub/b.txt").is_none() {
-                pass("The file moved; it is gone from the source.").modified()
-            } else {
-                fail("After the move the file is not only in the destination.", "The file share did not move the file correctly.").modified()
-            }
-        });
+        self.check(
+            write_spec(
+                "fs.rename",
+                cat,
+                "Rename",
+                "Renames a.txt to b.txt and checks the old name is gone.",
+            ),
+            |s| {
+                if let Some(v) = s.need_dir() {
+                    return v;
+                }
+                if !s.passed("fs.create_file") {
+                    return skip("The file could not be created.");
+                }
+                let Some(spaces) = s.spaces() else {
+                    return skip("No file share.");
+                };
+                match ops::rename(spaces, &s.loc("a.txt"), "b.txt") {
+                    Ok(_) => {
+                        let names = s.names_in("");
+                        if names.contains(&"b.txt".to_string())
+                            && !names.contains(&"a.txt".to_string())
+                        {
+                            pass("Renamed; the old name is gone.").modified()
+                        } else {
+                            fail(
+                                "The rename reported success but the listing disagrees.",
+                                "The file share may be caching directory contents.",
+                            )
+                            .modified()
+                        }
+                    }
+                    Err(e) => fail(e.message, "Renaming through the file share failed."),
+                }
+            },
+        );
+
+        self.check(
+            write_spec(
+                "fs.copy",
+                cat,
+                "Copy",
+                "Copies b.txt into a sub-folder and compares the content.",
+            ),
+            |s| {
+                if let Some(v) = s.need_dir() {
+                    return v;
+                }
+                if !s.passed("fs.rename") {
+                    return skip("The file was not renamed.");
+                }
+                let Some(spaces) = s.spaces() else {
+                    return skip("No file share.");
+                };
+                if let Err(e) = ops::create_dir(spaces, &Location::linux(&s.dir()), "sub") {
+                    return fail(e.message, "Could not create the sub-folder.");
+                }
+                if let Err(m) = s.run_transfer(&s.loc("b.txt"), &s.loc("sub"), TransferMode::Copy) {
+                    return fail(m, "Copying through the file share failed.").modified();
+                }
+                let (a, b) = (s.read_rel("sub/b.txt"), s.read_rel("b.txt"));
+                if a.is_some() && a == b {
+                    pass("The copy exists and matches the original.").modified()
+                } else {
+                    fail(
+                        "The copy is missing or differs from the original.",
+                        "The file share did not copy the content correctly.",
+                    )
+                    .modified()
+                }
+            },
+        );
+
+        self.check(
+            write_spec(
+                "fs.move",
+                cat,
+                "Move",
+                "Moves the copy into another sub-folder and checks it left the first one.",
+            ),
+            |s| {
+                if let Some(v) = s.need_dir() {
+                    return v;
+                }
+                if !s.passed("fs.copy") {
+                    return skip("The copy did not work.");
+                }
+                let Some(spaces) = s.spaces() else {
+                    return skip("No file share.");
+                };
+                if let Err(e) = ops::create_dir(spaces, &Location::linux(&s.dir()), "sub2") {
+                    return fail(e.message, "Could not create the second sub-folder.");
+                }
+                if let Err(m) =
+                    s.run_transfer(&s.loc("sub/b.txt"), &s.loc("sub2"), TransferMode::Move)
+                {
+                    return fail(m, "Moving through the file share failed.").modified();
+                }
+                if s.read_rel("sub2/b.txt").is_some() && s.read_rel("sub/b.txt").is_none() {
+                    pass("The file moved; it is gone from the source.").modified()
+                } else {
+                    fail(
+                        "After the move the file is not only in the destination.",
+                        "The file share did not move the file correctly.",
+                    )
+                    .modified()
+                }
+            },
+        );
 
         self.check(
             write_spec("fs.symlink", cat, "Symbolic link detection", "Creates a link inside the distribution (`ln -s`) and checks the file layer recognises it as a link and reports its target."),
@@ -919,10 +1226,24 @@ impl<'a, 'p> Run<'a, 'p> {
     }
 
     fn entries_in(&self, rel: &str) -> Vec<crate::fs::Entry> {
-        let Some(spaces) = self.spaces() else { return Vec::new() };
-        let path = if rel.is_empty() { self.dir() } else { format!("{}/{}", self.dir(), rel) };
+        let Some(spaces) = self.spaces() else {
+            return Vec::new();
+        };
+        let path = if rel.is_empty() {
+            self.dir()
+        } else {
+            format!("{}/{}", self.dir(), rel)
+        };
         let store = ListStore::new();
-        match store.open_dir(spaces, &Location::linux(&path), &ListOptions { show_hidden: true, ..Default::default() }, 500) {
+        match store.open_dir(
+            spaces,
+            &Location::linux(&path),
+            &ListOptions {
+                show_hidden: true,
+                ..Default::default()
+            },
+            500,
+        ) {
             Ok(head) => {
                 store.close(&head.id);
                 head.page.entries
@@ -941,11 +1262,25 @@ impl<'a, 'p> Run<'a, 'p> {
         fs::read_to_string(&e.host).ok()
     }
 
-    fn run_transfer(&self, src: &Location, dest: &Location, mode: TransferMode) -> Result<(), String> {
-        let Some(spaces) = self.spaces() else { return Err("No file share.".into()) };
+    fn run_transfer(
+        &self,
+        src: &Location,
+        dest: &Location,
+        mode: TransferMode,
+    ) -> Result<(), String> {
+        let Some(spaces) = self.spaces() else {
+            return Err("No file share.".into());
+        };
         let mut cb = |_: &Progress| {};
         let mut r = Runner::new(self.cancel, &mut cb);
-        let res = ops::transfer(spaces, std::slice::from_ref(src), dest, mode, Conflict::Fail, &mut r);
+        let res = ops::transfer(
+            spaces,
+            std::slice::from_ref(src),
+            dest,
+            mode,
+            Conflict::Fail,
+            &mut r,
+        );
         let rep = r.finish();
         res.map_err(|e| e.message)?;
         if let Some(f) = rep.failed.first() {
@@ -955,13 +1290,23 @@ impl<'a, 'p> Run<'a, 'p> {
     }
 
     fn cleanup(&mut self) {
-        let Some(dir) = self.diag_dir.clone() else { return };
+        let Some(dir) = self.diag_dir.clone() else {
+            return;
+        };
         // Runs even after a cancellation: it removes only what this run itself created.
-        let token = self.env.token.strip_prefix("vlx-").unwrap_or("x").to_string();
+        let token = self
+            .env
+            .token
+            .strip_prefix("vlx-")
+            .unwrap_or("x")
+            .to_string();
         let expect = format!("/tmp/{DIAG_PREFIX}{token}");
         let t0 = Instant::now();
         let v = if dir != expect {
-            fail("Refused to clean up: the folder is not the one this run created.", "Nothing was removed.")
+            fail(
+                "Refused to clean up: the folder is not the one this run created.",
+                "Nothing was removed.",
+            )
         } else if let Some(spaces) = self.spaces.as_ref() {
             let never = CancelToken::new();
             let mut cb = |_: &Progress| {};
@@ -980,12 +1325,25 @@ impl<'a, 'p> Run<'a, 'p> {
                 })
                 .unwrap_or(false);
             match res {
-                Ok(()) if rep.failed.is_empty() && gone => pass(format!("Removed {dir} and everything the run created in it.")).modified(),
-                Ok(()) => fail(format!("{dir} could not be removed completely."), format!("Remove {dir} yourself (in a terminal: rm -r {dir}).")).modified(),
-                Err(e) => fail(e.message, format!("Remove {dir} yourself (in a terminal: rm -r {dir}).")),
+                Ok(()) if rep.failed.is_empty() && gone => pass(format!(
+                    "Removed {dir} and everything the run created in it."
+                ))
+                .modified(),
+                Ok(()) => fail(
+                    format!("{dir} could not be removed completely."),
+                    format!("Remove {dir} yourself (in a terminal: rm -r {dir})."),
+                )
+                .modified(),
+                Err(e) => fail(
+                    e.message,
+                    format!("Remove {dir} yourself (in a terminal: rm -r {dir})."),
+                ),
             }
         } else {
-            fail("No file share to clean up through.", format!("Remove {dir} yourself."))
+            fail(
+                "No file share to clean up through.",
+                format!("Remove {dir} yourself."),
+            )
         };
         let r = CheckResult {
             id: "fs.cleanup".into(),
@@ -994,7 +1352,11 @@ impl<'a, 'p> Run<'a, 'p> {
             checked: "Removes only the temporary diagnostic folder this run created.".into(),
             distro: self.distro.clone(),
             outcome: v.outcome,
-            evidence: if self.env.mode == Mode::Simulated { Evidence::Simulated } else { Evidence::RealWsl },
+            evidence: if self.env.mode == Mode::Simulated {
+                Evidence::Simulated
+            } else {
+                Evidence::RealWsl
+            },
             modified: v.modified,
             message: v.message,
             guidance: v.guidance,
@@ -1022,22 +1384,36 @@ impl<'a, 'p> Run<'a, 'p> {
         });
 
         let root = self.env.linux_root.map(|p| p.to_path_buf());
-        self.check(spec("shared.mount_root", cat, "Drive mount root", "Reads /etc/wsl.conf for the drive mount root and whether automount is enabled."), |s| {
-            if let Some(v) = s.need_share() {
-                return v;
-            }
-            let Some(root) = &root else { return unsupported("No file share.") };
-            let (present, conf) = match fs::read_to_string(root.join("etc").join("wsl.conf")) {
-                Ok(t) => (true, parse_wsl_conf(&t)),
-                Err(_) => (false, Default::default()),
-            };
-            pass(format!(
-                "Mount root {}, automount {}{}.",
-                conf.mount_root,
-                if conf.automount_enabled { "on" } else { "off" },
-                if present { "" } else { " (no /etc/wsl.conf: WSL defaults)" }
-            ))
-        });
+        self.check(
+            spec(
+                "shared.mount_root",
+                cat,
+                "Drive mount root",
+                "Reads /etc/wsl.conf for the drive mount root and whether automount is enabled.",
+            ),
+            |s| {
+                if let Some(v) = s.need_share() {
+                    return v;
+                }
+                let Some(root) = &root else {
+                    return unsupported("No file share.");
+                };
+                let (present, conf) = match fs::read_to_string(root.join("etc").join("wsl.conf")) {
+                    Ok(t) => (true, parse_wsl_conf(&t)),
+                    Err(_) => (false, Default::default()),
+                };
+                pass(format!(
+                    "Mount root {}, automount {}{}.",
+                    conf.mount_root,
+                    if conf.automount_enabled { "on" } else { "off" },
+                    if present {
+                        ""
+                    } else {
+                        " (no /etc/wsl.conf: WSL defaults)"
+                    }
+                ))
+            },
+        );
 
         let root = self.env.linux_root.map(|p| p.to_path_buf());
         self.check(spec("shared.mount_access", cat, "Drive mounts reachable", "Lists the drive mount root (for example /mnt) to see that Windows drives are mounted."), |s| {
@@ -1159,14 +1535,29 @@ impl<'a, 'p> Run<'a, 'p> {
     fn desktop(&mut self) {
         let cat = Category::Desktop;
         let explorer = self.env.explorer.clone();
-        self.check(host_spec("desktop.explorer", cat, "Windows Explorer", "Whether explorer.exe exists (used by 'Show in Explorer' and 'Open')."), |_| match &explorer {
-            None => unsupported("This host has no Windows Explorer."),
-            Some(p) if p.is_file() => pass("explorer.exe was found."),
-            Some(_) => fail("explorer.exe was not found at its expected location.", "'Show in Explorer' will not work."),
-        });
+        self.check(
+            host_spec(
+                "desktop.explorer",
+                cat,
+                "Windows Explorer",
+                "Whether explorer.exe exists (used by 'Show in Explorer' and 'Open').",
+            ),
+            |_| match &explorer {
+                None => unsupported("This host has no Windows Explorer."),
+                Some(p) if p.is_file() => pass("explorer.exe was found."),
+                Some(_) => fail(
+                    "explorer.exe was not found at its expected location.",
+                    "'Show in Explorer' will not work.",
+                ),
+            },
+        );
 
         let drives = self.env.drives;
-        let mount = if self.mount_root.is_empty() { "/mnt".to_string() } else { self.mount_root.clone() };
+        let mount = if self.mount_root.is_empty() {
+            "/mnt".to_string()
+        } else {
+            self.mount_root.clone()
+        };
         self.check(host_spec("desktop.path_logic", cat, "Windows to WSL path conversion", "Converts a sample drive path and a network (UNC) path with VLINUX's own conversion rules."), |_| {
             let a = windows_to_wsl("C:\\Users\\Example\\Documents", &mount, drives);
             let b = windows_to_wsl("\\\\server\\share\\folder", &mount, drives);
@@ -1251,7 +1642,12 @@ impl<'a, 'p> Run<'a, 'p> {
 }
 
 /// Run diagnostics. `progress` is called after each check (and may be used to emit events).
-pub fn run(env: &DiagEnv<'_>, opts: &Options, cancel: &CancelToken, progress: &mut dyn FnMut(&CheckResult)) -> Report {
+pub fn run(
+    env: &DiagEnv<'_>,
+    opts: &Options,
+    cancel: &CancelToken,
+    progress: &mut dyn FnMut(&CheckResult),
+) -> Report {
     let mut r = Run {
         env,
         opts,
@@ -1318,7 +1714,10 @@ pub fn summarise(results: &[CheckResult]) -> Summary {
         skipped: count(Outcome::Skipped),
         unsupported: count(Outcome::Unsupported),
         not_tested: count(Outcome::NotTested),
-        real_wsl_passed: results.iter().filter(|r| r.outcome == Outcome::Passed && r.evidence == Evidence::RealWsl).count(),
+        real_wsl_passed: results
+            .iter()
+            .filter(|r| r.outcome == Outcome::Passed && r.evidence == Evidence::RealWsl)
+            .count(),
     }
 }
 
@@ -1358,8 +1757,15 @@ pub fn render_text(report: &Report, scrub: &[String]) -> String {
         Mode::Simulated => t.push_str("Run type: SIMULATED — no real WSL was contacted. These results say NOTHING about this PC.\n"),
     }
     t.push_str(&format!("Generated (unix time): {}\n", report.generated_at));
-    t.push_str(&format!("Distribution: {}\n", report.distro.as_deref().unwrap_or("(none selected)")));
-    t.push_str(&format!("Permissions for this run: start distribution = {}, create temporary files = {}\n", yes_no(report.allow_start), yes_no(report.allow_write)));
+    t.push_str(&format!(
+        "Distribution: {}\n",
+        report.distro.as_deref().unwrap_or("(none selected)")
+    ));
+    t.push_str(&format!(
+        "Permissions for this run: start distribution = {}, create temporary files = {}\n",
+        yes_no(report.allow_start),
+        yes_no(report.allow_write)
+    ));
     let s = &report.summary;
     t.push_str(&format!(
         "Summary: {} passed, {} failed, {} skipped, {} unsupported, {} not tested ({} passed against the real WSL)\n",
@@ -1369,13 +1775,28 @@ pub fn render_text(report: &Report, scrub: &[String]) -> String {
         t.push_str("The run was cancelled; the remaining checks are marked NOT TESTED.\n");
     }
     for cat in Category::ALL {
-        let rows: Vec<&CheckResult> = report.results.iter().filter(|r| r.category == cat).collect();
+        let rows: Vec<&CheckResult> = report
+            .results
+            .iter()
+            .filter(|r| r.category == cat)
+            .collect();
         if rows.is_empty() {
             continue;
         }
         t.push_str(&format!("\n[{}]\n", cat.title()));
         for r in rows {
-            t.push_str(&format!("{:<11} {} — {} [{}{}]\n", outcome_word(r.outcome), r.title, r.message, evidence_word(r.evidence), if r.modified { ", modified temporary files" } else { "" }));
+            t.push_str(&format!(
+                "{:<11} {} — {} [{}{}]\n",
+                outcome_word(r.outcome),
+                r.title,
+                r.message,
+                evidence_word(r.evidence),
+                if r.modified {
+                    ", modified temporary files"
+                } else {
+                    ""
+                }
+            ));
             if let Some(g) = &r.guidance {
                 if r.outcome == Outcome::Failed {
                     t.push_str(&format!("            What to do: {g}\n"));
@@ -1400,7 +1821,14 @@ pub fn redact(text: &str, scrub: &[String]) -> String {
             // Windows user names may contain spaces, so there the name runs to the next separator.
             let spaces_end_name = marker != "\\Users\\";
             let end = tail
-                .find(|c: char| c == '\\' || c == '/' || c == '\n' || c == '\r' || (spaces_end_name && c.is_whitespace()) || matches!(c, '\'' | '"' | ',' | ')' | ']' | ';'))
+                .find(|c: char| {
+                    c == '\\'
+                        || c == '/'
+                        || c == '\n'
+                        || c == '\r'
+                        || (spaces_end_name && c.is_whitespace())
+                        || matches!(c, '\'' | '"' | ',' | ')' | ']' | ';')
+                })
                 .unwrap_or(tail.len());
             if end > 0 {
                 result.push_str("<user>");
@@ -1502,10 +1930,26 @@ mod tests {
 
     fn default_rules() -> FakeRunner {
         FakeRunner::new()
-            .on("wsl.exe", &["-d", "Debian", "--exec", "printf", "%s", TOKEN], out_ok(TOKEN.as_bytes()))
-            .on("wsl.exe", &["-d", "Debian", "--exec", "/bin/true"], out_ok(b""))
-            .on("wsl.exe", &["-d", "Debian", "--exec", "wslpath", "-u", "C:/Windows"], out_ok(b"/mnt/c/Windows\n"))
-            .on("wsl.exe", &["-d", "Debian", "--exec", "test", "-f", DIAG_FILE], out_ok(b""))
+            .on(
+                "wsl.exe",
+                &["-d", "Debian", "--exec", "printf", "%s", TOKEN],
+                out_ok(TOKEN.as_bytes()),
+            )
+            .on(
+                "wsl.exe",
+                &["-d", "Debian", "--exec", "/bin/true"],
+                out_ok(b""),
+            )
+            .on(
+                "wsl.exe",
+                &["-d", "Debian", "--exec", "wslpath", "-u", "C:/Windows"],
+                out_ok(b"/mnt/c/Windows\n"),
+            )
+            .on(
+                "wsl.exe",
+                &["-d", "Debian", "--exec", "test", "-f", DIAG_FILE],
+                out_ok(b""),
+            )
     }
 
     fn world_with(state: DistroState, rules: FakeRunner) -> World {
@@ -1517,7 +1961,13 @@ mod tests {
         let runner = Arc::new(rules);
         World {
             ops: FakeDistro::new(root.path(), "/home/dana"),
-            report: fake_report(&[("Debian", state, Regular, 2), ("docker-desktop", Running, Internal, 2)], Some("Debian")),
+            report: fake_report(
+                &[
+                    ("Debian", state, Regular, 2),
+                    ("docker-desktop", Running, Internal, 2),
+                ],
+                Some("Debian"),
+            ),
             root,
             store: MappingStore::new(appdata.path()),
             _appdata: appdata,
@@ -1539,7 +1989,9 @@ mod tests {
     /// Answer the fake shell the way a real one would, until `stop` is set.
     fn shell_responder(backend: FakeBackend, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
-            let Some(p) = backend.wait_proc(0, Duration::from_secs(5)) else { return };
+            let Some(p) = backend.wait_proc(0, Duration::from_secs(5)) else {
+                return;
+            };
             let mut seen = 0usize;
             while !stop.load(Ordering::SeqCst) {
                 let w = p.written_text();
@@ -1565,7 +2017,12 @@ mod tests {
         })
     }
 
-    fn env<'a>(w: &'a World, mode: Mode, report: &'a WslReport, detect: &'a dyn Fn() -> WslReport) -> DiagEnv<'a> {
+    fn env<'a>(
+        w: &'a World,
+        mode: Mode,
+        report: &'a WslReport,
+        detect: &'a dyn Fn() -> WslReport,
+    ) -> DiagEnv<'a> {
         static EXISTS: fn(&str) -> bool = |_| true;
         DiagEnv {
             mode,
@@ -1608,11 +2065,19 @@ mod tests {
     }
 
     fn get<'a>(r: &'a Report, id: &str) -> &'a CheckResult {
-        r.results.iter().find(|x| x.id == id).unwrap_or_else(|| panic!("no result {id}"))
+        r.results
+            .iter()
+            .find(|x| x.id == id)
+            .unwrap_or_else(|| panic!("no result {id}"))
     }
 
     fn full() -> Options {
-        Options { distro: Some("Debian".into()), allow_start: false, allow_write: true, categories: None }
+        Options {
+            distro: Some("Debian".into()),
+            allow_start: false,
+            allow_write: true,
+            categories: None,
+        }
     }
 
     #[test]
@@ -1620,17 +2085,38 @@ mod tests {
         let w = world(Running);
         let r = go_with_shell(&w, Mode::Simulated, full());
         assert_eq!(r.mode, Mode::Simulated);
-        assert!(r.results.iter().all(|x| x.evidence != Evidence::RealWsl && x.evidence != Evidence::Host), "{:?}", r.results.iter().map(|x| (&x.id, x.evidence)).collect::<Vec<_>>());
+        assert!(
+            r.results
+                .iter()
+                .all(|x| x.evidence != Evidence::RealWsl && x.evidence != Evidence::Host),
+            "{:?}",
+            r.results
+                .iter()
+                .map(|x| (&x.id, x.evidence))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(r.summary.real_wsl_passed, 0);
         assert!(r.text.contains("SIMULATED") && r.text.contains("NOTHING about this PC"));
-        assert!(r.results.iter().filter(|x| x.outcome == Outcome::Passed).all(|x| x.evidence == Evidence::Simulated));
+        assert!(r
+            .results
+            .iter()
+            .filter(|x| x.outcome == Outcome::Passed)
+            .all(|x| x.evidence == Evidence::Simulated));
         assert!(r.summary.passed > 10);
     }
 
     #[test]
     fn a_real_run_labels_wsl_and_host_evidence() {
         let w = world(Running);
-        let r = go(&w, Mode::Real, Options { allow_write: false, ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Real,
+            Options {
+                allow_write: false,
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "runtime.wsl_available").evidence, Evidence::RealWsl);
         assert_eq!(get(&r, "shared.known_folders").evidence, Evidence::Host);
         assert_eq!(get(&r, "desktop.path_logic").evidence, Evidence::Host);
@@ -1643,8 +2129,28 @@ mod tests {
     #[test]
     fn writing_checks_need_permission_and_leave_nothing_behind() {
         let w = world(Running);
-        let r = go(&w, Mode::Simulated, Options { allow_write: false, ..full() }, None);
-        for id in ["terminal.pty_create", "terminal.io", "terminal.identity", "fs.create_dir", "fs.create_file", "fs.rename", "fs.copy", "fs.move", "fs.symlink", "shared.link_roundtrip", "desktop.unusual_names"] {
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                allow_write: false,
+                ..full()
+            },
+            None,
+        );
+        for id in [
+            "terminal.pty_create",
+            "terminal.io",
+            "terminal.identity",
+            "fs.create_dir",
+            "fs.create_file",
+            "fs.rename",
+            "fs.copy",
+            "fs.move",
+            "fs.symlink",
+            "shared.link_roundtrip",
+            "desktop.unusual_names",
+        ] {
             let c = get(&r, id);
             assert_eq!(c.outcome, Outcome::NotTested, "{id}");
             assert!(!c.modified);
@@ -1653,9 +2159,21 @@ mod tests {
         assert_eq!(get(&r, "fs.share_access").outcome, Outcome::Passed);
         assert_eq!(get(&r, "fs.enumerate").outcome, Outcome::Passed);
         assert!(r.results.iter().all(|x| !x.modified));
-        assert_eq!(fs::read_dir(w.root.join("tmp")).unwrap().count(), 0, "nothing may be created without permission");
-        assert_eq!(w.backend.proc_count(), 0, "no terminal session without permission");
-        assert!(w.ops.calls().iter().all(|c| !c.starts_with("make_symlink") && !c.starts_with("make_dir")));
+        assert_eq!(
+            fs::read_dir(w.root.join("tmp")).unwrap().count(),
+            0,
+            "nothing may be created without permission"
+        );
+        assert_eq!(
+            w.backend.proc_count(),
+            0,
+            "no terminal session without permission"
+        );
+        assert!(w
+            .ops
+            .calls()
+            .iter()
+            .all(|c| !c.starts_with("make_symlink") && !c.starts_with("make_dir")));
     }
 
     #[test]
@@ -1701,19 +2219,32 @@ mod tests {
             assert_eq!(c.outcome, Outcome::Passed, "{id}: {}", c.message);
         }
         if cfg!(unix) {
-            for id in ["fs.symlink", "fs.symlink_no_follow", "shared.link_roundtrip"] {
+            for id in [
+                "fs.symlink",
+                "fs.symlink_no_follow",
+                "shared.link_roundtrip",
+            ] {
                 let c = get(&r, id);
                 assert_eq!(c.outcome, Outcome::Passed, "{id}: {}", c.message);
             }
         }
-        assert_eq!(get(&r, "desktop.file_association").outcome, Outcome::NotTested);
+        assert_eq!(
+            get(&r, "desktop.file_association").outcome,
+            Outcome::NotTested
+        );
         assert_eq!(get(&r, "desktop.explorer").outcome, Outcome::Unsupported);
         // The terminal session was closed.
         assert_eq!(w.mgr.live_count(), 0);
         // Clean-up removed exactly the diagnostic folder.
         assert!(!w.root.join("tmp/vlinux-diag-abcdef1234").exists());
-        assert_eq!(fs::read_to_string(w.root.join("tmp/user-file.txt")).unwrap(), "mine");
-        assert_eq!(fs::read_to_string(w.root.join("tmp/other-dir/x")).unwrap(), "x");
+        assert_eq!(
+            fs::read_to_string(w.root.join("tmp/user-file.txt")).unwrap(),
+            "mine"
+        );
+        assert_eq!(
+            fs::read_to_string(w.root.join("tmp/other-dir/x")).unwrap(),
+            "x"
+        );
         assert!(r.diag_dir.is_none());
         assert!(get(&r, "fs.cleanup").modified);
         assert!(get(&r, "terminal.io").modified && !get(&r, "fs.enumerate").modified);
@@ -1722,7 +2253,12 @@ mod tests {
         let mut sorted = cats.clone();
         sorted.sort();
         assert_eq!(cats, sorted);
-        let last_fs = r.results.iter().filter(|x| x.category == Category::Filesystem).last().unwrap();
+        let last_fs = r
+            .results
+            .iter()
+            .filter(|x| x.category == Category::Filesystem)
+            .last()
+            .unwrap();
         assert_eq!(last_fs.id, "fs.cleanup");
     }
 
@@ -1731,7 +2267,15 @@ mod tests {
         let mut w = world(Running);
         w.step = Duration::from_millis(150);
         // Nothing ever answers in the terminal.
-        let r = go(&w, Mode::Simulated, Options { categories: Some(vec![Category::Terminal]), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                categories: Some(vec![Category::Terminal]),
+                ..full()
+            },
+            None,
+        );
         let io = get(&r, "terminal.io");
         assert_eq!(io.outcome, Outcome::Failed);
         assert!(io.guidance.is_some());
@@ -1745,9 +2289,23 @@ mod tests {
         let w = world(Running);
         w.backend.fail_next_spawn("pseudo console unavailable");
         w.backend.fail_next_spawn("pseudo console unavailable");
-        let r = go(&w, Mode::Simulated, Options { categories: Some(vec![Category::Terminal]), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                categories: Some(vec![Category::Terminal]),
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "terminal.pty_create").outcome, Outcome::Failed);
-        for id in ["terminal.io", "terminal.ansi", "terminal.unicode", "terminal.resize", "terminal.close"] {
+        for id in [
+            "terminal.io",
+            "terminal.ansi",
+            "terminal.unicode",
+            "terminal.resize",
+            "terminal.close",
+        ] {
             assert_eq!(get(&r, id).outcome, Outcome::Skipped, "{id}");
         }
     }
@@ -1755,12 +2313,27 @@ mod tests {
     #[test]
     fn stopped_distro_is_not_started_without_permission() {
         let w = world(Stopped);
-        let r = go(&w, Mode::Simulated, Options { allow_write: true, allow_start: false, ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                allow_write: true,
+                allow_start: false,
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "runtime.distro_start").outcome, Outcome::NotTested);
         assert_eq!(get(&r, "runtime.exec").outcome, Outcome::NotTested);
         assert_eq!(get(&r, "terminal.pty_create").outcome, Outcome::NotTested);
         assert_eq!(get(&r, "fs.share_access").outcome, Outcome::NotTested);
-        assert!(!w.runner.call_lines().iter().any(|c| c.contains("/bin/true")), "must not start the distribution");
+        assert!(
+            !w.runner
+                .call_lines()
+                .iter()
+                .any(|c| c.contains("/bin/true")),
+            "must not start the distribution"
+        );
         assert_eq!(w.backend.proc_count(), 0);
         assert_eq!(fs::read_dir(w.root.join("tmp")).unwrap().count(), 0);
     }
@@ -1772,12 +2345,25 @@ mod tests {
         let detect = || running.clone();
         let report = w.report.clone();
         let e = env(&w, Mode::Simulated, &report, &detect);
-        let r = run(&e, &Options { allow_write: false, allow_start: true, ..full() }, &CancelToken::new(), &mut |_| {});
+        let r = run(
+            &e,
+            &Options {
+                allow_write: false,
+                allow_start: true,
+                ..full()
+            },
+            &CancelToken::new(),
+            &mut |_| {},
+        );
         let s = get(&r, "runtime.distro_start");
         assert_eq!(s.outcome, Outcome::Passed);
         assert!(s.modified);
         assert_eq!(get(&r, "runtime.exec").outcome, Outcome::Passed);
-        assert!(w.runner.call_lines().iter().any(|c| c.ends_with("--exec /bin/true")));
+        assert!(w
+            .runner
+            .call_lines()
+            .iter()
+            .any(|c| c.ends_with("--exec /bin/true")));
     }
 
     #[test]
@@ -1792,22 +2378,58 @@ mod tests {
         assert_eq!(get(&r, "terminal.pty_create").outcome, Outcome::Skipped);
         assert_eq!(w.backend.proc_count(), 0);
         let mut unsupported_host = w.report.clone();
-        unsupported_host.status = RuntimeStatus::UnsupportedHost { reason: "not Windows".into() };
-        assert_eq!(get(&go(&w, Mode::Simulated, full(), Some(unsupported_host)), "runtime.wsl_available").outcome, Outcome::Unsupported);
+        unsupported_host.status = RuntimeStatus::UnsupportedHost {
+            reason: "not Windows".into(),
+        };
+        assert_eq!(
+            get(
+                &go(&w, Mode::Simulated, full(), Some(unsupported_host)),
+                "runtime.wsl_available"
+            )
+            .outcome,
+            Outcome::Unsupported
+        );
     }
 
     #[test]
     fn internal_and_unknown_distros_are_refused() {
         let w = world(Running);
-        let r = go(&w, Mode::Simulated, Options { distro: Some("docker-desktop".into()), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                distro: Some("docker-desktop".into()),
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "runtime.distro_state").outcome, Outcome::Failed);
         assert_ne!(get(&r, "runtime.exec").outcome, Outcome::Passed);
-        let r = go(&w, Mode::Simulated, Options { distro: Some("Nope".into()), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                distro: Some("Nope".into()),
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "runtime.distro_state").outcome, Outcome::Failed);
-        let r = go(&w, Mode::Simulated, Options { distro: Some("-d x; rm".into()), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                distro: Some("-d x; rm".into()),
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "runtime.distro_state").outcome, Outcome::Failed);
         assert_ne!(get(&r, "fs.share_access").outcome, Outcome::Passed);
-        assert!(w.runner.calls().is_empty(), "nothing may run for a refused distribution");
+        assert!(
+            w.runner.calls().is_empty(),
+            "nothing may run for a refused distribution"
+        );
         assert_eq!(w.backend.proc_count(), 0);
         assert_eq!(fs::read_dir(w.root.join("tmp")).unwrap().count(), 0);
     }
@@ -1815,7 +2437,15 @@ mod tests {
     #[test]
     fn no_distribution_selected_runs_only_host_and_runtime_checks() {
         let w = world(Running);
-        let r = go(&w, Mode::Real, Options { distro: None, ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Real,
+            Options {
+                distro: None,
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "runtime.distro_state").outcome, Outcome::NotTested);
         assert_eq!(get(&r, "fs.share_access").outcome, Outcome::NotTested);
         assert_eq!(get(&r, "shared.known_folders").outcome, Outcome::Passed);
@@ -1837,7 +2467,13 @@ mod tests {
             }
         });
         assert!(r.cancelled);
-        assert!(r.results.iter().filter(|x| x.outcome == Outcome::NotTested).count() >= 10);
+        assert!(
+            r.results
+                .iter()
+                .filter(|x| x.outcome == Outcome::NotTested)
+                .count()
+                >= 10
+        );
         assert_eq!(get(&r, "runtime.wsl_available").outcome, Outcome::Passed);
         assert_eq!(get(&r, "terminal.pty_create").outcome, Outcome::NotTested);
         assert!(r.text.contains("cancelled"));
@@ -1853,7 +2489,10 @@ mod tests {
         let e = env(&w, Mode::Simulated, &report, &detect);
         let cancel = CancelToken::new();
         let c2 = cancel.clone();
-        let opts = Options { categories: Some(vec![Category::Filesystem]), ..full() };
+        let opts = Options {
+            categories: Some(vec![Category::Filesystem]),
+            ..full()
+        };
         let r = run(&e, &opts, &cancel, &mut |c| {
             if c.id == "fs.rename" {
                 c2.cancel();
@@ -1875,7 +2514,10 @@ mod tests {
         e.budget = Duration::from_millis(0);
         std::thread::sleep(Duration::from_millis(5));
         let r = run(&e, &full(), &CancelToken::new(), &mut |_| {});
-        assert!(r.results.iter().any(|x| x.outcome == Outcome::NotTested && x.message.contains("time budget")));
+        assert!(r
+            .results
+            .iter()
+            .any(|x| x.outcome == Outcome::NotTested && x.message.contains("time budget")));
     }
 
     #[test]
@@ -1898,7 +2540,13 @@ mod tests {
             wsl_ready: true,
             running: true,
             share_ok: true,
-            spaces: Some(Spaces { linux_root: Some(w.root.path().to_path_buf()), linux_home: None, mount_root: "/mnt".into(), windows: vec![], mapped_links: vec![] }),
+            spaces: Some(Spaces {
+                linux_root: Some(w.root.path().to_path_buf()),
+                linux_home: None,
+                mount_root: "/mnt".into(),
+                windows: vec![],
+                mapped_links: vec![],
+            }),
             home: None,
             mount_root: "/mnt".into(),
             automount: true,
@@ -1907,19 +2555,40 @@ mod tests {
         };
         run_.cleanup();
         assert_eq!(run_.results[0].outcome, Outcome::Failed);
-        assert!(w.root.join("home/dana").exists(), "a folder that is not ours must never be removed");
+        assert!(
+            w.root.join("home/dana").exists(),
+            "a folder that is not ours must never be removed"
+        );
     }
 
     #[test]
     fn mount_checks_detect_missing_drives_and_disabled_automount() {
         let w = world(Running);
         fs::remove_dir_all(w.root.join("mnt/c")).unwrap();
-        let r = go(&w, Mode::Simulated, Options { allow_write: false, ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                allow_write: false,
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "shared.mount_access").outcome, Outcome::Failed);
         fs::write(w.root.join("etc/wsl.conf"), "[automount]\nenabled=false\n").unwrap();
-        let r = go(&w, Mode::Simulated, Options { allow_write: false, ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                allow_write: false,
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "shared.mount_access").outcome, Outcome::Skipped);
-        assert!(get(&r, "shared.mount_root").message.contains("automount off"));
+        assert!(get(&r, "shared.mount_root")
+            .message
+            .contains("automount off"));
     }
 
     #[test]
@@ -1929,15 +2598,36 @@ mod tests {
         let detect = || w.report.clone();
         let mut e = env(&w, Mode::Real, &report, &detect);
         e.resolver = &NoFolders;
-        let r = run(&e, &Options { allow_write: false, ..full() }, &CancelToken::new(), &mut |_| {});
+        let r = run(
+            &e,
+            &Options {
+                allow_write: false,
+                ..full()
+            },
+            &CancelToken::new(),
+            &mut |_| {},
+        );
         assert_eq!(get(&r, "shared.known_folders").outcome, Outcome::Failed);
     }
 
     #[test]
     fn exec_failures_are_reported_not_hidden() {
-        let bad = FakeRunner::new().on("wsl.exe", &["-d", "Debian", "--exec", "printf", "%s", TOKEN], out_code(1, b""));
+        let bad = FakeRunner::new().on(
+            "wsl.exe",
+            &["-d", "Debian", "--exec", "printf", "%s", TOKEN],
+            out_code(1, b""),
+        );
         let w = world_with(Running, bad);
-        let r = go(&w, Mode::Simulated, Options { allow_write: false, categories: Some(vec![Category::Runtime]), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                allow_write: false,
+                categories: Some(vec![Category::Runtime]),
+                ..full()
+            },
+            None,
+        );
         assert_eq!(get(&r, "runtime.exec").outcome, Outcome::Failed);
         assert!(get(&r, "runtime.exec").guidance.is_some());
     }
@@ -1945,10 +2635,28 @@ mod tests {
     #[test]
     fn category_filter_limits_the_run() {
         let w = world(Running);
-        let r = go(&w, Mode::Simulated, Options { allow_write: false, categories: Some(vec![Category::Runtime]), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                allow_write: false,
+                categories: Some(vec![Category::Runtime]),
+                ..full()
+            },
+            None,
+        );
         assert!(r.results.iter().all(|x| x.category == Category::Runtime));
         // Desktop alone still needs the supporting share/folder checks, but not the full filesystem set.
-        let r = go(&w, Mode::Simulated, Options { allow_write: false, categories: Some(vec![Category::Desktop]), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                allow_write: false,
+                categories: Some(vec![Category::Desktop]),
+                ..full()
+            },
+            None,
+        );
         assert!(r.results.iter().any(|x| x.id == "fs.share_access"));
         assert!(!r.results.iter().any(|x| x.id == "fs.rename"));
     }
@@ -1959,9 +2667,16 @@ mod tests {
         assert!(!t.contains("/home/dana") && !t.contains("/Users/dana") && !t.contains("dana-pc"));
         assert!(t.contains("C:\\Users\\<user>"));
         assert_eq!(redact("nothing here", &[]), "nothing here");
-        assert_eq!(redact("short ab", &["ab".into()]), "short ab", "too-short scrub strings are ignored");
+        assert_eq!(
+            redact("short ab", &["ab".into()]),
+            "short ab",
+            "too-short scrub strings are ignored"
+        );
         assert_eq!(redact("/home/", &[]), "/home/");
-        assert_eq!(replace_ci("Dana and DANA", "dana", "<user>"), "<user> and <user>");
+        assert_eq!(
+            replace_ci("Dana and DANA", "dana", "<user>"),
+            "<user> and <user>"
+        );
     }
 
     #[test]
@@ -1971,7 +2686,15 @@ mod tests {
         let detect = || w.report.clone();
         let mut e = env(&w, Mode::Simulated, &report, &detect);
         e.scrub = vec!["dana".into()];
-        let r = run(&e, &Options { allow_write: false, ..full() }, &CancelToken::new(), &mut |_| {});
+        let r = run(
+            &e,
+            &Options {
+                allow_write: false,
+                ..full()
+            },
+            &CancelToken::new(),
+            &mut |_| {},
+        );
         assert!(!r.text.contains("dana"));
         assert!(!r.text.contains("Example\\Documents"));
     }
@@ -1983,7 +2706,15 @@ mod tests {
         let detect = || w.report.clone();
         let e = env(&w, Mode::Simulated, &report, &detect);
         let mut seen = Vec::new();
-        let r = run(&e, &Options { allow_write: false, ..full() }, &CancelToken::new(), &mut |c| seen.push(c.id.clone()));
+        let r = run(
+            &e,
+            &Options {
+                allow_write: false,
+                ..full()
+            },
+            &CancelToken::new(),
+            &mut |c| seen.push(c.id.clone()),
+        );
         assert_eq!(seen.len(), r.results.len());
         assert_eq!(seen[0], "runtime.wsl_available");
     }
@@ -1993,7 +2724,15 @@ mod tests {
     fn symlink_target_text_differences_are_noted_not_failed() {
         // FakeDistro links point at host paths, so the file layer reports a different target text.
         let w = world(Running);
-        let r = go(&w, Mode::Simulated, Options { categories: Some(vec![Category::Filesystem]), ..full() }, None);
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                categories: Some(vec![Category::Filesystem]),
+                ..full()
+            },
+            None,
+        );
         let c = get(&r, "fs.symlink");
         assert_eq!(c.outcome, Outcome::Passed, "{}", c.message);
         assert!(c.message.contains("symbolic link"));
@@ -2003,9 +2742,20 @@ mod tests {
     fn evidence_never_claims_real_for_a_check_that_did_not_run() {
         let w = world(Running);
         for mode in [Mode::Real, Mode::Simulated] {
-            let r = go(&w, mode, Options { allow_write: false, ..full() }, None);
+            let r = go(
+                &w,
+                mode,
+                Options {
+                    allow_write: false,
+                    ..full()
+                },
+                None,
+            );
             for c in &r.results {
-                if matches!(c.outcome, Outcome::NotTested | Outcome::Skipped | Outcome::Unsupported) {
+                if matches!(
+                    c.outcome,
+                    Outcome::NotTested | Outcome::Skipped | Outcome::Unsupported
+                ) {
                     assert_eq!(c.evidence, Evidence::None, "{}", c.id);
                 }
             }
@@ -2014,9 +2764,16 @@ mod tests {
 
     #[test]
     fn identity_answer_is_read_only_from_a_real_answer_not_the_echo() {
-        let echo = "printf 'VLXID:%s:%s:END\\n' \"$(id -un)\" \"$HOME\"\r\nVLXID:dana:/home/dana:END\r\n";
-        assert_eq!(parse_identity(echo), Some(("dana".into(), "/home/dana".into())));
-        assert_eq!(parse_identity("printf 'VLXID:%s:%s:END\\n' \"$(id -un)\"\r\n"), None);
+        let echo =
+            "printf 'VLXID:%s:%s:END\\n' \"$(id -un)\" \"$HOME\"\r\nVLXID:dana:/home/dana:END\r\n";
+        assert_eq!(
+            parse_identity(echo),
+            Some(("dana".into(), "/home/dana".into()))
+        );
+        assert_eq!(
+            parse_identity("printf 'VLXID:%s:%s:END\\n' \"$(id -un)\"\r\n"),
+            None
+        );
         assert_eq!(parse_identity("nothing here"), None);
     }
 }
