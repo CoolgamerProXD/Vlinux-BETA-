@@ -297,6 +297,7 @@ jobs:
             $mw = [math]::Round($main.WorkingSetSize/1MB,1); $mp = [math]::Round($main.PrivatePageCount/1MB,1)
             $ww = [math]::Round((($wv | Measure-Object WorkingSetSize -Sum).Sum)/1MB,1); $wp = [math]::Round((($wv | Measure-Object PrivatePageCount -Sum).Sum)/1MB,1)
             $line = "[$label] main process: working set $mw MiB, private $mp MiB | WebView2 children: $($wv.Count) processes, working set sum $ww MiB (shared pages counted once per process), private sum $wp MiB | other descendants: $($other.Count)"
+            if ($other.Count -gt 0) { $line += ' [' + ((($other | Group-Object Name | Sort-Object Count -Descending | Select-Object -First 6 | ForEach-Object { "$($_.Name) x$($_.Count)" }) -join ', ')) + ']' }
             Note $line
             Write-Host "::notice title=Memory $label::$line"
             return ,($t | ForEach-Object { [int]$_.ProcessId })
@@ -364,6 +365,8 @@ jobs:
           Note "WebView2 smoke exit code: $smoke"
           $ids2 = Measure-Tree $p.Id 'after the smoke test opened the apps'
           $allIds = @($ids + $ids2 | Select-Object -Unique)
+          Start-Sleep -Seconds 8
+          $null = Measure-Tree $p.Id 'settled, 8 s after the smoke test'
 
           # ---- exit and clean up ----
           Stop-Process -Id $p.Id -Force
