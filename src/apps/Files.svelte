@@ -69,8 +69,10 @@
   let typed = $state('');
   let typedError = $state<string | null>(null);
   let pathInput: HTMLInputElement | undefined = $state();
+  let blurTimer: ReturnType<typeof setTimeout> | undefined;
 
   async function startEdit() {
+    clearTimeout(blurTimer);
     typed = files.linuxPath ?? '';
     typedError = null;
     editing = true;
@@ -255,8 +257,9 @@
   async function drop(e: DragEvent, dest: Location | null, destName?: string) {
     e.preventDefault();
     const d = files.drag;
+    const ok = canDrop(dest, destName);
     dragEnd();
-    if (!d || !canDrop(dest, destName) || !dest) return;
+    if (!d || !ok || !dest) return;
     await files.transfer(d.sources, dest, e.ctrlKey ? 'copy' : 'move');
   }
 
@@ -294,7 +297,7 @@
     {#if editing}
       <form class="pathbar editing" onsubmit={(e) => { e.preventDefault(); void commitTyped(); }}>
         <input bind:this={pathInput} bind:value={typed} spellcheck="false" aria-label="Location" placeholder="Type a Linux path, e.g. ~/Documents or /etc"
-               oninput={() => (typedError = null)} onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); editing = false; } }} onblur={() => setTimeout(() => (editing = false), 120)} />
+               oninput={() => (typedError = null)} onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); clearTimeout(blurTimer); editing = false; } }} onblur={() => { clearTimeout(blurTimer); blurTimer = setTimeout(() => (editing = false), 150); }} />
         {#if typedError}<small class="bad" role="alert">{typedError}</small>{/if}
       </form>
     {:else}
@@ -321,9 +324,11 @@
         {#if places?.home}
           {@render item(places.home, 'home')}
         {/if}
-        {#each places?.folders ?? [] as p (p.id)}
-          {@render item(p, 'folder')}
-        {/each}
+        {#if places?.linux_available}
+          {#each places?.folders ?? [] as p (p.id)}
+            {@render item(p, 'folder')}
+          {/each}
+        {/if}
 
         <div class="head">
           <span>Linux</span>
@@ -607,8 +612,8 @@
   .ico { display: inline-flex; flex: none; color: var(--muted); }
   .ico.folder { color: #ffd37a; }
   .ico.link { color: #8fd0ff; }
-  .nm { overflow: hidden; text-overflow: ellipsis; }
-  .lt { color: var(--faint); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; }
+  .nm { flex: 0 0 auto; max-width: 62%; overflow: hidden; text-overflow: ellipsis; }
+  .lt { flex: 1 1 0; min-width: 0; color: var(--faint); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; }
   .tag { flex: none; font-size: 0.62rem; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--faint); }
   .loadmore { position: absolute; left: 0; right: 0; padding: 6px 18px; color: var(--faint); font-size: 0.78rem; }
   @container (max-width: 560px) {

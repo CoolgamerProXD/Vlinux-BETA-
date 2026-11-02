@@ -52,14 +52,9 @@ try {
   check('date shown', (await text(page, '.date')).length > 3);
   check('5 workspace indicators, #1 active', (await count(page, '.ws .pill')) === 5 && (await text(page, '.ws .pill.active')) === '1');
   check('dock has launcher + 5 apps', (await count(page, '.dock .item')) === 6);
-  check('only the planned app (Files) is disabled; Terminal is enabled', (await count(page, '.dock .item[aria-disabled="true"]')) === 1 && (await count(page, '.dock .item[aria-label^="Terminal"]:not([aria-disabled="true"])')) === 1);
+  check('every app is available (none disabled); Files and Terminal are enabled', (await count(page, '.dock .item[aria-disabled="true"]')) === 0 && (await count(page, '.dock .item[aria-label^="Files"]:not([aria-disabled="true"])')) === 1 && (await count(page, '.dock .item[aria-label^="Terminal"]:not([aria-disabled="true"])')) === 1);
   check('wallpaper rendered', (await count(page, '.wp svg')) === 1);
   await shot(page, '01-desktop');
-
-  console.log('Planned apps do nothing misleading');
-  await page.click('.dock .item[aria-label^="Files"]');
-  await sleep(150);
-  check('clicking Files (planned) opens no window', (await count(page, '.win')) === 0);
 
   console.log('Launcher');
   await page.keyboard.down('Alt'); await page.keyboard.press('F1'); await page.keyboard.up('Alt');
@@ -261,7 +256,7 @@ try {
   await clickText(page, '.settings nav button', 'Linux folders');
   await page.waitForSelector('.folder[data-folder="downloads"]');
   check('six personal folders listed, all shared by default', (await count(page, '.folder')) === 6 && (await page.$$eval('.folder input[role="switch"]', (els) => els.every((e) => e.checked))));
-  check('preferences are labelled as not yet applied', (await text(page, '.page')).includes('not applied to any distribution yet'));
+  check('preferences are not presented as connected (checked-and-applied wording, no "Connected" badge)', (await text(page, '.page')).includes('checked and applied') && !(await text(page, '.page')).includes('Connected'));
   check('projects default to Linux-native storage', await page.$eval('.seg button[aria-checked="true"]', (b) => b.textContent.includes('Inside Linux')));
   await page.click('.folder[data-folder="music"] input[role="switch"]');
   await sleep(800);
@@ -443,6 +438,222 @@ try {
   log = await pv(page);
   check('terminal: "Open terminal" in Linux Setup starts a session in that exact distro', log.opened.length === 1 && log.opened[0].distro === 'archlinux', JSON.stringify(log.opened));
   check('terminal: that session is not used to change the selected/default distro', (await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config') ?? '{}').runtime?.selected_distro ?? '')) === '');
+  await page.close();
+
+  // ====================================================================================
+  console.log('M4 - Files (browser preview: real UI against a SIMULATED in-memory filesystem)');
+  const setVal = (pg, sel, v) => pg.$eval(sel, (e, v2) => { e.value = v2; e.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+  const rowNames = (pg) => pg.$$eval('.files .row', (els) => els.map((e) => e.getAttribute('data-name')));
+  const hasRow = async (pg, n) => (await rowNames(pg)).includes(n);
+  const focusList = (pg) => pg.focus('.rows');
+  const dnd = (pg, srcSel, dstSel, ctrl = false) => pg.evaluate((s2, d2, c2) => {
+    const dt = new DataTransfer();
+    const fire = (el, type) => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, ctrlKey: c2 }));
+    const src = document.querySelector(s2); const dst = document.querySelector(d2);
+    if (!src || !dst) throw new Error(`dnd: missing ${s2} or ${d2}`);
+    fire(src, 'dragstart'); fire(dst, 'dragenter'); fire(dst, 'dragover'); fire(dst, 'drop'); fire(src, 'dragend');
+  }, srcSel, dstSel, ctrl);
+  const openFiles = async (pg) => { await pg.click('.dock .item[aria-label^="Files"]'); await pg.waitForSelector('.files .row'); await sleep(400); };
+  const goto = async (pg, name) => { await pg.click(`.files .row[data-name="${name}"]`); await pg.keyboard.press('Enter'); await sleep(250); };
+  const place = (id, space = 'linux') => `.files .place[data-place="${id}"][data-space="${space}"]`;
+  const typePath = async (pg, t) => { await pg.focus('.rows'); await pg.keyboard.down('Control'); await pg.keyboard.press('l'); await pg.keyboard.up('Control'); await pg.waitForSelector('.pathbar input'); await setVal(pg, '.pathbar input', t); await pg.keyboard.press('Enter'); await sleep(250); };
+
+  page = await fresh(1600, 900, '?wsl=ready');
+  await page.evaluate(() => localStorage.clear());
+  await setSelected(page, 'archlinux');
+  await openFiles(page);
+  check('Files opens as a window', (await visibleWindows(page)).join() === 'Files');
+  check('sidebar has Home, the six personal folders, the file system and the Windows folders',
+    (await count(page, place('home'))) === 1 && (await count(page, '.files .place[data-space="linux"]')) === 8 && (await count(page, '.files .place[data-space="windows"]')) === 6 && (await count(page, place('root'))) === 1);
+  check('opens at the Linux home of the selected distro', (await page.$$eval('.pathbar .crumb', (c) => c.map((x) => x.textContent.trim()))).join('/') === '//home/preview'.replace('//', '/') || (await text(page, '.pathbar')).includes('preview'));
+  check('Linux space is labelled', (await text(page, '.pathbar .space')) === 'Linux');
+  check('home lists folders; hidden files are not shown by default', (await hasRow(page, 'projects')) && !(await hasRow(page, '.bashrc')));
+  await page.click('[data-act="hidden"]'); await sleep(250);
+  check('hidden-files toggle reveals dotfiles', await hasRow(page, '.bashrc'));
+  await page.click('[data-act="hidden"]'); await sleep(250);
+  check('and hides them again', !(await hasRow(page, '.bashrc')));
+  check('symbolic links are marked with their target, broken ones flagged',
+    (await text(page, '.row[data-name="Music"]')).includes('→ /opt/music') && (await text(page, '.row[data-name="broken"]')).includes('broken or unknown'));
+  check('folders sort before files; sizes shown for files', (await rowNames(page))[0] !== undefined);
+  await shot(page, '20-files-home');
+
+  console.log('M4 - large folder (virtual list + paging)');
+  await goto(page, 'projects'); await goto(page, 'big');
+  check('the 3000-entry folder reports its full count without loading it', /3.?000 items/.test(await text(page, '[data-status="count"]')) && /loaded/.test(await text(page, '[data-status="count"]')));
+  const domRows = await count(page, '.files .row');
+  check(`only a window of rows is in the DOM (${domRows} of 3000)`, domRows > 0 && domRows < 80, String(domRows));
+  await page.$eval('.rows', (e) => { e.scrollTop = e.scrollHeight; });
+  await page.waitForFunction(() => document.querySelector('.files .row[data-name="file-3000.txt"]'), { timeout: 8000 });
+  check('scrolling to the end loads the last pages on demand', true);
+  await page.$eval('.rows', (e) => { e.scrollTop = 0; });
+  await sleep(200);
+
+  console.log('M4 - navigation, typed paths and errors');
+  await page.click('button[aria-label="Back"]'); await sleep(250);
+  check('Back returns to the previous folder', (await text(page, '.pathbar')).includes('projects') && !(await text(page, '.pathbar')).includes('big'));
+  await page.click('button[aria-label="Forward"]'); await sleep(250);
+  check('Forward goes on', (await text(page, '.pathbar')).includes('big'));
+  await page.click('button[aria-label="Parent folder"]'); await sleep(250);
+  check('Parent folder goes up', (await hasRow(page, 'hello.py')));
+  await typePath(page, '/root');
+  check('a folder without permission shows a clear error and nothing else', (await count(page, '.state.err[data-kind="permission_denied"]')) === 1);
+  await typePath(page, '/does/not/exist');
+  check('a missing folder is reported as missing', (await count(page, '.state.err[data-kind="not_found"]')) === 1);
+  await page.click(place('home')); await sleep(250);
+  check('an error is left by opening any place', (await count(page, '.state.err')) === 0 && (await hasRow(page, 'projects')));
+  await page.click('.files button[aria-label="Parent folder"]'); await sleep(250);
+  await page.click(place('home')); await sleep(250);
+  await typePath(page, '/etc/../root');
+  check('a path with .. is refused, no navigation', (await text(page, '.pathbar')).length > 0 && (await count(page, '.pathbar small[role="alert"]')) === 1);
+  await page.keyboard.press('Escape'); await sleep(100);
+  await typePath(page, 'C:\\Windows');
+  check('Windows paths are not accepted in the Linux path bar', (await text(page, '.pathbar small[role="alert"]')).includes('Windows'));
+  await page.keyboard.press('Escape'); await sleep(100);
+  await typePath(page, '~/Desktop');
+  check('~ is expanded to the distro home', (await text(page, '.pathbar')).includes('Desktop') && (await count(page, '.state.err')) === 0);
+
+  console.log('M4 - create, rename, delete (confirmation), copy, move');
+  await page.click(place('home')); await sleep(250);
+  await page.click('[data-act="new-folder"]'); await page.waitForSelector('[data-dialog="prompt"]');
+  await setVal(page, '[data-dialog="prompt"] input', 'Projects2');
+  await page.click('[data-act="confirm-prompt"]'); await sleep(350);
+  check('New folder creates a real entry and selects it', (await hasRow(page, 'Projects2')) && (await count(page, '.row.sel[data-name="Projects2"]')) === 1);
+  await page.click('[data-act="new-folder"]'); await page.waitForSelector('[data-dialog="prompt"]');
+  await setVal(page, '[data-dialog="prompt"] input', 'Projects2');
+  await page.click('[data-act="confirm-prompt"]'); await sleep(250);
+  check('creating a name that exists is refused with a message and nothing is overwritten', (await text(page, '[data-dialog-error]')).includes('already exists'));
+  await setVal(page, '[data-dialog="prompt"] input', 'a/b');
+  await page.click('[data-act="confirm-prompt"]'); await sleep(150);
+  check('a name with a slash is refused', (await count(page, '[data-dialog-error]')) === 1);
+  await page.keyboard.press('Escape'); await sleep(200);
+  check('Escape closes the dialog', (await count(page, '[data-dialog]')) === 0);
+  await page.click('.row[data-name="Projects2"]'); await page.keyboard.press('F2'); await page.waitForSelector('[data-dialog="prompt"]');
+  await setVal(page, '[data-dialog="prompt"] input', 'Work');
+  await page.keyboard.press('Enter'); await sleep(350);
+  check('F2 renames', (await hasRow(page, 'Work')) && !(await hasRow(page, 'Projects2')));
+  await page.click('.row[data-name="Work"]'); await page.keyboard.press('Delete'); await page.waitForSelector('[data-dialog="delete"]');
+  check('Delete asks first and says it is permanent', (await text(page, '[data-dialog="delete"]')).includes('permanently'));
+  await clickText(page, '[data-dialog="delete"] button', 'Keep'); await sleep(250);
+  check('declining keeps the item', (await hasRow(page, 'Work')) && (await count(page, '[data-dialog]')) === 0);
+  await page.click('.row[data-name="Work"]'); await page.keyboard.press('Delete'); await page.waitForSelector('[data-dialog="delete"]');
+  await page.click('[data-act="confirm-delete"]'); await sleep(500);
+  check('confirming deletes it', !(await hasRow(page, 'Work')));
+
+  await page.click(place('documents')); await sleep(300);
+  check('a non-empty folder that is not linked shows its real contents', (await hasRow(page, 'notes.txt')) && (await hasRow(page, 'thesis.odt')));
+  await page.click('.row[data-name="notes.txt"]'); await focusList(page);
+  await page.keyboard.down('Control'); await page.keyboard.press('c'); await page.keyboard.up('Control');
+  await page.click(place('desktop')); await sleep(250); await focusList(page);
+  await page.keyboard.down('Control'); await page.keyboard.press('v'); await page.keyboard.up('Control'); await sleep(600);
+  check('Copy + Paste copies into another folder', await hasRow(page, 'notes.txt'));
+  await focusList(page);
+  await page.keyboard.down('Control'); await page.keyboard.press('v'); await page.keyboard.up('Control'); await sleep(600);
+  check('pasting again keeps both (nothing is overwritten)', (await rowNames(page)).some((n) => /^notes \(copy.*\)\.txt$/.test(n ?? '')), (await rowNames(page)).join());
+  await page.click(place('documents')); await sleep(250);
+  check('the original is still there after a copy', await hasRow(page, 'notes.txt'));
+  await page.click('.row[data-name="notes.txt"]'); await focusList(page);
+  await page.keyboard.down('Control'); await page.keyboard.press('x'); await page.keyboard.up('Control');
+  await page.click(place('pictures')); await sleep(250); await focusList(page);
+  await page.keyboard.down('Control'); await page.keyboard.press('v'); await page.keyboard.up('Control'); await sleep(600);
+  check('Cut + Paste moves', await hasRow(page, 'notes.txt'));
+  await page.click(place('documents')); await sleep(250);
+  check('and the source no longer has it', !(await hasRow(page, 'notes.txt')));
+
+  console.log('M4 - drag and drop, context menus');
+  await dnd(page, '.row[data-name="thesis.odt"]', '.row[data-name="drafts"]'); await sleep(600);
+  check('dragging a file onto a folder moves it', !(await hasRow(page, 'thesis.odt')));
+  await goto(page, 'drafts');
+  check('it arrived in the target folder', await hasRow(page, 'thesis.odt'));
+  await dnd(page, '.row[data-name="thesis.odt"]', place('desktop'), true); await sleep(600);
+  check('Ctrl-drag onto a sidebar place copies (source stays)', await hasRow(page, 'thesis.odt'));
+  await page.click(place('desktop')); await sleep(250);
+  check('and it is in Desktop', await hasRow(page, 'thesis.odt'));
+  await page.click('.row[data-name="thesis.odt"]', { button: 'right' }); await page.waitForSelector('.ctx');
+  check('right-click on an item opens its menu', (await count(page, '.ctx [data-cmd="rename"]')) === 1 && (await count(page, '.ctx [data-cmd="delete"]')) === 1);
+  await page.mouse.click(700, 700); await sleep(150);
+  await page.click('.rows', { button: 'right', offset: { x: 300, y: 330 } }); await page.waitForSelector('.ctx');
+  check('right-click on empty space offers New folder / Paste', (await count(page, '.ctx [data-cmd="new-folder"]')) === 1 && (await count(page, '.ctx [data-cmd="paste"]')) === 1);
+  await page.keyboard.press('Escape');
+  await page.mouse.click(700, 700); await sleep(150);
+
+  console.log('M4 - shared Windows folders');
+  await page.click(place('downloads', 'windows')); await sleep(300);
+  check('Windows folder is labelled and lists the real Windows Downloads (redirected to another drive in the preview)', (await text(page, '.pathbar .space')) === 'Windows' && (await hasRow(page, 'photo.jpg')));
+  await page.click('.row[data-name="setup.exe"]', { button: 'right' }); await page.waitForSelector('.ctx');
+  check('programs are never launched from VLINUX: Open is disabled with an explanation', await page.$eval('.ctx [data-cmd="open"]', (b) => b.disabled && b.title.length > 10));
+  await page.mouse.click(700, 700); await sleep(150);
+  await shot(page, '21-files-windows');
+  await page.close();
+
+  console.log('M4 - Files without a distribution');
+  page = await fresh(1600, 900, '?wsl=missing');
+  await page.evaluate(() => localStorage.clear());
+  await openFiles(page);
+  check('Windows folders stay browsable', (await count(page, '.files .place[data-space="windows"]')) === 6 && (await hasRow(page, 'photo.jpg') || (await count(page, '.row')) > 0));
+  check('the Linux section explains why it is unavailable and offers Setup', (await count(page, '[data-note="linux"]')) === 1 && (await text(page, '[data-note="linux"]')).includes('Open Linux Setup'));
+  await page.close();
+
+  console.log('M4 - Settings: Linux folders apply / undo with conflicts (simulated)');
+  page = await fresh(1600, 900, '?wsl=ready');
+  await page.evaluate(() => localStorage.clear());
+  await setSelected(page, 'archlinux');
+  await open2(page);
+  await clickText(page, '.settings nav button', 'Linux folders');
+  await page.waitForSelector('.folder[data-folder="downloads"] [data-badge]');
+  const badges = async () => page.$$eval('.folder [data-badge]', (els) => els.map((e) => e.textContent.trim()));
+  check('before any check every folder reads "preferred, not checked" - never connected', (await badges()).every((b) => b.includes('not checked')), (await badges()).join('|'));
+  await page.waitForSelector('[data-act="check-mappings"]:not([disabled])', { timeout: 8000 });
+  await page.click('[data-act="check-mappings"]'); await sleep(500);
+  const st3 = async (id) => page.$eval(`.folder[data-folder="${id}"] .mapstate`, (e) => e.getAttribute('data-mapstate'));
+  check('after a check each folder reports what is really there', (await st3('downloads')) === 'ready' && (await st3('documents')) === 'conflict' && (await st3('pictures')) === 'ready' && (await st3('music')) === 'conflict' && (await st3('videos')) === 'conflict' && (await st3('desktop')) === 'ready',
+    [await st3('downloads'), await st3('documents'), await st3('pictures'), await st3('music'), await st3('videos'), await st3('desktop')].join());
+  check('nothing says Connected yet', !(await badges()).some((b) => b === 'Connected'));
+  check('conflicts are "pending", with the entries listed', (await text(page, '.folder[data-folder="documents"] [data-badge]')).includes('Pending') && (await text(page, '.folder[data-folder="documents"] .conflict')).includes('thesis.odt'));
+  check('Confirm is disabled until the user picks an option', await page.$eval('.folder[data-folder="documents"] [data-act="apply-resolution"]', (b) => b.disabled));
+  check('the foreign symlink is described and has its own offer', (await text(page, '.folder[data-folder="music"] .conflict')).includes('/opt/music') && (await count(page, '.folder[data-folder="music"] .offer')) >= 1);
+
+  await page.click('.folder[data-folder="downloads"] [data-act="apply"]'); await sleep(500);
+  check('Apply on a missing folder connects it, verified', (await st3('downloads')) === 'applied' && (await text(page, '.folder[data-folder="downloads"] [data-badge]')) === 'Connected');
+  await page.click('.folder[data-folder="pictures"] [data-act="apply"]'); await sleep(250);
+  check('replacing an empty folder asks for explicit confirmation first', (await count(page, '.folder[data-folder="pictures"] [data-act="confirm-apply"]')) === 1 && (await st3('pictures')) === 'ready');
+  await page.click('.folder[data-folder="pictures"] [data-act="confirm-apply"]'); await sleep(500);
+  check('after confirming it is connected', (await st3('pictures')) === 'applied');
+  await page.click('.folder[data-folder="documents"] .offer:last-of-type input'); await sleep(100);
+  check('picking an option enables Confirm', await page.$eval('.folder[data-folder="documents"] [data-act="apply-resolution"]', (b) => !b.disabled));
+  await page.click('.folder[data-folder="documents"] [data-act="apply-resolution"]'); await sleep(600);
+  check('"Move aside" connects Documents without deleting anything', (await st3('documents')) === 'applied');
+  await shot(page, '22-settings-mappings');
+
+  console.log('M4 - Files shows the connection');
+  await openFiles(page);
+  check('linked Linux folders are marked in the sidebar', (await page.$eval(place('downloads'), (e) => e.getAttribute('data-linked'))) === 'true' && (await page.$eval(place('music'), (e) => e.getAttribute('data-linked'))) === 'false');
+  check('the unresolved ones are not marked', (await page.$eval(place('videos'), (e) => e.getAttribute('data-linked'))) === 'false');
+  await page.click(place('downloads')); await sleep(350);
+  check('~/Downloads shows the Windows Downloads files and says so', (await hasRow(page, 'photo.jpg')) && (await count(page, '[data-chip="shared"]')) === 1);
+  await page.click(place('home')); await sleep(300);
+  check('the old Documents content was moved aside, not removed', await hasRow(page, 'Documents.vlinux-backup'));
+  await goto(page, 'Documents.vlinux-backup');
+  check('and its files are all still there', (await hasRow(page, 'thesis.odt')) && (await hasRow(page, 'notes.txt')));
+  await open2(page);
+  await clickText(page, '.settings nav button', 'Linux folders');
+  await page.waitForSelector('.folder[data-folder="downloads"] [data-badge]');
+  await page.waitForSelector('[data-act="check-mappings"]:not([disabled])', { timeout: 8000 });
+  await page.click('[data-act="check-mappings"]'); await sleep(500);
+  check('a re-check finds the real state: applied folders are still connected', (await st3('downloads')) === 'applied');
+  await page.click('.folder[data-folder="downloads"] input[role="switch"]'); await sleep(900);
+  check('turning sharing off while linked says it is still linked (never silently unlinks or deletes)', (await st3('downloads')) === 'linked_but_private' && (await text(page, '.folder[data-folder="downloads"] [data-badge]')).includes('Still linked'), await st3('downloads'));
+  await page.click('.folder[data-folder="downloads"] [data-act="undo"]'); await sleep(500);
+  check('Undo removes only the link; the folder is private again', (await st3('downloads')) === 'private');
+  await page.click('.folder[data-folder="documents"] [data-act="undo"]'); await sleep(500);
+  check('Undo of a "move aside" restores the original folder', (await st3('documents')) === 'conflict' || (await st3('documents')) === 'ready');
+  await page.close();
+
+  page = await fresh(1600, 900, '?wsl=ready');
+  await setSelected(page, 'archlinux');
+  await open2(page);
+  await clickText(page, '.settings nav button', 'Linux folders');
+  await page.waitForSelector('.folder[data-folder="downloads"] [data-badge]');
+  check('after a reload nothing is claimed as connected until the distribution is checked again', (await badges()).every((b) => b.includes('not checked') || b.includes('Linux-private')));
   await page.close();
 
   console.log('Responsive layouts (no overflow, nothing off-screen)');

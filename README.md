@@ -2,7 +2,7 @@
 
 A Windows application that gives you the experience of a Linux desktop without manual installation: Tauri 2 + Rust core, Svelte/TypeScript shell, WSL2 backend (detection and safe setup in M2).
 
-> **Status: M3 (real Linux terminal).** The shell is a *Windows-rendered* desktop; it is not a Linux compositor and not bare-metal Linux. WSL2 is virtualised. VLINUX detects WSL and your distributions read-only, and never starts, installs or changes anything unless you explicitly ask.
+> **Status: M4 (file manager and shared Windows/Linux folders).** The shell is a *Windows-rendered* desktop; it is not a Linux compositor and not bare-metal Linux. WSL2 is virtualised. VLINUX detects WSL and your distributions read-only, and never starts, installs or changes anything unless you explicitly ask.
 
 ## What works now
 Full-screen desktop shell, original VLINUX branding and four generated wallpapers, top bar (workspaces, clock/date, network/battery, status, full-screen, power), application launcher with search, dock (bottom or left), floating windows (drag, resize, maximise, minimise, close) across 2–9 workspaces, Settings (appearance, desktop, startup, Linux folders, shortcuts, settings file) persisted to TOML, System page, and a power menu with **Return to Windows** (leave full-screen + minimise, nothing stopped) and **Quit** (with confirmation).
@@ -11,7 +11,7 @@ Full-screen desktop shell, original VLINUX branding and four generated wallpaper
 * **Linux Setup** app: detects WSL (installed? default version, WSL 2, restart pending, virtualisation problems), lists your distributions (running/stopped, default, WSL version, *Existing* vs *Installed by VLINUX*), and offers to **use your existing distribution** (for example an existing Arch) without touching it. Detection runs only when you open the app or press *Check again*, is cached, and never starts a distribution.
 * **Safe install workflow** using only `wsl.exe --install <official name> --no-launch` / `--no-distribution`: official list → review (exact command, admin/restart/internet notes, what stays untouched) → explicit approval checkbox → live progress → cancel. Plans are single-use and expire. Existing distributions are never overwritten, reset, unregistered or modified; failures and leftovers are reported, never auto-removed. **Nothing is installed by the tests or by default.**
 * **Distro adapters** (Debian, Ubuntu, Arch, Fedora + generic fallback): the only place distribution specifics live. Adding a distribution means adding an adapter.
-* **Shared-folder preferences** (Settings → Linux folders): Downloads/Documents/Pictures/Videos/Music/Desktop → Windows Known Folders (resolved dynamically; redirected folders, other drives, UNC and unsupported paths detected). Saved preferences only — applying them to a distribution arrives with M4.
+* **Shared-folder preferences** (Settings → Linux folders): Downloads/Documents/Pictures/Videos/Music/Desktop → Windows Known Folders (resolved dynamically; redirected folders, other drives, UNC and unsupported paths detected).
 
 ### New in M3 — a real Linux terminal
 * **Terminal** app: a genuine interactive shell inside your selected WSL distribution, rendered with xterm.js and driven through a Windows pseudoconsole (ConPTY, via `portable-pty`). Arrow keys, history, Tab completion, Ctrl+C and other control keys, full-screen programs (vim, htop…), ANSI colours and Unicode all come from the real shell and tty — nothing is emulated on the frontend.
@@ -19,7 +19,13 @@ Full-screen desktop shell, original VLINUX branding and four generated wallpaper
 * **Tabs and windows:** multiple sessions, per-tab distro and status indicator, `+` for the selected distro and `▾` to open another installed distro, Clear, resize that follows the window, Restart for ended shells, and an **Open terminal** button on each distro in Linux Setup. Closing a window or tab ends only its own sessions (with a confirmation if shells are running) and never shuts down WSL or other distros.
 * **Streaming, not polling:** output arrives as events with ack-based flow control, so huge output cannot flood the UI. No Linux process exists until you open a session.
 
-Files (M4) and Distributions (M5) are shown **disabled and labelled** until they exist.
+### New in M4 — Files and shared Windows/Linux folders
+* **Files** app on the real filesystem of your selected distribution (reached through `\\wsl.localhost\<distro>`; direct filesystem APIs, never shell strings) and on your **Windows shared folders** (resolved dynamically from the Windows Known Folders, or your chosen alternative). Sidebar: Home, Desktop, Documents, Downloads, Pictures, Music, Videos, the Linux *File System*, and the Windows folders. Back/forward/parent, breadcrumbs plus a typed Linux path bar (Ctrl+L; `..`, Windows and UNC paths are refused), hidden-file toggle, sortable columns, selection, context menus, F2 / Delete / Ctrl+C / X / V / A, in-window drag and drop (move; Ctrl = copy).
+* **Safe by construction:** nothing is ever overwritten (a name clash keeps both: `name (copy)`), delete needs an explicit confirmation and is permanent (no recycle bin), symbolic links are shown, never followed for copy/move/delete, executable file types are never launched from VLINUX, permission errors and missing paths are explained.
+* **Large folders:** a folder is listed page by page (200 per page) behind a virtual list, so only visible rows exist in the UI; large files are never read into the frontend; copy/move/delete run as cancellable background jobs with progress events.
+* **Shared folders that really link:** Settings → Linux folders can check each of `~/Downloads`, `~/Documents`, `~/Pictures`, `~/Videos`, `~/Music`, `~/Desktop` in the selected distribution and **apply** it as a symbolic link to the Windows folder (through the distribution's own mount, honouring `/etc/wsl.conf`). Files appear on both sides immediately — no copying, no sync. An existing non-empty folder, a file or a foreign link is **never replaced** without an explicit choice (“move my items aside”, or replace an *empty* folder / a link after confirmation); anything that can't be done safely leaves the filesystem unchanged and says why. **Undo** removes only the link VLINUX made and puts back what was there. A folder is shown as *Connected* only after a live check of the distribution; the badges distinguish *preferred · not checked*, *pending (needs your decision)*, *connected*, *unavailable* and *failed*.
+
+Distributions (M5) is shown **disabled and labelled** until it exists.
 
 ### Shortcuts
 `Alt+F1` launcher · `Alt+1…9` workspace · `Alt+W` close window · `F11` full screen · `Alt+Shift+Q` power menu · `Ctrl+Alt+Q` return to Windows immediately. In the Terminal: `Ctrl+Shift+T` new tab · `Ctrl+Shift+W` close tab · `Ctrl+Shift+C/V` copy/paste (plain `Ctrl+C` is the shell's interrupt). The shell shortcuts above still work while the terminal has focus.
@@ -42,6 +48,13 @@ cd src-tauri && cargo test -p vlinux-runtime   # runtime crate (no Tauri needed;
 cd src-tauri && cargo test --workspace         # + the Tauri app crate (needs the Tauri build prerequisites)
 ```
 `.github/workflows/ci.yml` has a fast Ubuntu job for the runtime crate, and a `windows-latest` job that runs everything, builds the installer and smoke-launches the real app. The browser e2e uses *simulated* WSL data (`?wsl=missing|empty|ready|reboot`, clearly labelled in the UI); real detection only exists in the desktop app.
+
+## Verification status (M4)
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#m4-files-and-shared-storage) for the design.
+* **Temp-dir / fake tests (CI, no distro):** the runtime crate's `fs` and `shared` modules are tested against temp-directory "distribution roots" with a fake `wsl.exe`/distro-ops layer: listing and paging, 2 000+-entry directories, create/rename/copy/move/delete, missing and permission-denied paths, invalid names, traversal (`..`), mount pass-through, redirected Known Folders, UNC and other-drive targets, `/etc/wsl.conf` mount roots, and every mapping state (missing, empty folder, non-empty folder, file, foreign link, already applied, drift, rollback on failure, undo/restore, record store).
+* **Real OS tests (CI):** the same code runs against the real filesystem of the Ubuntu runner and, for the portable subset, the Windows runner. Real **symlink** tests run on Ubuntu only (Windows runners can't create symlinks without privileges).
+* **UI:** `npm run e2e` drives the real Files and Settings UI against a clearly labelled **simulated** in-memory filesystem (178 checks, including a 3000-entry folder, delete confirmation, drag and drop, conflict flows).
+* **Not verified:** anything against a real WSL distribution on a real Windows desktop — symlink behaviour and permissions over `\\wsl.localhost`, `wsl.exe` argument handling for unusual paths, `explorer /select`, opening files with Windows associations, and WebView2 rendering. CI has no distribution.
 
 ## Layout
 ```

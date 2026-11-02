@@ -1,4 +1,4 @@
-# VLINUX architecture (M0 – M3)
+# VLINUX architecture (M0 – M4)
 
 ## Principles
 * **Honest framing.** The VLINUX desktop is a *Windows-rendered shell* (a Tauri/WebView2 window). It is not a Wayland compositor and not a bare-metal Linux install. Linux will run through WSL2, which is virtualised.
@@ -95,12 +95,12 @@ Flow: host check (Windows and build ≥ 18362) → `wsl --status` → `wsl --ver
 ### Backend abstraction
 The seam for other execution backends is the runtime crate boundary plus `CommandRunner`; WSL2 is the only backend in M2. Nothing in the frontend is distro-specific: it renders `display_label`, adapter package-manager names and badges from the report.
 
-### Storage architecture (groundwork; mappings are applied from M4)
+### Storage architecture (preferences; applied in M4 — see the M4 section)
 Defaults: `~/Downloads`, `~/Documents`, `~/Pictures`, `~/Videos`, `~/Music`, `~/Desktop` → the matching Windows Known Folder, accessed directly through the drive mount (no copy, no sync). Linux system files, package databases, caches and dotfiles are always private to the distribution. Development projects default to **Linux-native** storage (recommended; `/mnt` access is slower) and can be switched.
 * Known Folders are resolved dynamically via the shell folder API (`dirs` → `SHGetKnownFolderPath`), so redirected folders and other drives work; no user name, `C:\Users` path or drive letter is hard-coded.
 * `windows_to_wsl(path, mount_root, drives)` is pure and tested. It rejects UNC (`\\server\share`, `\\?\UNC`), `\\wsl$` / `\\wsl.localhost`, device paths, drive-relative paths, `..`, illegal characters, reserved names, trailing space/dot and bare drive roots, and **warns** for network and removable drives (`GetDriveTypeW`). The mount root is assumed to be `/mnt`; reading `/etc/wsl.conf` / `wslpath` is an M4 follow-up.
 * `plan_mapping(mode, verdict, existing_linux_entry)` is a pure planner that can never plan data loss: a missing path → create link; the same link → no-op; a symlink elsewhere → retarget (confirmation); an **empty** directory → replace (confirmation); a **non-empty directory or a file → handed to the user, never changed**; unsupported target → blocked; switching to private only unlinks a symlink (confirmation) and leaves the Windows files untouched.
-* UI: Settings → *Linux folders* shows, per folder, the Linux path, where it points (or why it cannot be shared), a share/private switch, an alternative Windows folder with a *Check* step, a projects selector and *Restore defaults*. All of it is labelled as saved preferences that are not applied yet.
+* UI: Settings → *Linux folders* shows, per folder, the Linux path, where it points (or why it cannot be shared), a share/private switch, an alternative Windows folder with a *Check* step, a projects selector and *Restore defaults*. (M4 adds status, apply and undo on top; see below.)
 
 ### Testing strategy
 * `crates/runtime` unit tests plus `tests/detect_scenarios.rs` and `tests/install_scenarios.rs` drive the real parsing/detection/install code with `FakeRunner` (scripted `wsl.exe`/`reg.exe`). Every detection scenario asserts the read-only guarantee; every install scenario asserts that no destructive verb was issued.
@@ -142,3 +142,46 @@ Fake-PTY tests for every behaviour (see README); real-PTY tests on `sh`/`cmd.exe
 * Starting a stopped distribution happens implicitly when `wsl.exe -d` runs (that is what WSL does); VLINUX only does it on an explicit user action.
 * Interactive programs that rely on Windows-side drag-and-drop, links or images (sixel) are not supported; clipboard uses the WebView clipboard API (Ctrl+Shift+C/V).
 * The M2 storage preferences are still not applied (M4).
+
+## M4: Files and shared storage
+
+### Three spaces, never mixed
+1. **The Linux distribution filesystem.** Addressed as a Linux path (`/home/me/Downloads`). The backend reaches it with ordinary `std::fs` through the distribution's root as Windows sees it (`\\wsl.localhost\<name>`). It is never reached with shell strings. Only the selected (or explicitly chosen) distribution is used; the distro root is cached per distribution and resolved lazily.
+2. **Shared Windows folders.** Addressed as `Windows{root, rel}` where `root` is an id (`downloads`, `documents`, …), never a host path. The backend resolves the id to the real folder: the Windows Known Folder (dynamic, so redirection and other drives work) or the alternative the user chose in Settings. Nothing hard-codes a user name, `C:\Users` or a drive letter.
+3. **VLINUX config/app data** (`config.toml`, `distros.json`, `mappings.json` in the app config dir). Never browsable from Files.
+
+The frontend deals only in a typed `Location` (`{space:"linux",path}` or `{space:"windows",root,rel}`). The backend validates every component (no `..`, no NUL, no reserved Windows names, no drive/UNC prefixes) and keeps the result inside its root; a Linux path that crosses a symlink into `/mnt/<drive>` is turned back into the matching shared Windows location or refused (`outside_root`) rather than reaching arbitrary Windows paths.
+
+### Modules
+* `crates/runtime/src/fs/` — `error` (typed `FsError`: not_found, permission_denied, already_exists, not_a_directory, is_a_directory, not_empty, invalid_path, invalid_name, outside_root, unavailable, refused, cancelled, io), `path` (validation), `space` (resolving a `Location` against the spaces), `list` (paged, sorted listing sessions; `DEFAULT_PAGE` 200, `MAX_PAGE` 1000), `ops` (create, rename, copy, move, delete; progress, cancellation, report), `filetype` (file classes and the open policy).
+* `crates/runtime/src/shared/` — `wslconf` (automount root from `/etc/wsl.conf`), `distro` (the allow-listed `wsl.exe --exec` commands: `pwd`, `readlink`, `ln -s -T`, `unlink`, `rmdir`, `mkdir`, `mv -n`, `test -d`; paths containing quotes, backslashes, control characters or `..` are rejected), `store` (the reversible record in `mappings.json`), `engine` (`status`, `apply`, `undo`), `testing` (fakes).
+* `src-tauri/src/files.rs` — 14 async Tauri commands (`fs_places`, `fs_list_open/page/close`, `fs_create`, `fs_rename`, `fs_delete`, `fs_transfer`, `fs_job_cancel`, `fs_open`, `fs_reveal`, `mapping_status/apply/undo`). Blocking work runs off the main thread. Copy/move/delete are background jobs reported by `vlinux://fs-job` events (throttled to 100 ms; at most 6 jobs). Linux processes start only for `fs_places(refresh)`, `mapping_status(check)`, apply and undo.
+* Frontend: `fs-types.ts` (shapes and pure helpers), `files.svelte.ts` (store), `mapping.svelte.ts`, `apps/Files.svelte`, the Settings → Linux folders section, and `fs-preview.ts` (the labelled in-memory simulation used only in the browser).
+
+### Files: behaviour
+* Listing is a session of sorted entries on the backend; the UI asks for pages as the virtual list scrolls, so a huge directory is never held in the frontend. No polling: lists refresh on navigation, after an operation, or on F5.
+* Entries carry `kind` (file, dir, symlink, other), size, modified time, hidden/read-only flags, a file class and an open policy. Symlinks show their target and whether it is a folder; broken links are flagged. Hidden = leading dot.
+* **No overwrite, ever:** copy/move into an existing name keeps both (`name (copy)`, `(copy 2)`…); moving a folder into itself is refused; a failed item is reported and the job carries on with the rest. **Delete** requires `confirmed = true` (the UI asks first) and is permanent; symlinks are unlinked, never followed.
+* Cross-space copies (Linux ↔ Windows) are streamed in chunks; a move across filesystems is copy-then-delete, and the original is removed only if every item was copied (otherwise it is kept and the problem is reported). Same-filesystem moves use `rename`.
+* `fs_open` hands a file to the Windows association only if its class allows it; programs, scripts and shortcuts are refused. `fs_reveal` uses Explorer's `/select`.
+
+### Shared folder mappings: how they are applied and reversed
+Mechanism: a **symbolic link inside the distribution**, `~/Downloads → /mnt/<drive>/<path>` (the distribution's own DrvFs mount; the mount root comes from the distribution's `/etc/wsl.conf`, default `/mnt`). Chosen because it needs no Windows feature, no admin rights and no `wsl --mount`, works for any distribution, is visible to Linux tools as a normal path, is trivially reversible, and means both sides see the same bytes. Alternatives considered: bind mounts (need root and `/etc/fstab` edits), `\\wsl.localhost` shares in the other direction (Windows-initiated, not the Linux home), and copying/syncing (explicitly excluded). UNC/network targets are detected and are *not* auto-mounted; they are reported as unavailable unless the distribution already exposes them.
+
+`status` inspects, never changes. States: `unknown` (not yet checked), `private`, `ready` (nothing in the way, or an empty folder that needs confirmation), `applied` (verified by `readlink`), `conflict` (non-empty folder, file, or a link VLINUX didn't create; with the entries listed and the safe offers), `linked_but_private`, `unavailable`, `failed`.
+
+`apply(resolution?)` re-inspects at the moment of acting, so a stale UI can't cause damage, and then: creates the link if nothing exists; with `ReplaceEmptyFolder` removes the *empty* folder (`rmdir` fails on a non-empty one) and links; with `ReplaceLink` swaps a foreign link (the old target is recorded and restored by Undo); with `MoveAside` renames the existing item to `<Name>.vlinux-backup[-N]` (`mv -n`, never overwriting) and links. Every step has a rollback; success is declared only after `readlink` confirms the link. Failure leaves the original in place and says why.
+
+`undo` removes only a link that matches what VLINUX recorded or would create, then restores what was there (the old link, the moved-aside folder, or a fresh empty folder). It never deletes the Windows files or any Linux personal data, and refuses to touch a regular folder or a link it didn't create. Disabling a preference alone changes nothing: the folder shows *Still linked* until the user undoes it.
+
+### Testing strategy
+Temp directories serve as distro roots, with a fake distro-ops layer that applies link/rename operations to the temp tree (unix) and a fake `wsl.exe` runner; real `std::fs` behaviour is exercised on the CI OS; real symlinks on Ubuntu. Paths use injected resolvers (Known Folders, drive kinds, mount root) so redirected folders and alternate drives are testable without Windows. The browser e2e uses the in-memory simulation and says so in the UI.
+
+### Known limitations (M4)
+* **No real distribution has been tested.** Behaviour of symlinks, permissions and file times over `\\wsl.localhost` (9P), `wsl.exe --exec` quoting for unusual names, and WSL1 differences are unverified; that is why link creation/removal go through `ln`/`unlink` inside the distribution and exec paths exclude quotes and backslashes.
+* Links point at `/mnt/<drive>/…`, so they work only while Windows drives are automounted (the status says *unavailable* otherwise). Windows-side tools see the link target through the real folder, not the link.
+* Listing a distribution that is stopped starts it (WSL does that on first access); this only happens when the user opens Files/checks status on it.
+* Large-folder sorting happens on the backend over the full listing, so the first page of a very large folder takes as long as scanning it; the scan is capped (`truncated` is reported).
+* No trash/undo for deletes, no permission editing, no file preview, no search, no multi-window or tabs in Files, no drag and drop from/to Explorer. Open-with uses the default Windows association only.
+* UNC/network shared-folder *targets* are browsable from Windows but not auto-linked into Linux.
+* Opening files from WSL via `\\wsl.localhost` depends on Windows' handling of that path by the associated program.
