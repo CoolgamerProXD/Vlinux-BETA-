@@ -13,6 +13,8 @@
 //! * [`detect`]    — read-only WSL detection, report and install catalogue
 //! * [`install`]   — consent-gated install plans and the install job
 //! * [`managed`]   — record of distributions VLINUX installed itself
+//! * [`fs`]        — file manager backend: locations, listing, file operations (M4)
+//! * [`shared`]    — shared-storage mappings: apply/undo with conflict safety (M4)
 //! * [`storage`]   — Windows<->Linux shared-folder model, path validation, mapping planner
 //! * [`terminal`]  — interactive terminal sessions on a pseudoterminal (M3)
 //! * [`testing`]   — fake process runner and helpers for tests
@@ -21,11 +23,13 @@ pub mod adapters;
 pub mod detect;
 pub mod encoding;
 pub mod exec;
+pub mod fs;
 pub mod install;
 pub mod managed;
 pub mod model;
 pub mod osrelease;
 pub mod parse;
+pub mod shared;
 pub mod storage;
 pub mod terminal;
 pub mod testing;

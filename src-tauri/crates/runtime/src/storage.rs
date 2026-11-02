@@ -354,8 +354,6 @@ pub struct StorageOverview {
     pub folders: Vec<FolderStatus>,
     pub projects: ProjectsMode,
     pub mount_root: String,
-    /// Mappings are not applied to any distribution in M2 (they arrive with M4).
-    pub applied: bool,
     pub notes: Vec<String>,
 }
 
@@ -401,11 +399,10 @@ pub fn overview(cfg: &StorageConfig, resolver: &dyn KnownFolderResolver, drives:
         folders,
         projects: cfg.projects,
         mount_root: mount_root.to_string(),
-        applied: false,
         notes: vec![
-            "These are saved preferences. They are not applied to any distribution yet; applying them arrives with the file manager (M4), and existing Linux folders will never be replaced without asking.".to_string(),
+            "These are saved preferences. A folder is only linked to Windows after it has been checked and applied for a distribution; the status shown here comes from that check, never from the preference alone. Existing Linux folders are never replaced, merged or deleted without an explicit choice.".to_string(),
             "Linux-native storage is recommended for development projects: reading and writing files through /mnt is slower than the distribution's own filesystem.".to_string(),
-            format!("Assumes the default WSL mount root ({DEFAULT_MOUNT_ROOT}); a custom automount root in /etc/wsl.conf will be detected in M4."),
+            format!("Targets are shown with the default WSL mount root ({DEFAULT_MOUNT_ROOT}). When a mapping is checked or applied, the selected distribution's own /etc/wsl.conf is read, so a custom automount root is honoured."),
         ],
     }
 }
@@ -586,7 +583,6 @@ mod tests {
         assert!(by("pictures").points_to.starts_with("Cannot be shared"));
         // No location reported at all.
         assert!(matches!(by("videos").verdict, Some(Verdict::Unsupported { .. })));
-        assert!(!o.applied);
         assert_eq!(by("downloads").linux_path, "~/Downloads");
         assert_eq!(o.folders.len(), 6);
     }
