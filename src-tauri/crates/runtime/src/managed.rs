@@ -94,7 +94,7 @@ impl ManagedStore {
             fs::create_dir_all(dir)?;
         }
         let tmp = self.path.with_extension("json.tmp");
-        let text = serde_json::to_string_pretty(&data).map_err(|e| io::Error::other(e))?;
+        let text = serde_json::to_string_pretty(&data).map_err(io::Error::other)?;
         fs::write(&tmp, text)?;
         fs::rename(&tmp, &self.path)
     }

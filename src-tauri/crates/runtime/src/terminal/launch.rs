@@ -84,7 +84,7 @@ pub fn resolve_target(
         }
         RuntimeStatus::UnsupportedHost { reason } => {
             return Err(TerminalError::WslUnavailable {
-                reason: format!("{reason}"),
+                reason: reason.to_string(),
             })
         }
         RuntimeStatus::FeatureProblem { hint, .. } => {

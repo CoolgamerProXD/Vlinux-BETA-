@@ -357,8 +357,8 @@ mod tests {
         let r: Arc<dyn CommandRunner> = fake;
         let c = CancelToken::new();
         let p = Prober::new(&r, "wsl.exe", "D", &c).unwrap();
-        assert_eq!(p.test_path("-e", "/a").unwrap(), true);
-        assert_eq!(p.test_path("-e", "/b").unwrap(), false);
+        assert!(p.test_path("-e", "/a").unwrap());
+        assert!(!p.test_path("-e", "/b").unwrap());
         assert!(p.test_path("-e", "/c").is_err());
     }
 }

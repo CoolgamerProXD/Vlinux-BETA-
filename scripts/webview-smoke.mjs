@@ -100,12 +100,12 @@ await page.screenshot({ path: path.join(out, 'webview-welcome.png') });
 const ipc = await page.evaluate(async () => {
   try {
     const o = await window.__TAURI_INTERNALS__.invoke('distro_overview', { force: false });
-    return { ok: true, status: o?.runtime?.status ?? null, distros: Array.isArray(o?.distros) ? o.distros.length : null };
+    return { ok: true, status: o?.runtime?.kind ?? null, distros: Array.isArray(o?.cards) ? o.cards.length : null };
   } catch (e) {
     return { ok: false, error: String(e?.message ?? e) };
   }
 });
-check('real IPC: distro_overview answers from Rust', ipc.ok, ipc.ok ? `status=${ipc.status}, distributions=${ipc.distros}` : ipc.error);
+check('real IPC: distro_overview answers from Rust', ipc.ok && ipc.status !== null, ipc.ok ? `status=${ipc.status}, distributions=${ipc.distros}` : ipc.error);
 
 // UI -> Distributions with REAL data
 if (welcome) await page.click('[data-testid="welcome-detect"]');

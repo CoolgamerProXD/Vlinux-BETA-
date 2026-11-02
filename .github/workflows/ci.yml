@@ -273,7 +273,9 @@ jobs:
           if ($hasDesk) { Note "Desktop shortcut: created by the silent installer" }
           else { Write-Host "::warning title=Desktop shortcut::the silent (/S) install created a Start Menu entry but no Desktop shortcut"; Note "Desktop shortcut: NOT created by the silent installer" }
 
-          # ---- launch the installed app with WebView2 remote debugging ----
+          $lnkSummary = ($found.Keys | Sort-Object | ForEach-Object { "$_ = $(Split-Path $found[$_] -Leaf)" }) -join '; '
+          Write-Host "::notice title=Installer result (silent /S install, runner)::installed to $dir; files: $((Get-ChildItem $dir | ForEach-Object { $_.Name }) -join ', '); shortcuts: $lnkSummary"
+          # ---- launch the installed app ----
           function Get-Tree([int]$rootPid) {
             $all = Get-CimInstance Win32_Process
             $ids = New-Object 'System.Collections.Generic.HashSet[int]'
@@ -380,7 +382,7 @@ jobs:
           $lnkLeft = @($found.Values | Where-Object { Test-Path $_ })
           Note "Uninstall: shortcuts left = $($lnkLeft.Count); installed exe copies left = $($remaining.Count); user data folder existed before=$dataBefore after=$(Test-Path $appData)"
           $report | Out-File artifacts/installer-e2e.txt
-          Write-Host "::notice title=Installer end-to-end::installed, launched, smoke-tested and uninstalled on a runner; smoke exit $smoke; leftovers after uninstall: exe $($remaining.Count), shortcuts $($lnkLeft.Count)"
+          Write-Host "::notice title=Installer end-to-end::installed, launched, smoke-tested and uninstalled on a runner; smoke exit $smoke; leftovers after uninstall: exe $($remaining.Count), shortcuts $($lnkLeft.Count); child processes still running 6 s after exit: $($left.Count); user-data folder present before uninstall=$dataBefore, after=$(Test-Path $appData); install folder left=$(Test-Path $dir)"
           if ($smoke -ne 0) { throw "WebView2 smoke test failed (see webview-smoke.log)" }
           if ($remaining.Count -gt 0) { throw "uninstall left vlinux.exe behind" }
 
