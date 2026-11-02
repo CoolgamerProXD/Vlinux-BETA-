@@ -3,6 +3,7 @@
   import System from '../apps/System.svelte';
   import Setup from '../apps/Setup.svelte';
   import Terminal from '../apps/Terminal.svelte';
+  import Files from '../apps/Files.svelte';
 
   let { appId }: { appId: string } = $props();
 </script>
@@ -11,6 +12,8 @@
   <Settings />
 {:else if appId === 'terminal'}
   <Terminal />
+{:else if appId === 'files'}
+  <Files />
 {:else if appId === 'setup'}
   <Setup />
 {:else if appId === 'system'}

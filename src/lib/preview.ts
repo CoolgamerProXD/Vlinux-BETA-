@@ -208,11 +208,17 @@ export function validatePath(path: string): Verdict {
   return { kind: 'supported', wsl_path: `/mnt/${m[1].toLowerCase()}/${parts.join('/')}` };
 }
 
+/** Where the SIMULATED Windows keeps a Known Folder (Downloads is "redirected" to another drive). */
+export function previewKnownFolder(id: string): string {
+  const label = KNOWN[id] ?? id;
+  return id === 'downloads' ? 'D:\\Media\\Downloads' : `C:\\Users\\Preview\\${label}`;
+}
+
 export function storageOverview(cfg: Config): StorageOverview {
   const folders: FolderStatus[] = FOLDER_IDS.map((id) => {
     const pref = cfg.storage[id];
     const label = KNOWN[id] ?? id;
-    const def = `C:\\Users\\Preview\\${label}`;
+    const def = previewKnownFolder(id);
     const eff = pref.windows_path ?? def;
     const verdict = pref.mode === 'private' ? null : validatePath(eff);
     const points_to =
@@ -222,9 +228,9 @@ export function storageOverview(cfg: Config): StorageOverview {
     return { id, label, linux_path: `~/${label}`, mode: pref.mode, custom_windows_path: pref.windows_path, default_windows_path: def, effective_windows_path: eff, verdict, points_to };
   });
   return {
-    folders, projects: cfg.storage.projects, mount_root: '/mnt', applied: false,
+    folders, projects: cfg.storage.projects, mount_root: '/mnt',
     notes: [
-      'These are saved preferences. They are not applied to any distribution yet; applying them arrives with the file manager (M4), and existing Linux folders will never be replaced without asking.',
+      'These are saved preferences. A folder is only linked to Windows after it has been checked and applied for a distribution; the status shown here comes from that check, never from the preference alone. Existing Linux folders are never replaced, merged or deleted without an explicit choice.',
       'Linux-native storage is recommended for development projects: reading and writing files through /mnt is slower than the distribution\'s own filesystem.',
       SIMULATION_NOTE,
     ],

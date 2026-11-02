@@ -117,7 +117,6 @@ export interface StorageOverview {
   folders: FolderStatus[];
   projects: 'linux_private' | 'shared';
   mount_root: string;
-  applied: boolean;
   notes: string[];
 }
 

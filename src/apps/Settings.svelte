@@ -1,5 +1,10 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { config } from '../lib/config.svelte';
+  import { mapping } from '../lib/mapping.svelte';
+  import { mappingBadge, type Resolution } from '../lib/fs-types';
+  import { openFilesAt } from '../lib/open-files';
+  import { runtime } from '../lib/runtime.svelte';
   import { host } from '../lib/host.svelte';
   import { setFullscreen, storageOverview, storageValidatePath } from '../lib/ipc';
   import type { StorageOverview, Verdict } from '../lib/runtime-types';
@@ -43,7 +48,7 @@
     ['Ctrl + Shift + C / V', 'Terminal: copy selection / paste (Ctrl + C is the shell\'s interrupt)'],
   ];
 
-  // ---- Linux folders (saved preferences; applied from M4 on) ----
+  // ---- Linux folders: saved preferences, and (separately) what a check of the distribution found ----
   let overview = $state<StorageOverview | null>(null);
   let overviewError = $state<string | null>(null);
   let draft = $state<Record<string, string>>({});
@@ -58,14 +63,40 @@
     }
   }
 
+  const distro = $derived(runtime.selectedDistro?.name ?? null);
+  let chosen = $state<Record<string, Resolution | null>>({});
+  let confirming = $state<string | null>(null);
+
   $effect(() => {
-    if (current === 'folders') void loadOverview();
+    if (current === 'folders') {
+      const d = distro;
+      untrack(() => {
+        void loadOverview();
+        if (!runtime.report) void runtime.refresh(false);
+        void mapping.load(d);
+      });
+    }
   });
 
   async function setPref(mutate: (c: typeof config.value) => void) {
     config.update(mutate);
     await config.flush();
     await loadOverview();
+    // A changed preference never changes the distribution by itself. If the user has already
+    // checked it, look again so the badges keep telling the truth about what is really linked.
+    if (distro && mapping.checkedOnce) await mapping.check(distro);
+  }
+
+  async function applyFolder(id: string, resolution: Resolution | null) {
+    if (!distro) return;
+    confirming = null;
+    await mapping.apply(distro, id, resolution);
+    chosen[id] = null;
+  }
+
+  function homeFolder(linuxPath: string): string {
+    const home = mapping.report?.home;
+    return home ? linuxPath.replace(/^~/, home) : linuxPath;
   }
 
   async function checkPath(id: string) {
@@ -183,18 +214,94 @@
     {:else if current === 'folders'}
       <h3>Shared personal folders</h3>
       <p class="muted">Your Linux home can point straight at your real Windows folders — the same files, no copies, no sync. System files, package data and caches always stay private to Linux.</p>
-      <div class="notice warn" role="note"><Icon name="info" size={16} /> These are saved preferences. They are not applied to any distribution yet — that arrives with the file manager (M4), and an existing Linux folder will never be replaced without asking.</div>
+      <div class="notice" role="note"><Icon name="info" size={16} /> {overview?.notes[0] ?? 'A folder is only connected after it has been checked and applied for a distribution.'}</div>
+      <div class="mapbar" data-mapbar>
+        <span class="muted">Distribution: <strong>{distro ?? 'none selected'}</strong></span>
+        <button class="btn" data-act="check-mappings" disabled={!distro || mapping.loading} onclick={() => distro && mapping.check(distro)}><Icon name="rotate" size={15} /> {mapping.loading ? 'Checking…' : 'Check status'}</button>
+        {#if distro}<button class="btn" onclick={() => openFilesAt(distro)}><Icon name="folder" size={15} /> Open Files</button>{/if}
+      </div>
+      <p class="muted small">{distro ? `“Check status” looks inside ${distro} (and starts it if it is stopped). It changes nothing.` : 'Choose a distribution in Linux Setup to check and apply these folders.'}</p>
+      {#if mapping.error}<div class="notice err" role="alert"><Icon name="alert" size={16} /> {mapping.error}</div>{/if}
       {#if overviewError}<div class="notice err" role="alert"><Icon name="alert" size={16} /> {overviewError}</div>{/if}
       {#if overview}
         {#each overview.folders as f (f.id)}
           {@const id = f.id as FolderId}
+          {@const st = mapping.statusOf(f.id)}
+          {@const badge = mappingBadge(st, f.mode)}
+          {@const checkedReport = mapping.report?.checked === true}
           <div class="folder" data-folder={f.id}>
             <label class="row nopad">
               <span><strong>{f.label}</strong> <code class="mono dim">{f.linux_path}</code>
+                <span class="badge {badge.tone}" data-badge={badge.tone}>{badge.text}</span>
                 <small class:bad={f.verdict?.kind === 'unsupported'}>{f.points_to}</small></span>
               <input type="checkbox" role="switch" aria-label="Share {f.label} with Windows" checked={f.mode === 'shared'}
                      onchange={(e) => setPref((x) => (x.storage[id].mode = e.currentTarget.checked ? 'shared' : 'private'))} />
             </label>
+
+            <div class="mapstate" data-mapstate={checkedReport && st ? st.state.state : 'unchecked'}>
+              {#if !distro}
+                <small>No distribution is selected, so nothing can be linked yet.</small>
+              {:else if !checkedReport || !st}
+                <small>Preferred only — VLINUX hasn’t looked inside {distro} yet. Use “Check status”.</small>
+              {:else if st.state.state === 'applied'}
+                <small class="okc">{st.linux_path} is a link to <code class="mono">{st.state.target}</code> — files appear on both sides immediately.</small>
+                <div class="macts">
+                  <button class="btn" onclick={() => openFilesAt(distro, { space: 'linux', path: homeFolder(st.linux_path) })}>Open in Files</button>
+                  <button class="btn" data-act="undo" disabled={mapping.busy === f.id} onclick={() => distro && mapping.undo(distro, f.id)}>Undo link</button>
+                </div>
+              {:else if st.state.state === 'linked_but_private'}
+                <small class="warnc">Preference is Linux-private, but {st.linux_path} is still linked to <code class="mono">{st.state.target}</code>. Nothing was removed.</small>
+                <div class="macts"><button class="btn" data-act="undo" disabled={mapping.busy === f.id} onclick={() => distro && mapping.undo(distro, f.id)}>Undo link</button></div>
+              {:else if st.state.state === 'ready'}
+                <small>{st.state.note}</small>
+                {#if st.state.needs && confirming === f.id}
+                  <div class="confirm" role="group" aria-label="Confirm replacing the empty folder">
+                    <p>{st.linux_path} is an empty folder. Confirming replaces <strong>only that empty folder</strong> with a link to your Windows folder. It can be undone.</p>
+                    <div class="macts">
+                      <button class="btn danger" data-act="confirm-apply" disabled={mapping.busy === f.id} onclick={() => applyFolder(f.id, st.state.state === 'ready' ? st.state.needs : null)}>Yes, replace the empty folder</button>
+                      <button class="btn" onclick={() => (confirming = null)}>Cancel</button>
+                    </div>
+                  </div>
+                {:else}
+                  <div class="macts">
+                    <button class="btn primary" data-act="apply" disabled={mapping.busy === f.id}
+                            onclick={() => (st.state.state === 'ready' && st.state.needs ? (confirming = f.id) : applyFolder(f.id, null))}>{st.state.needs ? 'Review and apply…' : 'Apply'}</button>
+                  </div>
+                {/if}
+              {:else if st.state.state === 'conflict'}
+                {@const c1 = st.state}
+                <div class="conflict" role="group" aria-label="{f.label} needs your decision">
+                  <strong>{st.linux_path} can’t be linked automatically</strong>
+                  <p>{c1.detail}</p>
+                  {#if c1.entries.length}
+                    <ul class="ents">{#each c1.entries as en}<li><code class="mono">{en}</code></li>{/each}{#if c1.more}<li>… and {c1.more} more</li>{/if}</ul>
+                  {/if}
+                  {#if c1.offers.length}
+                    <div class="offers" role="radiogroup" aria-label="Choose what to do">
+                      {#each c1.offers as o}
+                        <label class="offer" class:sel={chosen[f.id] === o.resolution}>
+                          <input type="radio" name="res-{f.id}" value={o.resolution} checked={chosen[f.id] === o.resolution} onchange={() => (chosen[f.id] = o.resolution)} />
+                          <span><strong>{o.label}</strong><small>{o.description}</small></span>
+                        </label>
+                      {/each}
+                    </div>
+                    <div class="macts">
+                      <button class="btn primary" data-act="apply-resolution" disabled={!chosen[f.id] || mapping.busy === f.id} onclick={() => applyFolder(f.id, chosen[f.id] ?? null)}>Confirm and apply</button>
+                    </div>
+                  {:else}
+                    <p class="muted small">There is no safe automatic option. Nothing was changed. Move or rename it yourself in Files, then check again.</p>
+                    <div class="macts"><button class="btn" onclick={() => openFilesAt(distro, { space: 'linux', path: homeFolder(st.linux_path).replace(/\/[^/]+$/, '') || '/' })}>Open in Files</button></div>
+                  {/if}
+                </div>
+              {:else if st.state.state === 'unavailable'}
+                <small class="bad">Can’t be linked: {st.state.reason}</small>
+              {:else if st.state.state === 'failed'}
+                <small class="bad">Failed: {st.state.message}</small>
+              {:else if st.state.state === 'private'}
+                <small>Linux-private inside {distro}. Nothing is shared.</small>
+              {/if}
+              {#if mapping.messages[f.id]}<small class:okc={mapping.messages[f.id]?.ok} class:bad={!mapping.messages[f.id]?.ok} role="status" data-mapmsg>{mapping.messages[f.id]?.text}</small>{/if}
+            </div>
             {#if f.mode === 'shared'}
               <div class="custom">
                 {#if f.custom_windows_path}
@@ -227,8 +334,7 @@
         </div>
         <p class="muted">{overview.notes[1]}</p>
         <p class="muted small">{overview.notes[2]}</p>
-        {#if overview.notes[3]}<p class="muted small">{overview.notes[3]}</p>{/if}
-
+        
         <h3>Defaults</h3>
         <button class="btn" onclick={restoreFolders}><Icon name="rotate" size={15} /> Restore folder defaults</button>
         <p class="muted small">Only changes these preferences. No file or folder is touched.</p>
@@ -332,4 +438,24 @@
     nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
     nav span { display: none; }
   }
+  .mapbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 2px; }
+  .badge { display: inline-block; margin-left: 8px; padding: 1px 9px; border-radius: 999px; font-size: 0.7rem; border: 1px solid var(--line-strong); vertical-align: 1px; white-space: nowrap; }
+  .badge.ok { color: #7ff0b4; border-color: rgb(61 220 151 / 0.5); background: rgb(61 220 151 / 0.1); }
+  .badge.info { color: #a8d8ff; border-color: rgb(143 208 255 / 0.45); }
+  .badge.warn { color: #ffd08a; border-color: rgb(255 180 84 / 0.5); background: rgb(255 180 84 / 0.08); }
+  .badge.bad { color: #ffb3bd; border-color: rgb(255 110 130 / 0.5); background: rgb(255 90 110 / 0.08); }
+  .badge.idle { color: var(--muted); }
+  .mapstate { display: grid; gap: 6px; padding: 4px 0 6px; font-size: 0.82rem; }
+  .mapstate small { display: block; margin: 0; color: var(--muted); line-height: 1.45; }
+  .mapstate small.okc, small.okc { color: #7ff0b4; }
+  .mapstate small.warnc { color: #ffd08a; }
+  .macts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn.primary { background: var(--accent); color: #0a0a12; border-color: transparent; font-weight: 600; }
+  .conflict, .confirm { display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px; background: rgb(255 180 84 / 0.08); border: 1px solid rgb(255 180 84 / 0.4); }
+  .conflict p, .confirm p { margin: 0; color: var(--muted); line-height: 1.5; }
+  .ents { margin: 0; padding-left: 18px; max-height: 110px; overflow: auto; color: var(--muted); font-size: 0.78rem; }
+  .offers { display: grid; gap: 6px; }
+  .offer { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgb(255 255 255 / 0.04); cursor: pointer; }
+  .offer.sel { border-color: var(--accent); background: rgb(var(--accent-rgb) / 0.14); }
+  .offer small { display: block; margin-top: 2px; }
 </style>

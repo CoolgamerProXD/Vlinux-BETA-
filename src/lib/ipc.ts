@@ -199,3 +199,95 @@ export async function onTerminalState(cb: (e: TerminalStateEvent) => void): Prom
   }
   return (await termPreview()).onState(cb);
 }
+
+// ---- Files and shared folders (M4) -------------------------------------------------------------
+// Typed file-manager commands. A place is a `Location` (a Linux path in the chosen distribution, or
+// a shared Windows folder id plus names): the UI never sends a host path and never builds a shell
+// command. In the browser preview a clearly-labelled in-memory demo filesystem stands in
+// (fs-preview.ts); it touches nothing real.
+
+import type {
+  Conflict, JobEvent, ListingHead, ListOptions, Location, MappingOutcome, MappingReport, Page, Places, Resolution, TransferMode,
+} from './fs-types';
+
+const fsPreview = () => import('./fs-preview');
+
+export async function fsPlaces(distro: string | null, refresh = false): Promise<Places> {
+  if (isTauri()) return call<Places>('fs_places', { distro, refresh });
+  return (await fsPreview()).places(distro, (await getConfig()).config);
+}
+
+export async function fsListOpen(distro: string | null, location: Location, options: ListOptions, pageSize = 200): Promise<ListingHead> {
+  if (isTauri()) return call<ListingHead>('fs_list_open', { distro, location, options, pageSize });
+  return (await fsPreview()).listOpen(distro, location, options, pageSize);
+}
+
+export async function fsListPage(id: string, offset: number, limit = 200): Promise<Page> {
+  if (isTauri()) return call<Page>('fs_list_page', { id, offset, limit });
+  return (await fsPreview()).listPage(id, offset, limit);
+}
+
+export async function fsListClose(id: string): Promise<void> {
+  if (isTauri()) return call<void>('fs_list_close', { id });
+  (await fsPreview()).listClose(id);
+}
+
+export async function fsCreate(distro: string | null, parent: Location, name: string, kind: 'folder' | 'file'): Promise<Location> {
+  if (isTauri()) return call<Location>('fs_create', { distro, parent, name, kind });
+  return (await fsPreview()).create(distro, parent, name, kind);
+}
+
+export async function fsRename(distro: string | null, location: Location, newName: string): Promise<Location> {
+  if (isTauri()) return call<Location>('fs_rename', { distro, location, newName });
+  return (await fsPreview()).rename(distro, location, newName);
+}
+
+/** Delete is a background job; `confirmed` must be true (the UI asks first, the backend insists). */
+export async function fsDelete(distro: string | null, targets: Location[], confirmed: boolean): Promise<{ job_id: string }> {
+  if (isTauri()) return call<{ job_id: string }>('fs_delete', { distro, targets, confirmed });
+  return (await fsPreview()).deleteItems(distro, targets, confirmed);
+}
+
+export async function fsTransfer(distro: string | null, sources: Location[], dest: Location, mode: TransferMode, conflict: Conflict = 'keep_both'): Promise<{ job_id: string }> {
+  if (isTauri()) return call<{ job_id: string }>('fs_transfer', { distro, sources, dest, mode, conflict });
+  return (await fsPreview()).transfer(distro, sources, dest, mode, conflict);
+}
+
+export async function fsJobCancel(jobId: string): Promise<boolean> {
+  if (isTauri()) return call<boolean>('fs_job_cancel', { jobId });
+  return false;
+}
+
+export async function fsOpen(distro: string | null, location: Location): Promise<void> {
+  if (isTauri()) return call<void>('fs_open', { distro, location });
+  (await fsPreview()).open(distro, location);
+}
+
+export async function fsReveal(distro: string | null, location: Location): Promise<void> {
+  if (isTauri()) return call<void>('fs_reveal', { distro, location });
+  (await fsPreview()).reveal(distro, location);
+}
+
+export async function onFsJob(cb: (e: JobEvent) => void): Promise<() => void> {
+  if (isTauri()) {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<JobEvent>('vlinux://fs-job', (e) => cb(e.payload));
+  }
+  return (await fsPreview()).onJob(cb);
+}
+
+/** `check = false` starts no Linux process and claims nothing as connected. */
+export async function mappingStatus(distro: string, check = false): Promise<MappingReport> {
+  if (isTauri()) return call<MappingReport>('mapping_status', { distro, check });
+  return (await fsPreview()).mappingStatus(distro, check, (await getConfig()).config);
+}
+
+export async function mappingApply(distro: string, folder: string, resolution: Resolution | null): Promise<MappingOutcome> {
+  if (isTauri()) return call<MappingOutcome>('mapping_apply', { distro, folder, resolution });
+  return (await fsPreview()).mappingApply(distro, folder, resolution, (await getConfig()).config);
+}
+
+export async function mappingUndo(distro: string, folder: string): Promise<MappingOutcome> {
+  if (isTauri()) return call<MappingOutcome>('mapping_undo', { distro, folder });
+  return (await fsPreview()).mappingUndo(distro, folder, (await getConfig()).config);
+}

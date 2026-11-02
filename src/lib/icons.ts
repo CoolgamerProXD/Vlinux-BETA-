@@ -2,7 +2,8 @@
 export type IconName =
   | 'terminal' | 'folder' | 'layers' | 'activity' | 'sliders' | 'power' | 'search' | 'grid'
   | 'wifi' | 'wifi-off' | 'battery' | 'expand' | 'shrink' | 'close' | 'minus' | 'square'
-  | 'windows' | 'check' | 'palette' | 'monitor' | 'keyboard' | 'info' | 'cpu' | 'alert' | 'rotate' | 'plus' | 'chevron-down';
+  | 'windows' | 'check' | 'palette' | 'monitor' | 'keyboard' | 'info' | 'cpu' | 'alert' | 'rotate' | 'plus' | 'chevron-down'
+  | 'file' | 'link' | 'arrow-left' | 'arrow-right' | 'arrow-up' | 'eye' | 'eye-off' | 'trash' | 'edit' | 'copy' | 'scissors' | 'clipboard' | 'external' | 'home' | 'drive';
 
 export const ICONS: Record<IconName, string> = {
   plus: 'M12 5v14M5 12h14',
@@ -32,4 +33,19 @@ export const ICONS: Record<IconName, string> = {
   cpu: 'M7 7h10v10H7zM10 10h4v4h-4zM9.5 3.5v3.5M14.5 3.5v3.5M9.5 17v3.5M14.5 17v3.5M3.5 9.5H7M3.5 14.5H7M17 9.5h3.5M17 14.5h3.5',
   alert: 'M12 4l9 15.5H3zM12 10v4.5M12 17.2h.01',
   rotate: 'M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5',
+  file: 'M6 3.5h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1zM14 3.5v4h4',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
+  'arrow-left': 'M19 12H5M11 6l-6 6 6 6',
+  'arrow-right': 'M5 12h14M13 6l6 6-6 6',
+  'arrow-up': 'M12 19V5M6 11l6-6 6 6',
+  eye: 'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+  'eye-off': 'M3 3l18 18M10.6 5.6a9 9 0 0 1 1.4-.1c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3.2 3.8M6.6 7.7A17 17 0 0 0 2.5 12S6 18.5 12 18.5a9 9 0 0 0 3.4-.7M9.9 9.9a2.5 2.5 0 0 0 3.5 3.5',
+  trash: 'M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5',
+  edit: 'M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16zM13.5 6.5l4 4',
+  copy: 'M8.5 8.5h10v11h-10zM5.5 15.5v-11h10',
+  scissors: 'M6.5 6.5a2.5 2.5 0 1 0 .01 0zM6.5 17.5a2.5 2.5 0 1 0 .01 0zM8.5 8.5L20 19M8.5 15.5L20 5',
+  clipboard: 'M8.5 5.5h-2v15h11v-15h-2M9 3.5h6v4H9z',
+  external: 'M13 4.5h6.5V11M19.5 4.5L11 13M17.5 14v5.5h-13v-13H10',
+  home: 'M4 11l8-6.5 8 6.5M6 9.8v9.7h12V9.8M10 19.5v-5h4v5',
+  drive: 'M4 14.5h16v4.5H4zM4 14.5l2.5-8h11l2.5 8M16.5 17h.01',
 };

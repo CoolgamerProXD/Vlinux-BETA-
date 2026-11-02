@@ -290,7 +290,7 @@ pub struct JobStarted {
     pub job_id: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct JobEvent {
     job_id: String,
     kind: &'static str,
