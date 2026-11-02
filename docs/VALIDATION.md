@@ -12,7 +12,7 @@ Nothing here was run against the existing `archlinux` distribution. No test unre
 
 ## 1. Easy launch (CI-real)
 
-Source: workflow runs for commits `c41b2a6` and `6dfba9e` (job *Build, test and smoke-launch on Windows*), step *Installer end-to-end*. Figures below are from `6dfba9e` unless stated.
+Source: workflow runs for commits `c41b2a6`, `6dfba9e`, `b0fd483` and `841c8eb` (job *Build, test and smoke-launch on Windows*), step *Installer end-to-end*. Figures below are from `6dfba9e` unless stated.
 
 | Check | Result |
 |---|---|
@@ -21,7 +21,7 @@ Source: workflow runs for commits `c41b2a6` and `6dfba9e` (job *Build, test and 
 | Start Menu entry | created (the step fails the job if it is missing) |
 | Desktop shortcut | created by the silent installer: `Desktop (user) = VLINUX.lnk` and `Start Menu (user) = VLINUX.lnk` (annotation *Installer result*); installed to `%LOCALAPPDATA%\VLINUX` containing `vlinux.exe` and `uninstall.exe` |
 | Installed app launches | window shown 44–51 ms after process start (an empty dark window) |
-| Desktop appears (not a blank window) | **launch → desktop ready: 858–934 ms** over two runs (process start to `performance.mark('vlinux-ready')`, one clock) |
+| Desktop appears (not a blank window) | **launch → desktop ready: 858–934 ms** over four runs (process start to `performance.mark('vlinux-ready')`, one clock) |
 | Uninstall (silent) | program removed and no shortcuts left (run `c41b2a6`: 0 `vlinux.exe` copies, 0 shortcuts; the step fails the job if `vlinux.exe` remains). Whether the uninstaller leaves `%APPDATA%\app.vlinux.desktop` (your settings) in place is written to `installer-e2e.txt` in the artifact but was **not** read back; it is not claimed here |
 | Installer published | GitHub pre-release `installer-<commit>` (job *Publish installer as a pre-release*) |
 
@@ -31,7 +31,7 @@ The installer is **not code-signed** (SmartScreen will warn). Interactive instal
 
 `scripts/webview-smoke.mjs` drives a copy of the production build whose window config only adds `--remote-debugging-port` (WebView2 ignored the `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` switch for this host). WebView2/Edge 156.
 
-Passed: desktop renders (shell ready); Tauri IPC bridge present; dock/top bar drawn; 1024×768 window usable; stylesheets applied under the shipped CSP; first-launch welcome shown on a fresh profile; real `distro_overview` IPC answered by Rust; Distributions leaves loading and shows **real** (not simulated) state — "No Linux distribution is installed"; `Alt+F1` opens and `Esc` closes the launcher; all dock apps (except Terminal, which needs a distribution) open; **zero console errors, CSP violations or failed requests** across the run.
+Passed: desktop renders (shell ready); Tauri IPC bridge present; dock/top bar drawn; 1024×768 window usable; stylesheets applied under the shipped CSP; first-launch welcome shown on a fresh profile; real `distro_overview` IPC answered by Rust; Distributions leaves loading and shows **real** (not simulated) state — "No Linux distribution is installed"; `Alt+F1` opens and `Esc` closes the launcher; all dock apps (except Terminal, which needs a distribution) open; **zero console errors, CSP violations or failed requests** across the run (loads the browser cancelled itself during the script's own reload, `net::ERR_ABORTED`, are not counted — two early runs flagged them and the script was adjusted, nothing else was relaxed).
 
 Not covered: Terminal and Files in WebView2 (need a distribution), full-screen/`F11`, `Ctrl+Alt+Q`, resize by hand, high-DPI.
 
@@ -44,10 +44,12 @@ Installed app, fresh profile, GitHub runner. The runner's CPU, GPU and memory ar
 | Main process (`vlinux.exe`) working set, idle | 29.6–29.9 MiB (private 4.5 MiB) |
 | WebView2 children, idle (6 `msedgewebview2.exe`) | working set sum 308–310 MiB, private sum 113.3 MiB — working sets count shared pages once per process, so the sum over-states real use; private is the better figure |
 | Same, after opening Distributions, Setup, System, Settings, Files | main 30.5–30.6 MiB; children working set 420–432 MiB, private 151–157 MiB |
-| Idle CPU over 10 s (main + all children) | 0–0.47 % of one core (two runs) |
+| Idle CPU over 10 s (main + all children) | 0–0.47 % of one core (four runs) |
 | Process start → main window shown | 44–51 ms |
 | Process start → desktop ready | 858–934 ms |
 | Terminal start, filesystem navigation, diagnostics timings | **not measured** — they need a real distribution. Diagnostics records per-check `ms`; run it once on the real PC and read the numbers from the report |
+
+One anomaly, unexplained: in one of four runs the process-tree snapshot after the smoke test listed 131 non-WebView2 descendant processes (the other three runs and the idle snapshots: 0). It was not reproduced when the snapshot was repeated with process names in the next run, so it may be a snapshot artefact, but a burst of child processes from the Setup/System pages cannot be ruled out. Check Task Manager once on the real PC.
 
 Cleanup after exit: the step records how many of the app's child processes are still running 6 s after the main process is killed (in `installer-e2e.txt` in the `vlinux-windows` artifact); that figure was not read back, so **no cleanup claim is made** beyond the real-PTY tests below. Reopening terminals repeatedly is covered only by the Simulated real-PTY tests (`terminal_real_pty`, which open and close real PTYs on `sh`/`cmd.exe` and assert no live session remains).
 
