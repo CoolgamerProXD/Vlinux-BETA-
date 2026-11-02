@@ -60,7 +60,12 @@ page.on('pageerror', (e) => problems.push('pageerror: ' + String(e)));
 page.on('console', (m) => {
   if (m.type() === 'error') problems.push('console.error: ' + m.text());
 });
-page.on('requestfailed', (r) => problems.push('requestfailed: ' + r.url() + ' ' + (r.failure()?.errorText ?? '')));
+// ERR_ABORTED is what the browser reports for loads it cancelled itself (the reload below cuts off
+// the previous document's in-flight fonts and chunks). Every other failure, and every CSP block, still counts.
+page.on('requestfailed', (r) => {
+  const why = r.failure()?.errorText ?? '';
+  if (!why.includes('ERR_ABORTED')) problems.push('requestfailed: ' + r.url() + ' ' + why);
+});
 
 // Reload with the listeners attached so start-up errors and CSP violations are seen.
 // Time from process start to the desktop being ready, on one clock (the CI step passes the start time).
