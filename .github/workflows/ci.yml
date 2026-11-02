@@ -292,6 +292,12 @@ jobs:
             return $sum
           }
 
+          # A WebView2 browser process left over from the earlier smoke launch would be reused (and would
+          # ignore the debugging switch), so stop strays and give this launch its own, fresh profile.
+          Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+          $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:RUNNER_TEMP 'vlinux-webview2-profile'
+          Remove-Item -Recurse -Force $env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue
           $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
           $sw = [Diagnostics.Stopwatch]::StartNew()
           $p = Start-Process -FilePath $exe -PassThru
@@ -320,6 +326,12 @@ jobs:
           $env:PROC_START_MS = [string][DateTimeOffset]::new($p.StartTime).ToUnixTimeMilliseconds()
           node scripts/webview-smoke.mjs 2>&1 | Tee-Object -FilePath artifacts/webview-smoke.log
           $smoke = $LASTEXITCODE
+          if ($smoke -ne 0) {
+            $ports = (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { (Get-Tree $p.Id | ForEach-Object { [int]$_.ProcessId }) -contains $_.OwningProcess } | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort)" }) -join ', '
+            $cl = (Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Select-Object -First 1).CommandLine
+            if ($cl -and $cl.Length -gt 700) { $cl = $cl.Substring(0,700) }
+            Write-Host ("::notice title=CDP diagnosis::listening ports of the app tree: [" + $ports + "]; first WebView2 command line: " + ($cl -replace "%","%25" -replace "`n"," "))
+          }
           $logText = (Get-Content artifacts/webview-smoke.log -Raw)
           if ($logText.Length -gt 3500) { $logText = $logText.Substring(0, 3500) }
           Write-Host ("::notice title=WebView2 smoke log::" + ($logText -replace "`r","" -replace "%","%25" -replace "`n","%0A"))

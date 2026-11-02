@@ -2,7 +2,24 @@
 
 A Windows application that gives you the experience of a Linux desktop without manual installation: Tauri 2 + Rust core, Svelte/TypeScript shell, WSL2 backend (detection and safe setup in M2).
 
-> **Status: M5 (distribution management, lifecycle and compatibility foundation).** The shell is a *Windows-rendered* desktop; it is not a Linux compositor and not bare-metal Linux. WSL2 is virtualised. VLINUX detects WSL and your distributions read-only, and never starts, installs or changes anything unless you explicitly ask.
+> **Status: M6 (real-world validation, installer and release readiness).** The shell is a *Windows-rendered* desktop; it is not a Linux compositor and not bare-metal Linux. WSL2 is virtualised. VLINUX detects WSL and your distributions read-only, and never starts, installs or changes anything unless you explicitly ask.
+
+## Quick start (Windows 11 or 10 1809+, x64)
+
+**Install** — download `VLINUX_0.1.0_x64-setup.exe` from the newest **pre-release** on the repository's *Releases* page (one is published by CI for every pushed commit, tagged `installer-<commit>`; the same file is also in the workflow artifact `vlinux-windows`). Run it: it installs for the current user only (no administrator rights) into `%LOCALAPPDATA%\VLINUX` and adds a **Start Menu** entry (and, in the interactive installer, a Desktop shortcut). The installer is **not code-signed**, so Windows SmartScreen will say "unknown publisher": choose *More info → Run anyway*. Uninstalling removes the program only; it never touches WSL distributions or your files.
+
+**Launch** — Start Menu → *VLINUX* (or the Desktop shortcut). It opens full screen on the desktop. `Ctrl+Alt+Q` goes back to Windows at any time, `F11` toggles full screen.
+
+**From source** — needs Rust (MSVC), Node 20+ and the WebView2 runtime:
+```powershell
+npm ci
+npm run tauri:dev
+```
+
+**2-minute check on your own PC** (nothing is installed, started or changed unless you press a button):
+1. Launch VLINUX → the *Welcome* card explains the steps. Press **Show my distributions**: your existing WSL distributions are listed (read-only, nothing is started). Press **Set as preferred** on yours.
+2. **Distributions → Diagnostics → Run** (tick *Allow creating temporary files* and *Allow starting …* if you want the real terminal, filesystem and shared-folder checks; it only writes inside `/tmp/vlinux-diag-…` in the distribution and removes that folder afterwards). Every result is labelled *Real WSL / Host / Simulated / Not tested*. **Copy report** gives you a redacted text you can paste anywhere.
+3. Open **Terminal**: run `whoami` and `echo $HOME` yourself; open **Files**: browse your Linux home.
 
 ## What works now
 Full-screen desktop shell, original VLINUX branding and four generated wallpapers, top bar (workspaces, clock/date, network/battery, status, full-screen, power), application launcher with search, dock (bottom or left), floating windows (drag, resize, maximise, minimise, close) across 2–9 workspaces, Settings (appearance, desktop, startup, Linux folders, WSL configuration, shortcuts, settings file) persisted to TOML, System page, and a power menu with **Return to Windows** (leave full-screen + minimise, nothing stopped) and **Quit** (with confirmation).
