@@ -16,6 +16,7 @@
 //! * [`fs`]        — file manager backend: locations, listing, file operations (M4)
 //! * [`shared`]    — shared-storage mappings: apply/undo with conflict safety (M4)
 //! * [`storage`]   — Windows<->Linux shared-folder model, path validation, mapping planner
+//! * [`distroconf`] — reviewable, reversible `/etc/wsl.conf` editing with backups (M5)
 //! * [`lifecycle`]  — start/stop one distribution, de-duplicated and confirmed (M5)
 //! * [`inspect`]    — read-only distribution inspection and its cache (M5)
 //! * [`probe`]      — allow-listed read-only in-distribution commands (M5)
@@ -26,6 +27,7 @@
 
 pub mod adapters;
 pub mod detect;
+pub mod distroconf;
 pub mod encoding;
 pub mod exec;
 pub mod fs;
