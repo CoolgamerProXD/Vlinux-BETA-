@@ -12,17 +12,17 @@ Nothing here was run against the existing `archlinux` distribution. No test unre
 
 ## 1. Easy launch (CI-real)
 
-Source: workflow run for commit `c41b2a6` (job *Build, test and smoke-launch on Windows*), step *Installer end-to-end*.
+Source: workflow runs for commits `c41b2a6` and `6dfba9e` (job *Build, test and smoke-launch on Windows*), step *Installer end-to-end*. Figures below are from `6dfba9e` unless stated.
 
 | Check | Result |
 |---|---|
 | `npx tauri build` produces an NSIS installer | yes — `VLINUX_0.1.0_x64-setup.exe`, 2.0 MiB (2,082,454 bytes) |
 | Silent per-user install (`/S`, no admin) | exit code 0; `vlinux.exe` and `uninstall.exe` installed under `%LOCALAPPDATA%` |
 | Start Menu entry | created (the step fails the job if it is missing) |
-| Desktop shortcut | see the `Installer result` annotation of the run (the step emits a `::warning` if the silent installer skips it; none was emitted) |
-| Installed app launches | window shown 51 ms after process start (an empty dark window) |
-| Desktop appears (not a blank window) | **launch → desktop ready: 858 ms** (process start to `performance.mark('vlinux-ready')`, one clock) |
-| Uninstall (silent) | program removed, no shortcuts left; user-data folder not removed by the uninstaller |
+| Desktop shortcut | created by the silent installer: `Desktop (user) = VLINUX.lnk` and `Start Menu (user) = VLINUX.lnk` (annotation *Installer result*); installed to `%LOCALAPPDATA%\VLINUX` containing `vlinux.exe` and `uninstall.exe` |
+| Installed app launches | window shown 44–51 ms after process start (an empty dark window) |
+| Desktop appears (not a blank window) | **launch → desktop ready: 858–934 ms** over two runs (process start to `performance.mark('vlinux-ready')`, one clock) |
+| Uninstall (silent) | program removed and no shortcuts left (run `c41b2a6`: 0 `vlinux.exe` copies, 0 shortcuts; the step fails the job if `vlinux.exe` remains). Whether the uninstaller leaves `%APPDATA%\app.vlinux.desktop` (your settings) in place is written to `installer-e2e.txt` in the artifact but was **not** read back; it is not claimed here |
 | Installer published | GitHub pre-release `installer-<commit>` (job *Publish installer as a pre-release*) |
 
 The installer is **not code-signed** (SmartScreen will warn). Interactive installer pages (a Desktop-shortcut checkbox) were not exercised.
@@ -41,15 +41,15 @@ Installed app, fresh profile, GitHub runner. The runner's CPU, GPU and memory ar
 
 | Metric | Value |
 |---|---|
-| Main process (`vlinux.exe`) working set, idle | 29.6 MiB (private 4.5 MiB) |
-| WebView2 children, idle (6 `msedgewebview2.exe`) | working set sum 309.7 MiB, private sum 113.3 MiB — working sets count shared pages once per process, so the sum over-states real use; private is the better figure |
-| Same, after opening Distributions, Setup, System, Settings, Files | main 30.5 MiB; children working set 420.1 MiB, private 150.6 MiB |
-| Idle CPU over 10 s (main + all children) | 0 % of one core |
-| Process start → main window shown | 51 ms |
-| Process start → desktop ready | 858 ms |
+| Main process (`vlinux.exe`) working set, idle | 29.6–29.9 MiB (private 4.5 MiB) |
+| WebView2 children, idle (6 `msedgewebview2.exe`) | working set sum 308–310 MiB, private sum 113.3 MiB — working sets count shared pages once per process, so the sum over-states real use; private is the better figure |
+| Same, after opening Distributions, Setup, System, Settings, Files | main 30.5–30.6 MiB; children working set 420–432 MiB, private 151–157 MiB |
+| Idle CPU over 10 s (main + all children) | 0–0.47 % of one core (two runs) |
+| Process start → main window shown | 44–51 ms |
+| Process start → desktop ready | 858–934 ms |
 | Terminal start, filesystem navigation, diagnostics timings | **not measured** — they need a real distribution. Diagnostics records per-check `ms`; run it once on the real PC and read the numbers from the report |
 
-Cleanup after exit: the step records how many of the app's child processes are still running 6 s after the main process is killed (see `installer-e2e.txt` in the `vlinux-windows` artifact). Reopening terminals repeatedly is covered only by the Simulated real-PTY tests (`terminal_real_pty`, which open and close real PTYs on `sh`/`cmd.exe` and assert no live session remains).
+Cleanup after exit: the step records how many of the app's child processes are still running 6 s after the main process is killed (in `installer-e2e.txt` in the `vlinux-windows` artifact); that figure was not read back, so **no cleanup claim is made** beyond the real-PTY tests below. Reopening terminals repeatedly is covered only by the Simulated real-PTY tests (`terminal_real_pty`, which open and close real PTYs on `sh`/`cmd.exe` and assert no live session remains).
 
 ## 4. Automated tests
 

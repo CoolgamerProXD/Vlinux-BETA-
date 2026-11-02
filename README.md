@@ -74,6 +74,9 @@ cd src-tauri && cargo test --workspace         # + the Tauri app crate (needs th
 ```
 `.github/workflows/ci.yml` has a fast Ubuntu job for the runtime crate, and a `windows-latest` job that runs everything, builds the installer and smoke-launches the real app. The browser e2e uses *simulated* WSL data (`?wsl=missing|empty|ready|reboot|multi`, clearly labelled in the UI); real detection only exists in the desktop app.
 
+## Verification status (M6)
+Evidence, with what ran where (CI-real on a GitHub Windows runner, Simulated, or Not verified), is in [docs/VALIDATION.md](docs/VALIDATION.md). In short: the installer builds, installs silently per-user with Start Menu **and** Desktop shortcuts, launches to the desktop (~0.9 s on the runner), passes a 13-check smoke test inside the real WebView2 with no console/CSP errors, and uninstalls. **Nothing has been verified against a real WSL distribution** — that is the 2-minute check above.
+
 ## Verification status (M5)
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#m5-distribution-management-lifecycle-and-compatibility) for the design.
 
