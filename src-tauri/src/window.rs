@@ -53,9 +53,9 @@ pub fn quit_app<R: Runtime>(app: AppHandle<R>) {
     app.exit(0);
 }
 
-/// Placeholder seam for later milestones (stop terminal sessions, apply the user's
-/// "stop distro on exit" policy). Intentionally does nothing in M0/M1 because VLINUX
-/// does not start any Linux processes yet.
+/// Seam for the user's "stop distro on exit" policy (later milestone). Terminal sessions are
+/// ended by the `RunEvent::Exit` handler in `lib.rs`, which covers every way of leaving. VLINUX
+/// never shuts WSL or a distribution down on its own.
 pub fn shutdown_hook() {}
 
 /// Called from the window-event handler: emit full-screen changes to the frontend.

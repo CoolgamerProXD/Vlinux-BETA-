@@ -14,6 +14,7 @@
 //! * [`install`]   — consent-gated install plans and the install job
 //! * [`managed`]   — record of distributions VLINUX installed itself
 //! * [`storage`]   — Windows<->Linux shared-folder model, path validation, mapping planner
+//! * [`terminal`]  — interactive terminal sessions on a pseudoterminal (M3)
 //! * [`testing`]   — fake process runner and helpers for tests
 
 pub mod adapters;
@@ -26,6 +27,7 @@ pub mod model;
 pub mod osrelease;
 pub mod parse;
 pub mod storage;
+pub mod terminal;
 pub mod testing;
 pub mod wsl;
 

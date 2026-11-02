@@ -5,14 +5,16 @@
 //! * `window`  — full-screen / exit-to-Windows / quit
 //! * `runtime` — Tauri bindings for the `vlinux-runtime` crate (WSL detection, install plans,
 //!   storage model). All Linux-runtime logic lives in that Tauri-free crate.
+//! * `terminal` — Tauri bindings for interactive terminal sessions (PTY logic is in the runtime crate)
 //!
-//! Later milestones add `pty` (terminal sessions), `fs` (file manager) and full distro
+//! Later milestones add `fs` (file manager) and full distro
 //! management, behind a backend trait so that non-WSL execution backends can be added.
 
 mod config;
 mod error;
 mod runtime;
 mod system;
+mod terminal;
 mod window;
 
 use std::sync::atomic::AtomicBool;
@@ -70,7 +72,7 @@ fn get_system_info() -> system::SystemInfo {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(FullscreenTracker(AtomicBool::new(false)))
         .setup(|app| {
             let dir = app
@@ -86,6 +88,8 @@ pub fn run() {
             app.manage(store);
             // Only constructs the state. No wsl.exe is run until the UI asks for detection.
             app.manage(Arc::new(runtime::RuntimeState::new(&dir)));
+            // Likewise: no PTY and no Linux process exists until the user opens a terminal.
+            app.manage(Arc::new(terminal::TerminalState::new(app.handle().clone())));
 
             // The window is created hidden (see tauri.conf.json) so that the user never
             // sees a flash of the wrong state. Always show it, even if a step fails.
@@ -125,7 +129,23 @@ pub fn run() {
             runtime::distro_stop,
             runtime::storage_overview,
             runtime::storage_validate_path,
+            terminal::terminal_open,
+            terminal::terminal_input,
+            terminal::terminal_resize,
+            terminal::terminal_ack,
+            terminal::terminal_close,
+            terminal::terminal_list,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running VLINUX");
+        .build(tauri::generate_context!())
+        .expect("error while building VLINUX");
+
+    app.run(|handle, event| {
+        // Whatever the exit path (menu, Alt+F4, installer), end the terminal sessions VLINUX
+        // started. Only those processes; WSL and the distributions keep running.
+        if let tauri::RunEvent::Exit = event {
+            if let Some(t) = handle.try_state::<Arc<terminal::TerminalState>>() {
+                t.manager.close_all();
+            }
+        }
+    });
 }

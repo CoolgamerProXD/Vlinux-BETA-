@@ -10,12 +10,53 @@ permissions:
   contents: read
 
 jobs:
+  lock:
+    name: Resolve and check Cargo.lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Needs to push the refreshed lock file back to the branch when dependencies changed.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Resolves any dependency added to a Cargo.toml and records it in Cargo.lock without
+      # touching versions that are already pinned. The other jobs then run with --locked.
+      - name: Resolve dependencies
+        run: cargo metadata --manifest-path src-tauri/Cargo.toml --format-version 1 > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cargo-lock
+          path: src-tauri/Cargo.lock
+
+      - name: Commit refreshed Cargo.lock (push events on non-main branches only)
+        if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+        run: |
+          if git diff --quiet -- src-tauri/Cargo.lock; then
+            echo "Cargo.lock already up to date"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src-tauri/Cargo.lock
+            git commit -m "chore: refresh Cargo.lock (resolved by CI)"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
   runtime:
     name: Runtime crate tests (fast, no Tauri, no Windows)
+    needs: lock
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cargo-lock
+          path: src-tauri
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -52,10 +93,16 @@ jobs:
 
   windows:
     name: Build, test and smoke-launch on Windows
+    needs: lock
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cargo-lock
+          path: src-tauri
 
       - name: Host information (read-only)
         shell: pwsh
@@ -94,6 +141,16 @@ jobs:
           $sum = ($out -split "`n" | Where-Object { $_ -match 'Running |test result|^error|FAILED|panicked' }) -join "`n"
           Write-Host ("::notice title=Rust tests::" + ($sum -replace "`r","" -replace "`n","%0A"))
           if ($LASTEXITCODE -ne 0) { throw "cargo test failed" }
+
+      - name: Real wsl.exe under ConPTY, unregistered distribution (informational)
+        working-directory: src-tauri
+        shell: pwsh
+        run: |
+          $out = cargo test -p vlinux-runtime --test terminal_real_pty real_wsl -- --nocapture 2>&1 | Out-String
+          Write-Host $out
+          $line = ($out -split "`n" | Where-Object { $_ -match 'real wsl.exe|wsl.exe could not be started|test result' }) -join "`n"
+          Write-Host ("::notice title=Real wsl.exe under ConPTY::" + ($line -replace "`r","" -replace "`n","%0A"))
+        continue-on-error: true
 
       - name: Clippy (informational)
         working-directory: src-tauri
