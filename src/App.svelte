@@ -49,6 +49,7 @@
         ui.toast(`Start-up problem: ${String((e as Error)?.message ?? e)}`, 'error', 9000);
       }
       ready = true;
+      performance.mark('vlinux-ready');
     })();
     return () => {
       host.dispose();

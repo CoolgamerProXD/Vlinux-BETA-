@@ -298,8 +298,8 @@ jobs:
           while (-not $p.HasExited -and $sw.Elapsed.TotalSeconds -lt 60) { $p.Refresh(); if ($p.MainWindowHandle -ne 0) { break }; Start-Sleep -Milliseconds 25 }
           $startMs = $sw.ElapsedMilliseconds
           if ($p.HasExited) { throw "installed VLINUX exited early with code $($p.ExitCode)" }
-          Note "Startup: process start to a visible main window = $startMs ms (window handle $($p.MainWindowHandle))"
-          Write-Host "::notice title=Startup time (runner)::$startMs ms from process start to visible main window (installed app, GitHub runner, not the user's PC)"
+          Note "Startup: process start to the main window being shown = $startMs ms (window handle $($p.MainWindowHandle)); the desktop inside it appears later - see Launch to desktop"
+          Write-Host "::notice title=Window shown (runner)::$startMs ms from process start to the main window being shown (an empty dark window; the desktop is drawn after the web content loads). Installed app on a GitHub runner, not the user's PC"
 
           Start-Sleep -Seconds 10
           $ids = Measure-Tree $p.Id 'idle, after launch'
@@ -317,8 +317,12 @@ jobs:
 
           # ---- drive the real WebView2 window ----
           $env:OUT_DIR = 'artifacts'
+          $env:PROC_START_MS = [string][DateTimeOffset]::new($p.StartTime).ToUnixTimeMilliseconds()
           node scripts/webview-smoke.mjs 2>&1 | Tee-Object -FilePath artifacts/webview-smoke.log
           $smoke = $LASTEXITCODE
+          $logText = (Get-Content artifacts/webview-smoke.log -Raw)
+          if ($logText.Length -gt 3500) { $logText = $logText.Substring(0, 3500) }
+          Write-Host ("::notice title=WebView2 smoke log::" + ($logText -replace "`r","" -replace "%","%25" -replace "`n","%0A"))
           Note "WebView2 smoke exit code: $smoke"
           $ids2 = Measure-Tree $p.Id 'after the smoke test opened the apps'
           $allIds = @($ids + $ids2 | Select-Object -Unique)

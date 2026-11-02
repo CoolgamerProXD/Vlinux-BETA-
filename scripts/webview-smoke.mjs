@@ -33,6 +33,14 @@ for (let i = 0; i < 60 && !browser; i++) {
 }
 if (!browser) {
   console.log('FAIL  could not attach to WebView2 over CDP');
+  for (const ep of ['/json/version', '/json/list']) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}${ep}`);
+      console.log(`GET ${ep} -> ${r.status} ${(await r.text()).slice(0, 600)}`);
+    } catch (e) {
+      console.log(`GET ${ep} failed: ${e}`);
+    }
+  }
   process.exit(2);
 }
 const connectMs = Date.now() - t0;
@@ -55,6 +63,14 @@ page.on('console', (m) => {
 page.on('requestfailed', (r) => problems.push('requestfailed: ' + r.url() + ' ' + (r.failure()?.errorText ?? '')));
 
 // Reload with the listeners attached so start-up errors and CSP violations are seen.
+// Time from process start to the desktop being ready, on one clock (the CI step passes the start time).
+const mark = await page.evaluate(() => {
+  const m = performance.getEntriesByName('vlinux-ready')[0];
+  return m ? { epoch: performance.timeOrigin + m.startTime, sinceNav: m.startTime } : null;
+});
+let launchToReadyMs = null;
+if (mark && process.env.PROC_START_MS) launchToReadyMs = Math.round(mark.epoch - Number(process.env.PROC_START_MS));
+if (mark) console.log(`::notice title=Launch to desktop (real WebView2, runner)::${launchToReadyMs !== null ? launchToReadyMs + ' ms from process start to the desktop being ready; ' : ''}${Math.round(mark.sinceNav)} ms from page navigation start`);
 const r0 = Date.now();
 await page.reload({ waitUntil: 'load' });
 await page.waitForSelector('.shell.ready', { timeout: 30000 }).catch(() => {});
@@ -133,7 +149,7 @@ await page.screenshot({ path: path.join(out, 'webview-apps.png') });
 check('no console errors, CSP violations or failed requests during the whole run', problems.length === 0, problems.slice(0, 5).join(' | '));
 
 const failed = results.filter((r) => !r.ok).length;
-fs.writeFileSync(path.join(out, 'webview-smoke.json'), JSON.stringify({ results, problems, connectMs, readyMs, userAgent: ua }, null, 2));
+fs.writeFileSync(path.join(out, 'webview-smoke.json'), JSON.stringify({ results, problems, connectMs, readyMs, launchToReadyMs, userAgent: ua }, null, 2));
 console.log(`::notice title=WebView2 smoke (real window)::${results.length - failed}/${results.length} checks passed${failed ? ', FAILED: ' + results.filter((r) => !r.ok).map((r) => r.name).join('; ') : ''}`);
 await browser.disconnect();
 process.exit(failed ? 1 : 0);
