@@ -131,6 +131,14 @@ impl Spaces {
         None
     }
 
+    /// `cur` is a proper prefix of a shared folder's mount path (`/mnt/d` on the way to
+    /// `/mnt/d/Media/Downloads`): passing through it is fine, the mount itself decides later.
+    fn on_the_way_to_a_mount(&self, cur: &[String]) -> bool {
+        self.windows.iter().filter_map(|r| r.linux_mount.as_deref()).any(|m| {
+            matches!(linux_components(m), Ok(mc) if mc.len() > cur.len() && comps_eq(&mc[..cur.len()], cur))
+        })
+    }
+
     fn blocked_drive(&self, cur: &[String]) -> bool {
         match linux_components(&self.mount_root) {
             Ok(mr) if !mr.is_empty() => {
@@ -188,7 +196,7 @@ impl Spaces {
                 let rel: Vec<String> = cur[n..].to_vec();
                 return self.windows_with_rest(&root.id.clone(), rel, &queue);
             }
-            if self.blocked_drive(&cur) {
+            if self.blocked_drive(&cur) && !self.on_the_way_to_a_mount(&cur) {
                 return Err(FsError::new(
                     FsErrorKind::OutsideRoot,
                     format!(
@@ -225,6 +233,13 @@ impl Spaces {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => missing = true,
                 Err(e) => return Err(FsError::from_io(&e, "open", &linux_join(&cur))),
             }
+        }
+        if self.blocked_drive(&cur) {
+            // Ended on the way to a shared mount: the folders around it are not shared.
+            return Err(FsError::new(
+                FsErrorKind::OutsideRoot,
+                format!("{} is part of a Windows drive. Use the shared folders in the sidebar instead.", linux_join(&cur)),
+            ));
         }
         Ok(Location::Linux { path: linux_join(&cur) })
     }
@@ -432,8 +447,10 @@ mod tests {
             s.resolve_linux("/mnt/d/Media/Downloads/Sub/file.txt").unwrap(),
             Location::windows("downloads", &["Sub", "file.txt"])
         );
-        // Another folder on the same drive is NOT reachable.
+        // Another folder on the same drive is NOT reachable, nor are the folders leading to the mount.
         assert_eq!(s.resolve_linux("/mnt/d/Media/Secret").unwrap_err().kind, FsErrorKind::OutsideRoot);
+        assert_eq!(s.resolve_linux("/mnt/d/Media").unwrap_err().kind, FsErrorKind::OutsideRoot);
+        assert_eq!(s.resolve_linux("/mnt/d").unwrap_err().kind, FsErrorKind::OutsideRoot);
     }
 
     #[test]

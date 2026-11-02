@@ -7,11 +7,14 @@
 //!   storage model). All Linux-runtime logic lives in that Tauri-free crate.
 //! * `terminal` — Tauri bindings for interactive terminal sessions (PTY logic is in the runtime crate)
 //!
-//! Later milestones add `fs` (file manager) and full distro
+//! * `files`  — Tauri bindings for the file manager and shared-folder mappings (logic is in the runtime crate)
+//!
+//! Later milestones add full distro
 //! management, behind a backend trait so that non-WSL execution backends can be added.
 
 mod config;
 mod error;
+mod files;
 mod runtime;
 mod system;
 mod terminal;
@@ -87,7 +90,11 @@ pub fn run() {
                 .unwrap_or(true);
             app.manage(store);
             // Only constructs the state. No wsl.exe is run until the UI asks for detection.
-            app.manage(Arc::new(runtime::RuntimeState::new(&dir)));
+            let rt = Arc::new(runtime::RuntimeState::new(&dir));
+            app.manage(rt.clone());
+            // The file manager and shared-folder mappings. Nothing runs inside a distribution
+            // until the user opens Files or checks/applies a mapping.
+            app.manage(Arc::new(files::FilesState::new(app.handle().clone(), rt, &dir)));
             // Likewise: no PTY and no Linux process exists until the user opens a terminal.
             app.manage(Arc::new(terminal::TerminalState::new(app.handle().clone())));
 
@@ -135,6 +142,20 @@ pub fn run() {
             terminal::terminal_ack,
             terminal::terminal_close,
             terminal::terminal_list,
+            files::fs_places,
+            files::fs_list_open,
+            files::fs_list_page,
+            files::fs_list_close,
+            files::fs_create,
+            files::fs_rename,
+            files::fs_delete,
+            files::fs_transfer,
+            files::fs_job_cancel,
+            files::fs_open,
+            files::fs_reveal,
+            files::mapping_status,
+            files::mapping_apply,
+            files::mapping_undo,
         ])
         .build(tauri::generate_context!())
         .expect("error while building VLINUX");

@@ -44,8 +44,8 @@ struct ActiveJob {
 }
 
 pub struct RuntimeState {
-    wsl: WslClient,
-    programs: Programs,
+    pub(crate) wsl: WslClient,
+    pub(crate) programs: Programs,
     registry: DistroRegistry,
     plans: PlanStore,
     managed: ManagedStore,
@@ -306,7 +306,7 @@ pub async fn install_cancel(rt: Rt<'_>, job_id: String) -> Result<bool, AppError
     .await
 }
 
-fn require_regular_distro(report: &WslReport, name: &str) -> Result<(), AppError> {
+pub(crate) fn require_regular_distro(report: &WslReport, name: &str) -> Result<(), AppError> {
     match report.distros.iter().find(|d| d.name == name) {
         Some(d) if d.kind == DistroKind::Regular => Ok(()),
         Some(_) => Err(AppError::Runtime(format!("'{name}' belongs to another application and is never touched by VLINUX."))),
@@ -314,7 +314,7 @@ fn require_regular_distro(report: &WslReport, name: &str) -> Result<(), AppError
     }
 }
 
-fn ensure_wsl_ready(report: &WslReport) -> Result<(), AppError> {
+pub(crate) fn ensure_wsl_ready(report: &WslReport) -> Result<(), AppError> {
     match report.status {
         RuntimeStatus::Ready => Ok(()),
         _ => Err(AppError::Runtime("WSL is not ready. Check the setup status first.".into())),
