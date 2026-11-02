@@ -625,7 +625,16 @@ impl<'a, 'p> Run<'a, 'p> {
                 if let Some(v) = s.need_running() {
                     return v;
                 }
-                let Some(root) = &root else { return unsupported("Linux files are reached through WSL's file share, which exists only on Windows.") };
+                let Some(root) = &root else {
+                    return if cfg!(windows) {
+                        fail(
+                            "The distribution's file share (\\\\wsl.localhost\\<name>) could not be found.",
+                            "Make sure the distribution is running and WSL is up to date (`wsl --update`).",
+                        )
+                    } else {
+                        unsupported("Linux files are reached through WSL's file share, which exists only on Windows.")
+                    };
+                };
                 match fs::read_dir(root) {
                     Ok(it) => {
                         let n = it.take(10_000).count();

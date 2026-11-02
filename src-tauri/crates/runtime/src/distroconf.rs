@@ -475,7 +475,7 @@ pub struct Plan {
     pub restart_note: String,
 }
 
-pub const RESTART_NOTE: &str = "A saved change takes effect only after this distribution restarts. VLINUX will not restart or stop it for you, and it cannot confirm the change is active until you have restarted it.";
+pub const RESTART_NOTE: &str = "A saved change takes effect only after this distribution restarts. VLINUX will not restart or stop it for you, and it cannot confirm the change has taken effect until you have restarted it.";
 
 /// Build the new file text for `changes` without writing anything.
 pub fn plan(distro: &str, current: Option<&str>, changes: &[Change], wsl_version: u8) -> Result<Plan, ConfError> {

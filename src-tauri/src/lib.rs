@@ -8,11 +8,14 @@
 //! * `terminal` — Tauri bindings for interactive terminal sessions (PTY logic is in the runtime crate)
 //!
 //! * `files`  — Tauri bindings for the file manager and shared-folder mappings (logic is in the runtime crate)
+//! * `distros` — Tauri bindings for the Distribution Manager: overview, lifecycle, inspection, package
+//!   plans, `/etc/wsl.conf` editing and compatibility diagnostics (logic is in the runtime crate)
 //!
 //! Later milestones add full distro
 //! management, behind a backend trait so that non-WSL execution backends can be added.
 
 mod config;
+mod distros;
 mod error;
 mod files;
 mod runtime;
@@ -94,7 +97,10 @@ pub fn run() {
             app.manage(rt.clone());
             // The file manager and shared-folder mappings. Nothing runs inside a distribution
             // until the user opens Files or checks/applies a mapping.
-            app.manage(Arc::new(files::FilesState::new(app.handle().clone(), rt, &dir)));
+            app.manage(Arc::new(files::FilesState::new(app.handle().clone(), rt.clone(), &dir)));
+            // Distribution Manager: only constructs state. Nothing is inspected, started or polled
+            // until the user asks.
+            app.manage(Arc::new(distros::DistroMgmt::new(app.handle().clone(), rt, &dir)));
             // Likewise: no PTY and no Linux process exists until the user opens a terminal.
             app.manage(Arc::new(terminal::TerminalState::new(app.handle().clone())));
 
@@ -132,8 +138,6 @@ pub fn run() {
             runtime::install_prepare,
             runtime::install_start,
             runtime::install_cancel,
-            runtime::distro_start,
-            runtime::distro_stop,
             runtime::storage_overview,
             runtime::storage_validate_path,
             terminal::terminal_open,
@@ -156,6 +160,22 @@ pub fn run() {
             files::mapping_status,
             files::mapping_apply,
             files::mapping_undo,
+            distros::distro_overview,
+            distros::distro_set_preferred,
+            distros::distro_start,
+            distros::distro_stop,
+            distros::distro_inspect,
+            distros::distro_inspect_cancel,
+            distros::distro_pkg_plan,
+            distros::distro_pkg_search,
+            distros::wslconf_read,
+            distros::wslconf_preview,
+            distros::wslconf_apply,
+            distros::wslconf_backups,
+            distros::wslconf_restore,
+            distros::wslconfig_windows,
+            distros::diag_run,
+            distros::diag_cancel,
         ])
         .build(tauri::generate_context!())
         .expect("error while building VLINUX");

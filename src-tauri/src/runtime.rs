@@ -93,7 +93,7 @@ impl RuntimeState {
         }
     }
 
-    fn invalidate(&self) {
+    pub(crate) fn invalidate(&self) {
         if let Ok(mut g) = self.report.lock() {
             *g = None;
         }
@@ -148,7 +148,7 @@ impl RuntimeState {
 
 type Rt<'a> = State<'a, Arc<RuntimeState>>;
 
-async fn blocking<T, F>(f: F) -> Result<T, AppError>
+pub(crate) async fn blocking<T, F>(f: F) -> Result<T, AppError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, AppError> + Send + 'static,
@@ -319,44 +319,6 @@ pub(crate) fn ensure_wsl_ready(report: &WslReport) -> Result<(), AppError> {
         RuntimeStatus::Ready => Ok(()),
         _ => Err(AppError::Runtime("WSL is not ready. Check the setup status first.".into())),
     }
-}
-
-/// Start a distribution (user-initiated). Runs `/bin/true`, then re-detects, which now identifies
-/// it from `/etc/os-release` because it is running.
-#[tauri::command]
-pub async fn distro_start(rt: Rt<'_>, name: String) -> Result<WslReport, AppError> {
-    let rt = rt.inner().clone();
-    blocking(move || {
-        let report = rt.detect(false);
-        ensure_wsl_ready(&report)?;
-        require_regular_distro(&report, &name)?;
-        let out = rt.wsl.start(&name).map_err(|e| AppError::Runtime(format!("Could not start '{name}': {e}.")))?;
-        if !out.success() {
-            rt.invalidate();
-            return Err(AppError::Runtime(format!("'{name}' did not start (exit code {}).", out.status.map(|c| c.to_string()).unwrap_or_else(|| "unknown".into()))));
-        }
-        rt.invalidate();
-        Ok(rt.detect(true))
-    })
-    .await
-}
-
-/// Stop one distribution (user-initiated; the UI asks for confirmation first). Deletes nothing.
-#[tauri::command]
-pub async fn distro_stop(rt: Rt<'_>, name: String) -> Result<WslReport, AppError> {
-    let rt = rt.inner().clone();
-    blocking(move || {
-        let report = rt.detect(false);
-        ensure_wsl_ready(&report)?;
-        require_regular_distro(&report, &name)?;
-        let out = rt.wsl.terminate(&name).map_err(|e| AppError::Runtime(format!("Could not stop '{name}': {e}.")))?;
-        rt.invalidate();
-        if !out.success() {
-            return Err(AppError::Runtime(format!("'{name}' could not be stopped (exit code {}).", out.status.map(|c| c.to_string()).unwrap_or_else(|| "unknown".into()))));
-        }
-        Ok(rt.detect(true))
-    })
-    .await
 }
 
 /// Where each shared folder would point, resolved now from the saved preferences.

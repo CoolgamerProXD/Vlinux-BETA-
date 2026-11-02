@@ -83,7 +83,7 @@ fn storage_of(cfg: &Cfg<'_>) -> Result<StorageConfig, FsError> {
 }
 
 /// Host path of a distribution's file share.
-fn linux_root(distro: &str) -> FsResult<PathBuf> {
+pub(crate) fn linux_root(distro: &str) -> FsResult<PathBuf> {
     if !valid_distro_name(distro) {
         return Err(FsError::new(FsErrorKind::InvalidPath, format!("'{distro}' is not a valid distribution name.")));
     }
