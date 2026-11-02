@@ -13,9 +13,9 @@
     { id: 'M1', name: 'Desktop shell — bar, dock, launcher, exit to Windows', state: 'done' },
     { id: 'M2', name: 'WSL detection, distro adapters, safe setup workflow, storage model', state: 'done' },
     { id: 'M3', name: 'Linux terminal (real pseudoterminal, tabs)', state: 'done' },
-    { id: 'M4', name: 'File manager and shared-folder mapping', state: 'next' },
-    { id: 'M5', name: 'Distribution manager', state: 'planned' },
-    { id: 'M6', name: 'Polish, resource limits, installer testing', state: 'planned' },
+    { id: 'M4', name: 'File manager and shared-folder mapping', state: 'done' },
+    { id: 'M5', name: 'Distribution manager, WSL configuration, compatibility diagnostics', state: 'done' },
+    { id: 'M6', name: 'Polish, resource limits, installer testing, real-WSL verification', state: 'next' },
   ];
 
   const r = $derived(runtime.report);

@@ -2,7 +2,8 @@
 //
 // Used ONLY when the UI runs outside the desktop app (UI development, automated screenshots).
 // Everything here is SIMULATED: no WSL is queried and nothing is ever installed. The scenario
-// is chosen with `?wsl=missing|empty|ready|reboot` (default: "unavailable", which honestly says
+// is chosen with `?wsl=missing|empty|ready|reboot|multi` (`multi` = six distributions with different
+// package managers and states, for the Distribution Manager) (default: "unavailable", which honestly says
 // there is no WSL in a browser). The desktop app never loads this module.
 
 import type {
@@ -11,11 +12,11 @@ import type {
 import type { Config } from './types';
 import { FOLDER_IDS } from './types';
 
-export type Scenario = 'unavailable' | 'missing' | 'empty' | 'ready' | 'reboot';
+export type Scenario = 'unavailable' | 'missing' | 'empty' | 'ready' | 'reboot' | 'multi';
 
 export function scenario(): Scenario {
   const q = typeof location === 'undefined' ? '' : new URLSearchParams(location.search).get('wsl');
-  return q === 'missing' || q === 'empty' || q === 'ready' || q === 'reboot' ? q : 'unavailable';
+  return q === 'missing' || q === 'empty' || q === 'ready' || q === 'reboot' || q === 'multi' ? q : 'unavailable';
 }
 
 export const SIMULATION_NOTE =
@@ -57,6 +58,19 @@ function initialReport(): WslReport {
           distro('archlinux', 'Arch Linux', 'arch', 'running', { is_default: true, identity_source: 'os_release', os_release: { id: 'arch', pretty_name: 'Arch Linux', version_id: null } }),
           distro('Ubuntu-24.04', 'Ubuntu', 'ubuntu', 'stopped'),
           distro('Debian', 'Debian', 'debian', 'stopped', { wsl_version: 1 }),
+          distro('docker-desktop', 'docker-desktop', 'generic', 'running', { kind: 'internal' }),
+        ],
+      });
+    case 'multi':
+      return baseReport({ kind: 'ready' }, {
+        wsl_version: '2.4.13.0', kernel_version: '5.15.167.4-1', wslg_version: '1.0.65', default_wsl_version: 2, wsl2_available: true,
+        default_distro: 'archlinux', suggested_distro: 'archlinux',
+        distros: [
+          distro('archlinux', 'Arch Linux', 'arch', 'running', { is_default: true, identity_source: 'os_release', os_release: { id: 'arch', pretty_name: 'Arch Linux', version_id: null } }),
+          distro('Ubuntu-24.04', 'Ubuntu', 'ubuntu', 'stopped'),
+          distro('Debian', 'Debian', 'debian', 'running', { wsl_version: 1 }),
+          distro('FedoraLinux-42', 'Fedora', 'fedora', 'stopped'),
+          distro('Alpine', 'Other Linux', 'generic', 'stopped'),
           distro('docker-desktop', 'docker-desktop', 'generic', 'running', { kind: 'internal' }),
         ],
       });

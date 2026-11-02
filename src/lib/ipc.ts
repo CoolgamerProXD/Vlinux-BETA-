@@ -8,6 +8,12 @@
 
 import { sanitizeConfig, defaultConfig, type Config, type ConfigPayload, type SystemInfo } from './types';
 import type { Catalog, InstallEvent, InstallPlan, StorageOverview, Verdict, WslReport } from './runtime-types';
+import type {
+  ApplyOutcome, BackupInfo, ConfPlan, DiagOptions, DiagProgress, DiagReport, DistroOpEvent, InspectOutcome, LifecycleResult, Overview,
+  PackageHit, PackagePlan, SettingChange, WindowsConfig, WslConfRead,
+} from './distros-types';
+
+const distrosPreview = () => import('./distros-preview');
 
 export const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -129,14 +135,16 @@ export async function onInstallEvent(cb: (e: InstallEvent) => void): Promise<() 
   return (await preview()).onInstall(cb);
 }
 
-export async function distroStart(name: string): Promise<WslReport> {
-  if (isTauri()) return call<WslReport>('distro_start', { name });
-  return (await preview()).distroState(name, 'running');
+/** Start one distribution (explicit user action). The backend de-duplicates and verifies. */
+export async function distroStart(name: string): Promise<LifecycleResult> {
+  if (isTauri()) return call<LifecycleResult>('distro_start', { name });
+  return (await distrosPreview()).start(name);
 }
 
-export async function distroStop(name: string): Promise<WslReport> {
-  if (isTauri()) return call<WslReport>('distro_stop', { name });
-  return (await preview()).distroState(name, 'stopped');
+/** Stop one distribution. `confirmed` is the user's explicit confirmation; the backend refuses without it. */
+export async function distroStop(name: string, confirmed: boolean): Promise<LifecycleResult> {
+  if (isTauri()) return call<LifecycleResult>('distro_stop', { name, confirmed });
+  return (await distrosPreview()).stop(name, confirmed);
 }
 
 export async function storageOverview(): Promise<StorageOverview> {
@@ -290,4 +298,101 @@ export async function mappingApply(distro: string, folder: string, resolution: R
 export async function mappingUndo(distro: string, folder: string): Promise<MappingOutcome> {
   if (isTauri()) return call<MappingOutcome>('mapping_undo', { distro, folder });
   return (await fsPreview()).mappingUndo(distro, folder, (await getConfig()).config);
+}
+
+// ---- Distribution Manager (M5) ------------------------------------------------------------------
+// Typed requests only. The UI names a distribution and, for configuration, a list of
+// `{ id, value }` pairs for the few settings VLINUX manages; the backend validates the name against
+// the registered distributions, re-reads the real file, builds the new content itself and refuses
+// without `confirmed`. Nothing here accepts a command line, a path, or file text.
+
+/** Cached discovery. `force` re-queries WSL (explicit refresh); nothing is polled. */
+export async function distroOverview(force = false): Promise<Overview> {
+  if (isTauri()) return call<Overview>('distro_overview', { force });
+  return (await distrosPreview()).overview(force);
+}
+
+/** Record the preferred distribution in VLINUX's own config. Never changes the Windows default. */
+export async function distroSetPreferred(name: string | null): Promise<Overview> {
+  if (isTauri()) return call<Overview>('distro_set_preferred', { name });
+  return (await distrosPreview()).setPreferred(name);
+}
+
+/** Read-only inspection. A stopped distribution is started only when `allowStart` is true. */
+export async function distroInspect(name: string, allowStart: boolean): Promise<InspectOutcome> {
+  if (isTauri()) return call<InspectOutcome>('distro_inspect', { name, allowStart });
+  return (await distrosPreview()).inspect(name, allowStart);
+}
+
+export async function distroInspectCancel(name: string): Promise<boolean> {
+  if (isTauri()) return call<boolean>('distro_inspect_cancel', { name });
+  return false;
+}
+
+/** A reviewable package command. It is never executed by VLINUX. */
+export async function distroPkgPlan(name: string, op: 'install' | 'update', packages: string[]): Promise<PackagePlan> {
+  if (isTauri()) return call<PackagePlan>('distro_pkg_plan', { name, op, packages });
+  return (await distrosPreview()).pkgPlan(name, op, packages);
+}
+
+export async function distroPkgSearch(name: string, query: string): Promise<PackageHit[]> {
+  if (isTauri()) return call<PackageHit[]>('distro_pkg_search', { name, query });
+  return (await distrosPreview()).pkgSearch(name, query);
+}
+
+export async function wslconfRead(name: string): Promise<WslConfRead> {
+  if (isTauri()) return call<WslConfRead>('wslconf_read', { name });
+  return (await distrosPreview()).confRead(name);
+}
+
+export async function wslconfPreview(name: string, changes: SettingChange[]): Promise<ConfPlan> {
+  if (isTauri()) return call<ConfPlan>('wslconf_preview', { name, changes });
+  return (await distrosPreview()).confPreview(name, changes);
+}
+
+export async function wslconfApply(name: string, changes: SettingChange[], basedOn: string, confirmed: boolean): Promise<ApplyOutcome> {
+  if (isTauri()) return call<ApplyOutcome>('wslconf_apply', { name, changes, basedOn, confirmed });
+  return (await distrosPreview()).confApply(name, changes, basedOn, confirmed);
+}
+
+export async function wslconfBackups(name: string): Promise<BackupInfo[]> {
+  if (isTauri()) return call<BackupInfo[]>('wslconf_backups', { name });
+  return (await distrosPreview()).confBackups(name);
+}
+
+export async function wslconfRestore(name: string, backupId: string, force: boolean, confirmed: boolean): Promise<ApplyOutcome> {
+  if (isTauri()) return call<ApplyOutcome>('wslconf_restore', { name, backupId, force, confirmed });
+  return (await distrosPreview()).confRestore(name, backupId, force, confirmed);
+}
+
+/** Read-only view of the Windows-owned `.wslconfig`. */
+export async function wslconfigWindows(): Promise<WindowsConfig> {
+  if (isTauri()) return call<WindowsConfig>('wslconfig_windows');
+  return (await distrosPreview()).windowsConfig();
+}
+
+export async function diagRun(options: DiagOptions): Promise<DiagReport> {
+  if (isTauri()) return call<DiagReport>('diag_run', { options });
+  return (await distrosPreview()).diagRun(options);
+}
+
+export async function diagCancel(): Promise<boolean> {
+  if (isTauri()) return call<boolean>('diag_cancel');
+  return (await distrosPreview()).diagCancelRun();
+}
+
+export async function onDistroOp(cb: (e: DistroOpEvent) => void): Promise<() => void> {
+  if (isTauri()) {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<DistroOpEvent>('vlinux://distro-op', (e) => cb(e.payload));
+  }
+  return (await distrosPreview()).onOp(cb);
+}
+
+export async function onDiagProgress(cb: (e: DiagProgress) => void): Promise<() => void> {
+  if (isTauri()) {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<DiagProgress>('vlinux://diag-progress', (e) => cb(e.payload));
+  }
+  return (await distrosPreview()).onDiag(cb);
 }

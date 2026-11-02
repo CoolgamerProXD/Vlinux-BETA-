@@ -141,7 +141,7 @@
                 {:else if d.state === 'running'}
                   {#if confirmStop === d.name}
                     <span class="confirm">Stop {d.name}? Running programs in it end.
-                      <button class="btn danger" onclick={() => { const n = d.name; confirmStop = null; void runtime.stop(n); }}>Stop it</button>
+                      <button class="btn danger" onclick={() => { const n = d.name; confirmStop = null; void runtime.stop(n, true); }}>Stop it</button>
                       <button class="btn" onclick={() => (confirmStop = null)}>Keep running</button>
                     </span>
                   {:else}

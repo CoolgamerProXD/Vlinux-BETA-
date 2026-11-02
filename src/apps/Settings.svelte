@@ -13,14 +13,17 @@
   import { ACCENTS, DOCK_POSITIONS, WALLPAPERS, type Accent, type Wallpaper } from '../lib/types';
   import { ACCENT_COLORS } from '../lib/theme';
   import Icon from '../components/Icon.svelte';
+  import WslConfigPanel from '../components/WslConfigPanel.svelte';
+  import { distros } from '../lib/distros.svelte';
   import type { IconName } from '../lib/icons';
 
-  type Section = 'appearance' | 'desktop' | 'startup' | 'folders' | 'shortcuts' | 'storage';
+  type Section = 'appearance' | 'desktop' | 'startup' | 'folders' | 'wsl' | 'shortcuts' | 'storage';
   const sections: { id: Section; label: string; icon: IconName }[] = [
     { id: 'appearance', label: 'Appearance', icon: 'palette' },
     { id: 'desktop', label: 'Desktop & dock', icon: 'grid' },
     { id: 'startup', label: 'Startup & display', icon: 'monitor' },
     { id: 'folders', label: 'Linux folders', icon: 'folder' },
+    { id: 'wsl', label: 'WSL configuration', icon: 'layers' },
     { id: 'shortcuts', label: 'Shortcuts', icon: 'keyboard' },
     { id: 'storage', label: 'Settings file', icon: 'info' },
   ];
@@ -47,6 +50,14 @@
     ['Ctrl + Shift + T / W', 'Terminal: new tab / close tab'],
     ['Ctrl + Shift + C / V', 'Terminal: copy selection / paste (Ctrl + C is the shell\'s interrupt)'],
   ];
+
+  // ---- WSL configuration: cached discovery only; reading a distribution's file never starts it ----
+  let wslChosen = $state<string | null>(null);
+  const wslNames = $derived(distros.cards.filter((x) => x.kind === 'regular').map((x) => x.name));
+  const wslPick = $derived(wslChosen && wslNames.includes(wslChosen) ? wslChosen : (distros.current?.name ?? wslNames[0] ?? null));
+  $effect(() => {
+    if (current === 'wsl' && !distros.overview) untrack(() => void distros.refresh(false));
+  });
 
   // ---- Linux folders: saved preferences, and (separately) what a check of the distribution found ----
   let overview = $state<StorageOverview | null>(null);
@@ -340,6 +351,20 @@
         <p class="muted small">Only changes these preferences. No file or folder is touched.</p>
       {:else if !overviewError}
         <p class="muted" aria-busy="true">Resolving where Windows keeps your folders…</p>
+      {/if}
+    {:else if current === 'wsl'}
+      <h3>WSL configuration</h3>
+      <p class="muted">How each distribution behaves (automount, interoperability, default user) and how WSL is limited on this PC. Nothing is written until you review a change and confirm it, a backup is taken first, and nothing is restarted for you.</p>
+      {#if wslNames.length === 0}
+        <div class="dm-card"><p class="muted" data-testid="wsl-section-empty">{distros.loading ? 'Looking at WSL…' : 'No distribution to configure. Open Distributions and press Refresh, or set one up in Linux Setup.'}</p></div>
+      {:else}
+        <div class="dm-card dm-row" style="margin: 10px 0">
+          <label for="wsl-distro">Distribution</label>
+          <select id="wsl-distro" class="dm-select" value={wslPick} onchange={(e) => (wslChosen = e.currentTarget.value)}>
+            {#each wslNames as n}<option value={n}>{n}{n === distros.overview?.preferred_name ? ' (preferred)' : ''}</option>{/each}
+          </select>
+        </div>
+        <WslConfigPanel distro={wslPick} windows />
       {/if}
     {:else if current === 'shortcuts'}
       <h3>Keyboard shortcuts</h3>

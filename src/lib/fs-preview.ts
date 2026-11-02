@@ -86,7 +86,7 @@ const world = (d: string): World => {
 const err = (kind: FsError['kind'], message: string): FsError => ({ kind, message });
 
 function linuxAvailable(distro: string | null): string | null {
-  if (scenario() !== 'ready') return 'SIMULATED: WSL is not available in this preview scenario. Add ?wsl=ready to preview the Linux side.';
+  if (scenario() !== 'ready' && scenario() !== 'multi') return 'SIMULATED: WSL is not available in this preview scenario. Add ?wsl=ready to preview the Linux side.';
   if (!distro) return 'No Linux distribution is selected. Choose one in Linux Setup to browse its files.';
   return null;
 }

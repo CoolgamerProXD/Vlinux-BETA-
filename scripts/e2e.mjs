@@ -51,7 +51,7 @@ try {
   check('clock shows HH:MM', /^\d{2}:\d{2}$/.test(await text(page, '.time')), await text(page, '.time'));
   check('date shown', (await text(page, '.date')).length > 3);
   check('5 workspace indicators, #1 active', (await count(page, '.ws .pill')) === 5 && (await text(page, '.ws .pill.active')) === '1');
-  check('dock has launcher + 5 apps', (await count(page, '.dock .item')) === 6);
+  check('dock has launcher + 6 apps', (await count(page, '.dock .item')) === 7);
   check('every app is available (none disabled); Files and Terminal are enabled', (await count(page, '.dock .item[aria-disabled="true"]')) === 0 && (await count(page, '.dock .item[aria-label^="Files"]:not([aria-disabled="true"])')) === 1 && (await count(page, '.dock .item[aria-label^="Terminal"]:not([aria-disabled="true"])')) === 1);
   check('wallpaper rendered', (await count(page, '.wp svg')) === 1);
   await shot(page, '01-desktop');
@@ -656,6 +656,222 @@ try {
   check('after a reload nothing is claimed as connected until the distribution is checked again', (await badges()).every((b) => b.includes('not checked') || b.includes('Linux-private')));
   await page.close();
 
+  console.log('M5 - Distribution Manager (SIMULATED preview: six fake distributions, no real WSL)');
+  const dcard = (n) => `[data-testid="distro-card"][data-distro="${n}"]`;
+  const dstate = (pg, n) => pg.$eval(dcard(n), (e) => e.getAttribute('data-state'));
+  const dact = (n, a) => `${dcard(n)} [data-action="${a}"]`;
+  const dtab = async (pg, t) => { await pg.click(`[data-tab="${t}"]`); await sleep(250); };
+  const dfacts = (pg, n) => pg.$eval(`${dcard(n)} .dm-facts`, (e) => [...e.querySelectorAll('dt')].map((dt) => `${dt.textContent.trim()}: ${dt.nextElementSibling.textContent.trim()}`).join(' | '));
+  const waitState = (pg, n, st, ms = 8000) => pg.waitForFunction((sel, want) => document.querySelector(sel)?.getAttribute('data-state') === want, { timeout: ms }, dcard(n), st);
+  const waitConf = (pg, n) => pg.waitForFunction((name) => { const p = document.querySelector('[data-testid="wslconf-panel"]'); return !!p && p.textContent.includes(`· ${name}`) && ![...p.querySelectorAll('button')].some((b) => b.textContent.includes('Reading')) && !p.textContent.includes('Reading the file'); }, { timeout: 8000 }, n).then(() => sleep(250), async (e) => { console.log('waitConf timeout; panel text:', (await pg.$eval('[data-testid="wslconf-panel"]', (p) => p.textContent.slice(0, 400)).catch(() => '(no panel)'))); throw e; });
+  const listeners = (pg) => pg.evaluate(() => window.__vlinuxDistrosPreview?.listeners() ?? null);
+  const openDistros = async (pg) => { await pg.click('.dock .item[aria-label^="Distributions"]'); await pg.waitForSelector('[data-testid="distro-card"]', { timeout: 8000 }); await sleep(300); };
+
+  page = await fresh(1600, 900, '?wsl=multi');
+  await page.evaluate(() => localStorage.clear()); await page.reload({ waitUntil: 'networkidle0' }); await page.waitForSelector('.shell.ready'); await sleep(900);
+  check('the dock has an enabled Distributions tile', (await count(page, '.dock .item[aria-label^="Distributions"]:not([aria-disabled="true"])')) === 1);
+  await openDistros(page);
+  check('six distributions are listed, each with its own state', (await count(page, '[data-testid="distro-card"]')) === 6
+    && (await dstate(page, 'archlinux')) === 'running' && (await dstate(page, 'Ubuntu-24.04')) === 'stopped' && (await dstate(page, 'Debian')) === 'running'
+    && (await dstate(page, 'FedoraLinux-42')) === 'stopped' && (await dstate(page, 'Alpine')) === 'stopped' && (await dstate(page, 'docker-desktop')) === 'unavailable');
+  check('the preview says it is simulated', (await text(page, '[data-testid="distros-sim-banner"]')).startsWith('SIMULATED'));
+  check('discovery listeners exist only while the window is open', JSON.stringify(await listeners(page)) === '{"op":1,"diag":1}', JSON.stringify(await listeners(page)));
+  await shot(page, '20-distributions');
+
+  const f0 = await dfacts(page, 'archlinux');
+  check('before inspection nothing is invented: kernel, user, architecture and package manager say "Not inspected yet"', ['Kernel', 'Default user', 'Architecture', 'Package manager'].every((l) => f0.includes(`${l}: Not inspected yet`)) && !f0.includes('x86_64') && !f0.includes('5.15') && !f0.includes('pacman'), f0);
+  check('a card shows name, display name, WSL version and state', f0.includes('Name: archlinux') && f0.includes('Display name: Arch Linux') && f0.includes('WSL version: WSL 2'));
+  check('Debian is shown as WSL 1', (await dfacts(page, 'Debian')).includes('WSL version: WSL 1'));
+  check('the Windows default is marked, and nothing is preferred yet', (await text(page, '[data-testid="win-default-name"]')) === 'archlinux' && (await text(page, '[data-testid="pref-name"]')) === 'none chosen' && (await count(page, `${dcard('archlinux')} .dm-badge.win`)) === 1);
+
+  // Preferred distribution is VLINUX's own setting, separate from the Windows default.
+  await page.click(dact('Debian', 'set_preferred')); await page.waitForFunction(() => document.querySelector('[data-testid="pref-name"]')?.textContent === 'Debian', { timeout: 6000 }).catch(() => {}); await sleep(700);
+  check('Set as preferred records it in VLINUX config and marks the card', (await text(page, '[data-testid="pref-name"]')) === 'Debian' && (await page.$eval(dcard('Debian'), (e) => e.getAttribute('data-preferred'))) === 'true'
+    && (await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).runtime.selected_distro)) === 'Debian');
+  check('the Windows default is unchanged (preferred is not wsl --set-default)', (await text(page, '[data-testid="win-default-name"]')) === 'archlinux' && (await count(page, `${dcard('archlinux')} .dm-badge.win`)) === 1 && (await count(page, `${dcard('Debian')} .dm-badge.win`)) === 0);
+  check('the preferred button is disabled on the preferred card, with a reason', await page.$eval(dact('Debian', 'set_preferred'), (e) => e.disabled && e.title.length > 3));
+
+  // Inspect: read-only, cached, explicit.
+  await page.click(dact('archlinux', 'inspect')); await page.waitForFunction((sel) => document.querySelector(sel)?.textContent.includes('pacman'), { timeout: 8000 }, `${dcard('archlinux')} .dm-facts`); await sleep(900);
+  const f1 = await dfacts(page, 'archlinux');
+  check('inspecting a running distribution fills in what was really read', f1.includes('Kernel: 5.15.167.4-microsoft-standard-WSL2') && f1.includes('Architecture: x86_64') && f1.includes('Package manager: pacman') && f1.includes('Default user: preview') && f1.includes('Last inspected: Inspected just now'), f1);
+  check('and says it did not start the distribution', (await text(page, `${dcard('archlinux')} [data-testid="card-note"]`)).includes('was not started'));
+  check('the inspection did not change the state', (await dstate(page, 'archlinux')) === 'running');
+
+  await page.click(dact('Alpine', 'inspect')); await page.waitForSelector('[data-testid="inspect-start-confirm"]', { timeout: 6000 }).catch(() => {}); await sleep(900);
+  check('inspecting a STOPPED distribution asks first and starts nothing', (await count(page, '[data-testid="inspect-start-confirm"]')) === 1 && (await dstate(page, 'Alpine')) === 'stopped');
+  await clickText(page, '[data-testid="inspect-start-confirm"] button', 'Cancel'); await sleep(300);
+  check('cancelling leaves it stopped', (await count(page, '[data-testid="inspect-start-confirm"]')) === 0 && (await dstate(page, 'Alpine')) === 'stopped');
+  await page.click(dact('Alpine', 'inspect')); await page.waitForSelector('[data-testid="inspect-start-yes"]', { timeout: 6000 }); await sleep(300);
+  await page.click('[data-testid="inspect-start-yes"]');
+  await page.waitForFunction((sel) => document.querySelector(sel)?.textContent.includes('started the distribution'), { timeout: 8000 }, `${dcard('Alpine')} [data-testid="card-note"]`);
+  await waitState(page, 'Alpine', 'running'); await sleep(300);
+  check('with permission it starts, inspects, and says that it started it', (await dstate(page, 'Alpine')) === 'running' && (await text(page, `${dcard('Alpine')} [data-testid="card-note"]`)).includes('started the distribution'), `${await dstate(page, 'Alpine')} / ${await text(page, `${dcard('Alpine')} [data-testid="card-note"]`)}`);
+  check('an unsupported package manager is reported as such, not guessed', (await dfacts(page, 'Alpine')).includes('Package manager: None VLINUX supports was found'));
+
+  // Start: explicit, visible progress, no duplicates.
+  await page.click(dact('Ubuntu-24.04', 'start')); await sleep(150);
+  check('Start shows a Starting state at once and blocks a second start', (await dstate(page, 'Ubuntu-24.04')) === 'starting' && await page.$eval(dact('Ubuntu-24.04', 'start'), (e) => e.disabled));
+  await waitState(page, 'Ubuntu-24.04', 'running');
+  check('it ends in Running; the other distributions were not touched', (await dstate(page, 'FedoraLinux-42')) === 'stopped' && (await dstate(page, 'Debian')) === 'running');
+
+  // Stop: per distribution, explicit confirmation, interruption warning.
+  await page.click(dact('Debian', 'stop')); await sleep(250);
+  const warn = await text(page, '[data-testid="stop-confirm"]');
+  check('Stop asks for confirmation, warns about interruption, and says only this distribution stops', warn.includes('interrupted') && warn.includes('Only this distribution stops') && (await dstate(page, 'Debian')) === 'running');
+  await page.click('[data-testid="stop-confirm-no"]'); await sleep(250);
+  check('Cancel keeps it running', (await dstate(page, 'Debian')) === 'running' && (await count(page, '[data-testid="stop-confirm"]')) === 0);
+  await page.click(dact('Debian', 'stop')); await sleep(200);
+  await page.click('[data-testid="stop-confirm-yes"]');
+  await page.waitForFunction((sel) => document.querySelector(sel)?.getAttribute('data-state') === 'stopped', { timeout: 8000 }, dcard('Debian'));
+  check('after confirming, only Debian stops (archlinux, Ubuntu and Alpine keep running)', (await dstate(page, 'archlinux')) === 'running' && (await dstate(page, 'Ubuntu-24.04')) === 'running' && (await dstate(page, 'Alpine')) === 'running');
+  check('the preferred distribution survives being stopped (no silent switch)', (await text(page, '[data-testid="pref-name"]')) === 'Debian');
+
+  // Dangerous operations are not offered anywhere.
+  const labels = await page.$$eval('[data-testid="distros-app"] button', (b) => b.map((x) => x.textContent.trim()));
+  check('no button offers unregister, shutdown, delete, reset, import, export, mount or set-default', !labels.some((l) => /unregister|shut ?down|delete|reset|import|export|mount|set.?default|remove distribution|uninstall/i.test(l)), labels.join(' | '));
+  // Internal (other application's) distribution.
+  const internal = await page.$$eval(`${dcard('docker-desktop')} .acts button`, (b) => b.map((x) => ({ off: x.disabled, why: x.title })));
+  check('an internal distribution (docker-desktop) has every action disabled, each with a reason', internal.length >= 8 && internal.every((b) => b.off && b.why.length > 3));
+  check('and is labelled as used by another app', (await text(page, dcard('docker-desktop'))).includes('Used by another app'));
+
+  // Open terminal / Files from a card.
+  await page.click(dact('archlinux', 'open_terminal')); await page.waitForSelector('.tab.on .name', { timeout: 8000 }); await sleep(600);
+  check('Open terminal on a card opens a session in that distribution', (await text(page, '.tab.on .name')) === 'archlinux');
+  await page.click('.dock .item[aria-label^="Distributions"]'); await sleep(500);
+  await page.click(dact('Ubuntu-24.04', 'open_terminal')); await sleep(900);
+  check('another card adds a tab; the first session is preserved', (await count(page, '.tab')) === 2 && (await text(page, '.tab.on .name')) === 'Ubuntu-24.04' && (await text(page, '.tab:nth-child(1) .name')) === 'archlinux');
+  await page.click('.dock .item[aria-label^="Distributions"]'); await sleep(500);
+  await page.click(dact('archlinux', 'open_files')); await page.waitForSelector('.files .row', { timeout: 8000 }); await sleep(500);
+  check('Open Files on a card opens Files for that distribution', (await text(page, '.files')).includes('archlinux'));
+  await page.click('.dock .item[aria-label^="Distributions"]'); await sleep(500);
+
+  // Packages tab.
+  await page.click(`${dcard('archlinux')} .name`); await dtab(page, 'packages');
+  const caps = await page.$$eval('[data-testid="packages-panel"] [data-cap]', (r) => Object.fromEntries(r.map((x) => [x.getAttribute('data-cap'), x.getAttribute('data-support')])));
+  check('pacman capabilities: detect/version/search available, install/update show-the-command only', caps.detect === 'available' && caps.version === 'available' && caps.search === 'available' && caps.install === 'plan_only' && caps.update === 'plan_only', JSON.stringify(caps));
+  await page.type('[aria-label="Packages to install"]', 'neovim git'); await page.click('[data-testid="pkg-review-install"]'); await sleep(400);
+  check('install shows the exact command and says it was not run', (await text(page, '[data-testid="pkg-commands"]')) === 'sudo pacman -S --needed neovim git' && (await text(page, '[data-testid="pkg-plan"]')).includes('not run'));
+  check('and nothing was installed or started by that', (await count(page, '[data-testid="pkg-error"]')) === 0 && (await dstate(page, 'archlinux')) === 'running');
+  await page.$eval('[aria-label="Packages to install"]', (e) => { e.value = 'git; rm -rf ~'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.click('[data-testid="pkg-review-install"]'); await sleep(400);
+  check('a malicious package string is rejected with an error and no plan', (await text(page, '[data-testid="pkg-error"]')).includes('not a valid package name') && (await count(page, '[data-testid="pkg-plan"]')) === 0);
+  await page.click('[data-testid="pkg-review-update"]'); await sleep(400);
+  check('update shows the full-upgrade command and the Arch partial-upgrade warning', (await text(page, '[data-testid="pkg-commands"]')) === 'sudo pacman -Syu');
+  await page.$eval('[aria-label="Search for a package"]', (e) => { e.value = 'neovim'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.click('[data-testid="pkg-search"]'); await page.waitForSelector('[data-testid="pkg-hits"] li', { timeout: 5000 }).catch(() => {});
+  check('search is read-only and returns results', (await count(page, '[data-testid="pkg-hits"] li')) >= 1);
+  await page.click(`${dcard('Ubuntu-24.04')} .name`); await sleep(300);
+  check('a distribution that was not inspected says so instead of assuming APT', (await count(page, '[data-testid="pkg-not-inspected"]')) === 1 && (await count(page, '[data-testid="pkg-review-install"]')) === 0);
+  await page.click(dact('Ubuntu-24.04', 'inspect'));
+  await page.waitForFunction(() => document.querySelector('[data-testid="packages-panel"]')?.textContent.includes('APT 2.7.14'), { timeout: 6000 }).catch(() => {}); await sleep(300);
+  check('after inspection, APT is detected and a command can be prepared', (await text(page, '[data-testid="packages-panel"]')).includes('APT 2.7.14') && (await count(page, '[data-testid="pkg-review-install"]')) === 1);
+  await page.click(`${dcard('Alpine')} .name`); await sleep(300);
+  check('an unknown package manager gets no install form', (await count(page, '[data-testid="pkg-unsupported"]')) === 1 && (await count(page, '[data-testid="pkg-review-install"]')) === 0 && (await page.$$eval('[data-testid="packages-panel"] [data-cap]', (r) => r.every((x) => x.getAttribute('data-support') !== 'available' || ['detect'].includes(x.getAttribute('data-cap'))))) === true);
+  await shot(page, '21-packages');
+
+  // Configuration tab.
+  await page.click(dact('FedoraLinux-42', 'open_config')); await sleep(500);
+  check('configuration of a STOPPED distribution does not start it and offers an explicit start', (await count(page, '[data-testid="conf-needs-start"]')) === 1 && (await dstate(page, 'FedoraLinux-42')) === 'stopped');
+  await clickText(page, '[data-testid="conf-needs-start"] button', 'Start');
+  await page.waitForSelector('#wc-user\\.default', { timeout: 8000 }).catch(() => {}); await sleep(400);
+  check('after the explicit start the file is read', (await count(page, '#wc-user\\.default')) === 1 && (await page.$eval('#wc-user\\.default', (e) => e.value)) === 'preview' && (await dstate(page, 'FedoraLinux-42')) === 'running');
+  await page.click(dact('archlinux', 'open_config')); await waitConf(page, 'archlinux');
+  check('the current settings are read first', (await page.$eval('#wc-automount\\.root', (e) => e.value)) === '/mnt/' && (await page.$eval('#wc-automount\\.enabled', (e) => e.value)) === 'true');
+  check('unknown settings in the file are acknowledged and preserved', (await text(page, '[data-testid="wslconf-panel"]')).includes('network.hostname'));
+  check('config status: managed by the distribution (wsl.conf) and by Windows (.wslconfig, read-only)', (await text(page, '[data-testid="wslconf-panel"]')).includes('Managed by the distribution') && (await text(page, '[data-testid="winconf"]')).includes('Managed by Windows') && (await text(page, '[data-testid="winconf"]')).includes('read-only'));
+  check('Review is disabled until something is changed', await page.$eval('[data-testid="conf-review"]', (e) => e.disabled));
+  await page.select('#wc-automount\\.enabled', 'false'); await sleep(200);
+  await page.click('[data-testid="conf-review"]'); await sleep(500);
+  const diffText = await text(page, '[data-testid="conf-plan"] .dm-diff');
+  check('the change is previewed as a diff before anything is written', diffText.includes('+ enabled = false') && diffText.includes('− enabled = true'), diffText);
+  check('the preview states that a restart is needed and will not be done for you', (await text(page, '[data-testid="conf-plan"]')).includes('will not restart or stop it for you'));
+  check('Save is disabled until the review is confirmed', await page.$eval('[data-testid="conf-apply"]', (e) => e.disabled));
+  await page.click('[data-testid="conf-plan"] input[type="checkbox"]'); await page.click('[data-testid="conf-apply"]'); await page.waitForSelector('[data-testid="backup-row"]', { timeout: 8000 }); await sleep(500);
+  const applied = await text(page, '[data-testid="conf-applied"]');
+  check('saving reports it was read back, and does NOT claim the setting is active', applied.includes('Saved and read back') && applied.includes('Not yet in effect') && !/is now (on|off|active)/i.test(applied), applied);
+  check('the saved value is shown after re-reading, and a backup was taken', (await page.$eval('#wc-automount\\.enabled', (e) => e.value)) === 'false' && (await count(page, '[data-testid="backup-row"]')) === 1);
+  check('the distribution was not restarted or stopped', (await dstate(page, 'archlinux')) === 'running');
+  await clickText(page, '[data-testid="backup-row"] button', 'Restore'); await sleep(250);
+  check('restoring asks for confirmation first', (await text(page, '[data-testid="backup-row"]')).includes('Restore this version') && (await page.$eval('#wc-automount\\.enabled', (e) => e.value)) === 'false');
+  await clickText(page, '[data-testid="backup-row"] .dm-confirm button', 'Restore');
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="backup-row"]').length === 2, { timeout: 8000 }).catch(() => {}); await sleep(600);
+  check('restore puts the earlier content back and keeps a backup of what it replaced', (await page.$eval('#wc-automount\\.enabled', (e) => e.value)) === 'true' && (await count(page, '[data-testid="backup-row"]')) === 2);
+  await page.click(dact('Debian', 'start')); await waitState(page, 'Debian', 'running'); await sleep(300);
+  await page.waitForFunction((sel) => document.querySelector(sel) && !document.querySelector(sel).disabled, { timeout: 8000 }, dact('Debian', 'open_config'));
+  await page.click(dact('Debian', 'open_config')); await waitConf(page, 'Debian');
+  await page.select('#wc-boot\\.systemd', 'true'); await sleep(200);
+  await page.click('[data-testid="conf-review"]'); await sleep(500);
+  await page.click('[data-testid="conf-plan"] input[type="checkbox"]'); await page.click('[data-testid="conf-apply"]'); await page.waitForSelector('[data-testid="conf-not-writable"]', { timeout: 8000 });
+  const nw = await text(page, '[data-testid="conf-not-writable"]');
+  check('when the distribution does not let VLINUX write, nothing changes, no elevation is attempted, and instructions are shown', nw.includes('Nothing was changed') && nw.includes('does not use administrator') && nw.includes('[boot]'), nw);
+  await shot(page, '22-configuration');
+
+  // Diagnostics tab.
+  await page.click(dact('archlinux', 'view_diagnostics')); await sleep(400);
+  check('diagnostics is labelled SIMULATED in the preview', (await text(page, '[data-testid="diag-mode-banner"]')).startsWith('SIMULATED'));
+  check('before running, the panel states what the run will and will not do', (await text(page, '[data-testid="diag-plan"]')).includes('will NOT create any file') || (await text(page, '[data-testid="diag-plan"]')).includes('Will NOT create any file'));
+  check('permissions to write and to start are off by default', !(await page.$eval('[data-testid="diag-allow-write"]', (e) => e.checked)) && !(await page.$eval('[data-testid="diag-allow-start"]', (e) => e.checked)));
+  await page.click('[data-testid="diag-run"]'); await page.waitForSelector('[data-testid="diag-headline"]', { timeout: 15000 }); await sleep(300);
+  const hl = await text(page, '[data-testid="diag-headline"]');
+  check('the headline of a simulated run says it proves nothing about this PC', hl.startsWith('SIMULATED run') && hl.includes('says nothing about this PC'), hl);
+  const rows = await page.$$eval('[data-testid="diag-results"] .res', (r) => r.map((x) => ({ id: x.dataset.check, o: x.dataset.outcome, e: x.dataset.evidence })));
+  check('all five categories are present', ['runtime', 'terminal', 'fs', 'shared', 'desktop'].every((p) => rows.some((r) => r.id.startsWith(p))), JSON.stringify(rows.map((r) => r.id)));
+  check('without write permission every writing check is "Not tested" and did not run', rows.filter((r) => ['terminal.pty_create', 'fs.create_dir', 'fs.symlink', 'shared.link_roundtrip', 'desktop.unusual_names'].includes(r.id)).every((r) => r.o === 'not_tested' && r.e === 'none'));
+  check('no result claims evidence from a real WSL', rows.every((r) => r.e !== 'real_wsl'));
+  check('checks that cannot be done are Unsupported or Not tested, never Passed (file associations)', rows.find((r) => r.id === 'desktop.file_association')?.o === 'not_tested');
+  check('passed checks are marked SIMULATED', rows.filter((r) => r.o === 'passed').every((r) => r.e === 'simulated') && rows.some((r) => r.o === 'passed'));
+  await shot(page, '23-diagnostics');
+  await page.click('[data-testid="diag-allow-write"]'); await page.click('[data-testid="diag-run"]');
+  await page.waitForFunction(() => document.querySelector('[data-testid="diag-run"]')?.textContent.includes('Run diagnostics') && document.querySelectorAll('[data-testid="diag-results"] .res[data-check="fs.create_dir"][data-outcome="passed"]').length === 1, { timeout: 15000 });
+  const rows2 = await page.$$eval('[data-testid="diag-results"] .res', (r) => r.map((x) => ({ id: x.dataset.check, o: x.dataset.outcome, e: x.dataset.evidence, m: !!x.querySelector('.dm-badge.warn[title^="This check created"]') })));
+  check('with permission the writing checks run (still simulated) and say they modified something', rows2.find((r) => r.id === 'fs.create_dir')?.o === 'passed' && rows2.find((r) => r.id === 'fs.create_dir')?.m === true && rows2.find((r) => r.id === 'fs.create_dir')?.e === 'simulated');
+  const rep = await text(page, '[data-testid="diag-text"]');
+  check('the copyable report is labelled simulated and lists the permissions given', rep.includes('SIMULATED') && rep.includes('create temporary files = yes') && !/preview\b.*password/i.test(rep));
+  check('a Copy report button exists', (await count(page, '[data-testid="diag-copy"]')) === 1);
+  check('diagnostics did not start any stopped distribution (start was not allowed)', (await dstate(page, 'Debian')) === 'running' && (await dstate(page, 'FedoraLinux-42')) === 'running');
+
+  // Window lifecycle: closing the app detaches the listeners.
+  await page.keyboard.down('Alt'); await page.keyboard.press('KeyW'); await page.keyboard.up('Alt'); await sleep(500);
+  check('closing the Distribution Manager removes its listeners', JSON.stringify(await listeners(page)) === '{"op":0,"diag":0}', JSON.stringify(await listeners(page)));
+  await page.close();
+
+  // Settings: WSL configuration section.
+  page = await fresh(1600, 900, '?wsl=multi');
+  await open2(page);
+  check('Settings keeps its existing sections and adds WSL configuration', (await count(page, '.settings nav button')) === 7);
+  await clickText(page, '.settings nav button', 'WSL configuration'); await sleep(900);
+  check('the WSL section lists the regular distributions only', (await page.$$eval('#wsl-distro option', (o) => o.map((x) => x.value))).join() === 'archlinux,Ubuntu-24.04,Debian,FedoraLinux-42,Alpine');
+  check('it shows the Windows-managed config as read-only', (await text(page, '[data-testid="winconf"]')).includes('Managed by Windows'));
+  await page.select('#wsl-distro', 'Ubuntu-24.04'); await sleep(700);
+  check('choosing a stopped distribution does not start it', (await count(page, '[data-testid="conf-needs-start"]')) === 1);
+  await clickText(page, '.settings nav button', 'Linux folders'); await sleep(400);
+  check('the Linux folders section (M4) still works next to it', (await count(page, '.folder[data-folder="downloads"]')) === 1);
+  await page.close();
+
+  // Preferred distribution that no longer exists: warn, never switch.
+  page = await fresh(1600, 900, '?wsl=multi');
+  await setSelected(page, 'Gone-Distro');
+  await openDistros(page);
+  const pn = await text(page, '[data-testid="preferred-notice"]');
+  check('a missing preferred distribution gives a clear warning and does not switch', pn.includes('no longer registered') && pn.includes('has not switched') && (await count(page, '[data-preferred="true"]')) === 0 && (await text(page, '[data-testid="pref-name"]')) === 'Gone-Distro', pn);
+  check('the config still holds the missing name (no silent change)', (await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).runtime.selected_distro)) === 'Gone-Distro');
+  await page.close();
+
+  // Empty / failed discovery.
+  page = await fresh(1600, 900, '?wsl=empty');
+  await openDistros2(page);
+  check('with no distribution installed the manager explains it and points to Linux Setup', (await text(page, '[data-testid="distros-empty"]')).includes('No Linux distribution is installed'));
+  await page.close();
+  page = await fresh(1600, 900, '?wsl=missing');
+  await openDistros2(page);
+  check('with WSL missing the manager says so', (await text(page, '[data-testid="distros-empty"]')).includes('WSL is not installed'));
+  await page.close();
+  page = await fresh(1600, 900);
+  await openDistros2(page);
+  check('where WSL is unavailable it explains that instead of listing anything', (await count(page, '[data-testid="distros-empty"]')) === 1 && (await count(page, '[data-testid="distro-card"]')) === 0);
+  await page.close();
+
   console.log('Responsive layouts (no overflow, nothing off-screen)');
   for (const [w, h] of [[1920, 1080], [2560, 1440], [1366, 768], [1024, 640], [800, 560], [480, 800]]) {
     page = await fresh(w, h);
@@ -698,6 +914,11 @@ try {
   server.close();
 }
 
+async function openDistros2(page) {
+  await page.click('.dock .item[aria-label^="Distributions"]');
+  await page.waitForSelector('[data-testid="distros-empty"], [data-testid="distro-card"]', { timeout: 8000 });
+  await new Promise((r) => setTimeout(r, 400));
+}
 async function open2(page) {
   await page.keyboard.down('Alt'); await page.keyboard.press('F1'); await page.keyboard.up('Alt');
   await page.waitForSelector('.panel'); await page.keyboard.type('settings'); await page.keyboard.press('Enter'); await sleep(500);

@@ -1,0 +1,63 @@
+/* Shared look of the Distribution Manager, its panels, and the Settings "WSL" section.
+   Global on purpose (several components use it); every class is prefixed `dm-`. */
+.dm-btn { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 10px; background: rgb(255 255 255 / 0.09); border: 1px solid var(--line); font-size: 0.82rem; color: inherit; }
+.dm-btn:hover:not(:disabled) { background: rgb(255 255 255 / 0.15); }
+.dm-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+.dm-btn.primary { background: var(--accent); color: #0a0a12; border-color: transparent; font-weight: 600; }
+.dm-btn.primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent); }
+.dm-btn.danger { background: rgb(255 90 110 / 0.2); border-color: rgb(255 110 130 / 0.6); color: #ffb3bd; }
+.dm-btn.small { padding: 4px 9px; font-size: 0.76rem; border-radius: 8px; }
+
+.dm-card { padding: 14px 16px; border-radius: 14px; border: 1px solid var(--line); background: rgb(255 255 255 / 0.04); }
+.dm-card.selected { border-color: rgb(var(--accent-rgb) / 0.6); box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.25); }
+.dm-card.internal { opacity: 0.72; }
+.dm-muted { color: var(--muted); }
+.dm-faint { color: var(--faint); }
+.dm-small { font-size: 0.76rem; }
+.dm-bad { color: #ffb3bd; }
+.dm-good { color: #6ee7b0; }
+
+.dm-badge { padding: 2px 9px; border-radius: 999px; font-size: 0.7rem; background: rgb(255 255 255 / 0.08); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.dm-badge.pref { background: var(--accent); color: #0a0a12; border-color: transparent; font-weight: 600; }
+.dm-badge.win { color: var(--accent-2); border-color: rgb(94 224 255 / 0.4); }
+.dm-badge.good { color: #3ddc97; border-color: rgb(61 220 151 / 0.4); }
+.dm-badge.busy { color: #ffd36b; border-color: rgb(255 211 107 / 0.45); }
+.dm-badge.warn { color: #ffb454; border-color: rgb(255 180 84 / 0.5); }
+.dm-badge.bad { color: #ff8fa0; border-color: rgb(255 110 130 / 0.55); }
+.dm-badge.sim { color: #5ee0ff; border: 1px dashed rgb(94 224 255 / 0.6); }
+
+.dm-notice { display: block; padding: 10px 14px; border-radius: 12px; font-size: 0.82rem; line-height: 1.5; }
+.dm-notice.warn { background: rgb(255 180 84 / 0.12); border: 1px solid rgb(255 180 84 / 0.4); }
+.dm-notice.err { background: rgb(255 90 110 / 0.12); border: 1px solid rgb(255 110 130 / 0.5); }
+.dm-notice.info { background: rgb(255 255 255 / 0.05); border: 1px solid var(--line); }
+.dm-notice.sim { background: rgb(94 224 255 / 0.1); border: 1px dashed rgb(94 224 255 / 0.5); }
+.dm-notice.good { background: rgb(61 220 151 / 0.1); border: 1px solid rgb(61 220 151 / 0.4); }
+
+.dm-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 0.82rem; }
+.dm-facts dt { color: var(--faint); }
+.dm-facts dd { margin: 0; overflow-wrap: anywhere; }
+.dm-facts dd.unknown { color: var(--faint); font-style: italic; }
+
+.dm-confirm { display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgb(255 110 130 / 0.5); background: rgb(255 90 110 / 0.1); font-size: 0.82rem; line-height: 1.5; }
+.dm-confirm.soft { border-color: rgb(255 180 84 / 0.45); background: rgb(255 180 84 / 0.1); }
+.dm-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.dm-code { font-family: var(--mono, ui-monospace, 'Cascadia Mono', Consolas, monospace); font-size: 0.8rem; padding: 8px 10px; border-radius: 8px; background: rgb(0 0 0 / 0.35); border: 1px solid var(--line); overflow-wrap: anywhere; white-space: pre-wrap; margin: 0; }
+.dm-diff { font-family: var(--mono, ui-monospace, 'Cascadia Mono', Consolas, monospace); font-size: 0.78rem; border-radius: 8px; background: rgb(0 0 0 / 0.35); border: 1px solid var(--line); padding: 6px 0; overflow: auto; max-height: 220px; }
+.dm-diff div { padding: 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dm-diff .add { background: rgb(61 220 151 / 0.16); color: #9bf5cd; }
+.dm-diff .remove { background: rgb(255 90 110 / 0.16); color: #ffb3bd; }
+.dm-diff .same, .dm-diff .gap { color: var(--faint); }
+
+.dm-field { display: grid; gap: 4px; }
+.dm-field label { font-size: 0.82rem; font-weight: 600; }
+.dm-field .help { font-size: 0.76rem; color: var(--muted); line-height: 1.45; }
+.dm-input, .dm-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgb(0 0 0 / 0.3); color: inherit; font-size: 0.84rem; min-width: 0; }
+.dm-input:focus-visible, .dm-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dm-check { display: flex; gap: 9px; align-items: flex-start; font-size: 0.84rem; line-height: 1.45; cursor: pointer; }
+.dm-check input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent); flex: none; }
+
+.dm-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.dm-table th { text-align: left; font-weight: 600; color: var(--faint); padding: 4px 10px 4px 0; white-space: nowrap; }
+.dm-table td { padding: 5px 10px 5px 0; vertical-align: top; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.dm-h { margin: 0; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); font-weight: 600; }

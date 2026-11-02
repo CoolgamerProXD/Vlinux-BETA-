@@ -152,10 +152,11 @@ class RuntimeStore {
   }
 
   async start(name: string) {
-    await this.act(name, () => ipc.distroStart(name));
+    await this.act(name, async () => (await ipc.distroStart(name)).report);
   }
-  async stop(name: string) {
-    await this.act(name, () => ipc.distroStop(name));
+  /** `confirmed` must reflect the user's explicit confirmation: the backend refuses without it. */
+  async stop(name: string, confirmed: boolean) {
+    await this.act(name, async () => (await ipc.distroStop(name, confirmed)).report);
   }
   private async act(name: string, f: () => Promise<WslReport>) {
     this.busyDistro = name;
