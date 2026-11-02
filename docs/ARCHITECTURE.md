@@ -238,3 +238,13 @@ Rust unit tests per module with fake `wsl.exe` output (probe, inspect, lifecycle
 * Reading `/etc/wsl.conf` goes through `\\wsl.localhost` and needs the distribution running; a distribution that is running but has not finished booting may give transient errors.
 * Stopping uses `wsl.exe --terminate <name>` for one distribution; WSL itself decides when the VM shuts down.
 * `config.toml` comments are not preserved when VLINUX saves it.
+
+## M6: validation, installer and release readiness
+
+M6 adds no feature; it checks that what exists survives contact with a real Windows build, and makes it easy to start.
+
+* **First launch.** `Welcome.svelte` is shown on the empty desktop while no preferred distribution is chosen and it has not been dismissed (`localStorage` key `vlinux.welcome.dismissed`, UI state only — not in `config.toml`). Its three steps lead to Distributions (read-only detection), Terminal/Files and Diagnostics. Start-up can no longer leave an invisible shell: `ready` is set even if loading the config or host info throws (a toast says what failed), and `index.html` carries a `<noscript>` note.
+* **Diagnostics.** New check `terminal.identity` types `printf 'VLXID:%s:%s:END\n' "$(id -un)" "$HOME"` into the diagnostics PTY and reads the answer (only a line without `%`/`$` counts, so the echoed command is never mistaken for output). It passes for a non-root user with an absolute `HOME`; the user name is neither shown nor put in the report.
+* **CI (Windows job).** After building, the job installs the real NSIS installer silently (per-user), inventories the install folder and the Start Menu / Desktop shortcuts, launches the *installed* app with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` and a fresh `WEBVIEW2_USER_DATA_FOLDER`, and drives it with `scripts/webview-smoke.mjs` (puppeteer-core over CDP, no new dependency): desktop rendered, no console/CSP errors, real Tauri IPC (`distro_overview`), Distributions showing real (not simulated) state, launcher shortcuts, dock apps. It records the process tree's memory with the main process and the `msedgewebview2.exe` children **separately**, idle CPU, window-shown and launch-to-desktop times (`performance.mark('vlinux-ready')`), then exits the app, checks for leftover child processes, uninstalls silently and verifies the program is gone. These numbers come from a GitHub runner, not a user's PC.
+* **Release.** A `release` job publishes the installer of each pushed (non-`main`) commit as a GitHub pre-release `installer-<sha>`, with its SHA-256.
+* **Formatting.** The `lock` job runs `cargo fmt` and commits the result back on branch pushes (a commit pushed with `GITHUB_TOKEN` does not start a new run, so the next push is the verification).

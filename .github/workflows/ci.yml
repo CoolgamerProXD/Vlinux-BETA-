@@ -206,6 +206,19 @@ jobs:
           "screen $($b.Width)x$($b.Height)" | Out-File artifacts/screen.txt
           Stop-Process -Id $p.Id -Force
 
+      # Same build as production except that the window config adds --remote-debugging-port, so the
+      # smoke test can drive the real WebView2. The installer above is NOT built from this.
+      - name: Build a CDP-enabled copy of the app (for the WebView2 smoke only)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cfg = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $w = $cfg.app.windows[0]
+          $w | Add-Member -NotePropertyName additionalBrowserArgs -NotePropertyValue '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222' -Force
+          ConvertTo-Json -InputObject $cfg -Depth 30 | Set-Content (Join-Path $env:RUNNER_TEMP 'cdp.conf.json') -Encoding utf8
+          npx tauri build --no-bundle --config (Join-Path $env:RUNNER_TEMP 'cdp.conf.json')
+          Copy-Item src-tauri/target/release/vlinux.exe (Join-Path $env:RUNNER_TEMP 'vlinux-cdp.exe')
+
       # Installs the real NSIS installer silently for the CURRENT USER (no admin), checks what it put
       # on disk, launches the INSTALLED app with WebView2 remote debugging on, drives it with
       # scripts/webview-smoke.mjs, measures it (main process and WebView2 children separately),
@@ -298,7 +311,6 @@ jobs:
           Start-Sleep -Seconds 2
           $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:RUNNER_TEMP 'vlinux-webview2-profile'
           Remove-Item -Recurse -Force $env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
           $sw = [Diagnostics.Stopwatch]::StartNew()
           $p = Start-Process -FilePath $exe -PassThru
           while (-not $p.HasExited -and $sw.Elapsed.TotalSeconds -lt 60) { $p.Refresh(); if ($p.MainWindowHandle -ne 0) { break }; Start-Sleep -Milliseconds 25 }
@@ -320,6 +332,18 @@ jobs:
           $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("$PWD/artifacts/installed-launch.png")
+
+          # The production exe is done (installed app: window, memory, CPU measured above). WebView2 did not
+          # honour WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS for this host, so the real-WebView2 smoke runs a copy of
+          # the same build whose window config adds only --remote-debugging-port (built by the previous step).
+          Stop-Process -Id $p.Id -Force
+          Start-Sleep -Seconds 5
+          Get-Process msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
+          Remove-Item -Recurse -Force $env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue
+          $cdpExe = Join-Path $env:RUNNER_TEMP 'vlinux-cdp.exe'
+          if (-not (Test-Path $cdpExe)) { throw "CDP-enabled build missing" }
+          $p = Start-Process -FilePath $cdpExe -PassThru
 
           # ---- drive the real WebView2 window ----
           $env:OUT_DIR = 'artifacts'
