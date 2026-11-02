@@ -2,6 +2,7 @@
   import { exitToWindows, quitApp, setFullscreen } from '../lib/ipc';
   import { host } from '../lib/host.svelte';
   import { ui } from '../lib/ui.svelte';
+  import { terminals } from '../lib/terminal.svelte';
   import Icon from './Icon.svelte';
 
   let confirmQuit = $state(false);
@@ -55,7 +56,13 @@
       <p class="hint">Windows always stays reachable: the Win key, Alt+Tab and the taskbar keep working in full screen. Shortcut: <kbd class="mono">Ctrl</kbd>+<kbd class="mono">Alt</kbd>+<kbd class="mono">Q</kbd> returns to Windows instantly.</p>
     {:else}
       <h2>Quit VLINUX?</h2>
-      <p class="confirm">VLINUX will close and you will be back on the Windows desktop. Your settings are already saved. This version of VLINUX does not start Linux, so there is no distribution or file that this could stop or lose.</p>
+      <p class="confirm">VLINUX will close and you will be back on the Windows desktop. Your settings are already saved.
+        {#if terminals.liveCount > 0}
+          {terminals.liveCount === 1 ? 'The open terminal session ends' : `The ${terminals.liveCount} open terminal sessions end`}, like closing any terminal window: programs running in them stop. Your Linux distribution itself keeps running and no files are deleted.
+        {:else}
+          No terminal sessions are open, and VLINUX never shuts your Linux distribution down.
+        {/if}
+      </p>
       <div class="actions">
         <!-- svelte-ignore a11y_autofocus -->
         <button class="btn" autofocus onclick={() => (confirmQuit = false)}>Cancel</button>

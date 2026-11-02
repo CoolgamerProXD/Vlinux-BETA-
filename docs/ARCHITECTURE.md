@@ -1,4 +1,4 @@
-# VLINUX architecture (M0 – M2)
+# VLINUX architecture (M0 – M3)
 
 ## Principles
 * **Honest framing.** The VLINUX desktop is a *Windows-rendered shell* (a Tauri/WebView2 window). It is not a Wayland compositor and not a bare-metal Linux install. Linux will run through WSL2, which is virtualised.
@@ -113,3 +113,32 @@ Defaults: `~/Downloads`, `~/Documents`, `~/Pictures`, `~/Videos`, `~/Music`, `~/
 * No terminal, file manager or package operations; selecting a distribution only records the choice.
 * A distro that finished installing only after a Windows restart is not recorded as installed by VLINUX (it will show as *Existing*).
 * Mount root assumed `/mnt`; custom `automount.root` not read yet.
+
+## M3: the Linux terminal
+
+### Process and PTY architecture
+```
+xterm.js (Terminal.svelte)  ──typed Tauri commands──▶  src-tauri/src/terminal.rs  ──▶  vlinux-runtime::terminal
+   ▲   keystrokes (onData) → terminal_input                 (thin: async + spawn_blocking)     TerminalManager
+   │   resize → terminal_resize, ack → terminal_ack                                              │ sessions: id → Session
+   └─ events: vlinux://terminal-output {id, data:base64}                                        ▼
+            vlinux://terminal-state  {id, state}                      portable-pty (ConPTY on Windows)
+                                                                       wsl.exe -d <name> --cd ~   ← argument list built only in Rust
+```
+* The crate module `terminal/` is Tauri-free: `launch.rs` builds the allowed argument lists, `pty.rs` abstracts the PTY (real `portable-pty` backend, scripted fake for tests), `session.rs` runs one reader thread (output → sink, with ack-based flow control), one waiter thread (exit detection) and the manager, `b64.rs` is a tiny encoder (no extra dependency).
+* **Security:** IPC carries only `open{distro|null,rows,cols}`, `input{id,data}`, `resize`, `ack`, `close`, `list`. There is no command-string API. Rust resolves the distro against a fresh/cached detection report (regular, installed, not owned by another app), validates the name, and builds `wsl.exe` arguments from a closed allow-list (`is_allowed_session_args`); no shell or string interpolation is involved. No `--user root`, no elevation, no `--set-default`, no `--shutdown`, `--terminate` or `--unregister`.
+* **Launch:** first `wsl.exe -d <name> --cd ~` (the distribution's own configured login shell; nothing hardcoded), and only if it fails immediately one fallback `--exec /bin/sh -l`.
+* **Flow control:** output is chunked and base64-encoded; the reader stops after a high-water mark of unacknowledged bytes; xterm acks after writing, so large output cannot flood the WebView.  xterm.js parses writes asynchronously and the ack is sent from its write callback.
+* **Lifetime:** nothing runs until `terminal_open`. `close` kills only that session's `wsl.exe` child and closes its PTY. A ConPTY output pipe never reaches EOF on its own, so a waiter closes the master after the child exits and the output drains. `close_all` runs when the app exits; it never touches WSL itself or other distros.
+* **Frontend:** `terminal.svelte.ts` store owns xterm instances (lazy-loaded chunk, not part of the startup bundle), `terminal-types.ts` has the pure logic (base64 decode, ack batching, shell-shortcut passthrough), `terminal-preview.ts` is the browser-only loopback (labelled, executes nothing). The window manager gained close **guards** (`wm.guards`, `wm.pendingClose`, `CloseConfirm.svelte`) so closing a Terminal window with live shells asks first.
+* **CSP:** xterm.js injects `<style>` elements, so `tauri.conf.json` sets `dangerousDisableAssetCspModification: ["style-src"]` to keep `'unsafe-inline'` effective (Tauri would otherwise add a nonce which disables it). Scripts remain `'self'` only.
+
+### Testing strategy
+Fake-PTY tests for every behaviour (see README); real-PTY tests on `sh`/`cmd.exe`; a real `wsl.exe` under ConPTY against an unregistered distro name on the Windows runner (informational); browser e2e against the loopback. A real distro shell is manual-test-only because CI runners have no distribution.
+
+### Known limitations (M3)
+* No real-distribution test has been run by me; the Windows desktop WebView2 behaviour of xterm.js is unverified.
+* Sessions are not persisted across app restarts; no split panes; no tab reordering; scrollback is 5000 lines.
+* Starting a stopped distribution happens implicitly when `wsl.exe -d` runs (that is what WSL does); VLINUX only does it on an explicit user action.
+* Interactive programs that rely on Windows-side drag-and-drop, links or images (sixel) are not supported; clipboard uses the WebView clipboard API (Ctrl+Shift+C/V).
+* The M2 storage preferences are still not applied (M4).

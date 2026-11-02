@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { runtime } from '../lib/runtime.svelte';
+  import { openTerminalIn } from '../lib/open-terminal';
   import { statusHeadline, type Distro } from '../lib/runtime-types';
   import Icon from '../components/Icon.svelte';
 
@@ -127,6 +128,9 @@
                 {/if}
               </div>
               <div class="row-acts">
+                <button class="btn" onclick={() => openTerminalIn(d.name)} disabled={d.state === 'installing' || d.state === 'uninstalling' || d.state === 'converting'} title="Open a terminal in {d.name} (starts it if it is stopped)">
+                  <Icon name="terminal" size={15} /> Open terminal
+                </button>
                 {#if runtime.selected === d.name}
                   <button class="btn" onclick={() => runtime.select(null)}>Stop using</button>
                 {:else}

@@ -148,3 +148,54 @@ export async function storageValidatePath(path: string): Promise<Verdict> {
   if (isTauri()) return call<Verdict>('storage_validate_path', { path });
   return (await preview()).validatePath(path);
 }
+
+// ---- Terminal (M3) ----------------------------------------------------------------------------
+// The UI names at most a distribution; the backend validates it, builds the wsl.exe command line
+// and owns the PTY. `terminalInput` carries keystrokes to that PTY and nothing else. In the browser
+// preview a clearly-labelled loopback stands in (see terminal-preview.ts): it runs no shell.
+
+import type { SessionInfo, TerminalOutputEvent, TerminalStateEvent } from './terminal-types';
+
+const termPreview = () => import('./terminal-preview');
+
+/** Open a session in `distro`, or in the distribution selected in VLINUX when `null`. */
+export async function terminalOpen(distro: string | null, rows: number, cols: number): Promise<SessionInfo> {
+  if (isTauri()) return call<SessionInfo>('terminal_open', { distro, rows, cols });
+  return (await termPreview()).open(distro, rows, cols);
+}
+
+export async function terminalInput(id: string, data: string): Promise<void> {
+  if (isTauri()) return call<void>('terminal_input', { id, data });
+  return (await termPreview()).input(id, data);
+}
+
+export async function terminalResize(id: string, rows: number, cols: number): Promise<void> {
+  if (isTauri()) return call<void>('terminal_resize', { id, rows, cols });
+  return (await termPreview()).resize(id, rows, cols);
+}
+
+/** Flow control: the terminal has rendered `bytes` more output. */
+export async function terminalAck(id: string, bytes: number): Promise<void> {
+  if (isTauri()) return call<void>('terminal_ack', { id, bytes });
+}
+
+export async function terminalClose(id: string): Promise<void> {
+  if (isTauri()) return call<void>('terminal_close', { id });
+  return (await termPreview()).close(id);
+}
+
+export async function onTerminalOutput(cb: (e: TerminalOutputEvent) => void): Promise<() => void> {
+  if (isTauri()) {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<TerminalOutputEvent>('vlinux://terminal-output', (e) => cb(e.payload));
+  }
+  return (await termPreview()).onOutput(cb);
+}
+
+export async function onTerminalState(cb: (e: TerminalStateEvent) => void): Promise<() => void> {
+  if (isTauri()) {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<TerminalStateEvent>('vlinux://terminal-state', (e) => cb(e.payload));
+  }
+  return (await termPreview()).onState(cb);
+}

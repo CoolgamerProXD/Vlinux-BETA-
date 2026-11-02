@@ -2,9 +2,11 @@
 export type IconName =
   | 'terminal' | 'folder' | 'layers' | 'activity' | 'sliders' | 'power' | 'search' | 'grid'
   | 'wifi' | 'wifi-off' | 'battery' | 'expand' | 'shrink' | 'close' | 'minus' | 'square'
-  | 'windows' | 'check' | 'palette' | 'monitor' | 'keyboard' | 'info' | 'cpu' | 'alert' | 'rotate';
+  | 'windows' | 'check' | 'palette' | 'monitor' | 'keyboard' | 'info' | 'cpu' | 'alert' | 'rotate' | 'plus' | 'chevron-down';
 
 export const ICONS: Record<IconName, string> = {
+  plus: 'M12 5v14M5 12h14',
+  'chevron-down': 'M6 9l6 6 6-6',
   terminal: 'M3.5 5.5h17a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-17a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1zM7 10l3 2.5L7 15M12.5 15H17',
   folder: 'M3 7.5a1.5 1.5 0 0 1 1.5-1.5h4.3l2 2.2h8.7A1.5 1.5 0 0 1 21 9.7v7.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z',
   layers: 'M12 3.5l9 4.8-9 4.8-9-4.8zM3.5 12.2L12 16.7l8.5-4.5M3.5 16l8.5 4.5 8.5-4.5',

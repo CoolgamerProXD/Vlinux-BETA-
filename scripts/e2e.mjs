@@ -52,14 +52,14 @@ try {
   check('date shown', (await text(page, '.date')).length > 3);
   check('5 workspace indicators, #1 active', (await count(page, '.ws .pill')) === 5 && (await text(page, '.ws .pill.active')) === '1');
   check('dock has launcher + 5 apps', (await count(page, '.dock .item')) === 6);
-  check('planned apps (Terminal, Files) are disabled', (await count(page, '.dock .item[aria-disabled="true"]')) === 2);
+  check('only the planned app (Files) is disabled; Terminal is enabled', (await count(page, '.dock .item[aria-disabled="true"]')) === 1 && (await count(page, '.dock .item[aria-label^="Terminal"]:not([aria-disabled="true"])')) === 1);
   check('wallpaper rendered', (await count(page, '.wp svg')) === 1);
   await shot(page, '01-desktop');
 
   console.log('Planned apps do nothing misleading');
-  await page.click('.dock .item[aria-label^="Terminal"]');
+  await page.click('.dock .item[aria-label^="Files"]');
   await sleep(150);
-  check('clicking Terminal opens no window', (await count(page, '.win')) === 0);
+  check('clicking Files (planned) opens no window', (await count(page, '.win')) === 0);
 
   console.log('Launcher');
   await page.keyboard.down('Alt'); await page.keyboard.press('F1'); await page.keyboard.up('Alt');
@@ -285,6 +285,164 @@ try {
   await sleep(900);
   const st2 = await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).storage);
   check('restore defaults resets the preferences', st2.music.mode === 'shared' && st2.downloads.windows_path === null);
+  await page.close();
+
+  console.log('M3 - Terminal (browser preview: real xterm.js UI, loopback transport, simulated WSL data)');
+  const termText = (pg) => pg.$eval('.pane.active .xterm-rows', (e) => e.textContent);
+  const pv = (pg) => pg.evaluate(() => JSON.parse(JSON.stringify(window.__vlinuxTerminalPreview)));
+  const setSelected = async (pg, name) => {
+    await pg.evaluate((n) => {
+      const c = JSON.parse(localStorage.getItem('vlinux.config') ?? '{}');
+      c.runtime = { ...(c.runtime ?? {}), selected_distro: n };
+      localStorage.setItem('vlinux.config', JSON.stringify(c));
+    }, name);
+    await pg.reload({ waitUntil: 'networkidle0' });
+    await pg.waitForSelector('.shell.ready');
+    await sleep(900);
+  };
+
+  // Gates (no session can start)
+  page = await fresh(1600, 900);
+  await openApp(page, 'Terminal');
+  await page.waitForSelector('.gate [data-gate], .gate .card');
+  check('terminal: WSL unavailable explains itself and points to Linux Setup', (await page.$eval('.gate .card', (e) => e.textContent)).includes('Linux Setup') && (await count(page, '.pane')) === 0);
+  await shot(page, '11-terminal-unavailable');
+  await page.close();
+
+  page = await fresh(1600, 900, '?wsl=empty');
+  await openApp(page, 'Terminal');
+  await page.waitForSelector('.gate [data-gate="no-distributions"]');
+  check('terminal: no distribution → helpful empty state with Linux Setup button, nothing installed', (await page.$eval('.gate', (e) => e.textContent)).includes('never installs') && (await count(page, '.pane')) === 0);
+  await clickText(page, '.gate .btn', 'Open Linux Setup');
+  await sleep(500);
+  check('terminal: empty-state button opens Linux Setup', (await visibleWindows(page)).includes('Linux Setup'));
+  await page.close();
+
+  page = await fresh(1600, 900, '?wsl=ready');
+  await setSelected(page, '');
+  await openApp(page, 'Terminal');
+  await page.waitForSelector('.gate [data-gate="choose"]');
+  check('terminal: nothing selected → asks which distro, never assumes one, lists only regular distros', (await count(page, '.gate .choice')) === 3 && (await count(page, '.pane')) === 0);
+  await shot(page, '12-terminal-choose');
+  await page.close();
+
+  page = await fresh(1600, 900, '?wsl=ready');
+  await setSelected(page, 'Gentoo-Gone');
+  await openApp(page, 'Terminal');
+  await page.waitForSelector('.gate [data-gate="selected-missing"]');
+  check('terminal: removed selected distro handled gracefully (no session, selection untouched)', (await text(page, '.gate h2')).includes('Gentoo-Gone') && (await count(page, '.pane')) === 0 && (await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).runtime.selected_distro)) === 'Gentoo-Gone');
+  await page.close();
+
+  // A real session UI
+  page = await fresh(1600, 900, '?wsl=ready');
+  await setSelected(page, 'Ubuntu-24.04');
+  await openApp(page, 'Terminal');
+  await page.waitForSelector('.pane.active .xterm-rows');
+  await sleep(300);
+  let log = await pv(page);
+  check('terminal: opens automatically in the SELECTED distribution only', log.opened.length === 1 && log.opened[0].distro === 'Ubuntu-24.04', JSON.stringify(log.opened));
+  check('terminal: opened with a real size from the fitted xterm', log.opened[0].rows > 5 && log.opened[0].cols > 20, JSON.stringify(log.opened));
+  check('terminal: tab + status bar show the distro and a running indicator', (await text(page, '.tab.on .name')) === 'Ubuntu-24.04' && (await count(page, '.tab.on .dot.running')) === 1 && (await text(page, '.status')).includes('Ubuntu-24.04'));
+  check('terminal: banner rendered through xterm.js', (await termText(page)).includes('VLINUX browser preview'));
+  await shot(page, '13-terminal');
+
+  await page.keyboard.type('héllo wörld ✓ 日本語');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.down('Control'); await page.keyboard.press('KeyC'); await page.keyboard.up('Control');
+  await sleep(200);
+  log = await pv(page);
+  const sent = log.inputs.map((i) => i.data).join('');
+  check('terminal: typed characters (incl. Unicode) reach the session input', sent.includes('héllo wörld ✓ 日本語'), JSON.stringify(sent));
+  check('terminal: Enter, arrow keys, Backspace and Ctrl+C are forwarded as terminal bytes', sent.includes('\r') && sent.includes('\x1b[A') && sent.includes('\x7f') && sent.includes('\x03'), JSON.stringify(sent));
+  check('terminal: output is rendered', (await termText(page)).includes('héllo'));
+
+  // Shell shortcuts are NOT swallowed by the terminal, and terminal shortcuts do not leak.
+  await page.keyboard.down('Alt'); await page.keyboard.press('Digit2'); await page.keyboard.up('Alt');
+  await sleep(150);
+  check('terminal: Alt+2 still switches workspace (shell keys pass through)', (await text(page, '.ws .pill.active')) === '2');
+  await page.keyboard.down('Alt'); await page.keyboard.press('Digit1'); await page.keyboard.up('Alt');
+  await sleep(600);
+
+  // Tabs
+  const nIn = (await pv(page)).inputs.length;
+  await page.keyboard.down('Control'); await page.keyboard.down('Shift'); await page.keyboard.press('KeyT'); await page.keyboard.up('Shift'); await page.keyboard.up('Control');
+  await sleep(500);
+  check('terminal: Ctrl+Shift+T opens a second tab (and does not type into the shell)', (await count(page, '.tab')) === 2 && (await pv(page)).inputs.length === nIn);
+  check('terminal: duplicate distro tabs are numbered', (await text(page, '.tab:nth-child(1) .name')) === 'Ubuntu-24.04 · 1' && (await text(page, '.tab:nth-child(2) .name')) === 'Ubuntu-24.04 · 2');
+  check('terminal: only the active pane is visible', (await page.$$eval('.pane', (p) => p.filter((e) => getComputedStyle(e).display !== 'none').length)) === 1);
+  await page.click('.newgroup .icon-btn[aria-label^="Choose a distribution"]');
+  await page.waitForSelector('.menu');
+  check('terminal: the new-tab menu offers installed regular distros only (docker-desktop excluded)', (await count(page, '.menu .menu-item')) === 3);
+  await shot(page, '14-terminal-menu');
+  await page.click('.menu .menu-item[data-distro="archlinux"]');
+  await sleep(500);
+  log = await pv(page);
+  check('terminal: a tab can target another distro without changing the selection', (await text(page, '.tab.on .name')) === 'archlinux' && log.opened.at(-1).distro === 'archlinux' && (await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config')).runtime.selected_distro)) === 'Ubuntu-24.04');
+  await page.keyboard.type('arch-only');
+  await sleep(150);
+  const lastIn = (await pv(page)).inputs.at(-1);
+  check('terminal: input goes to the active session only', lastIn.id === log.opened.at(-1).id);
+  await page.evaluate(() => document.querySelector('.tab .tab-main').click());
+  await sleep(300);
+  check('terminal: switching tabs switches the visible session', (await text(page, '.tab.on .name')).startsWith('Ubuntu-24.04'));
+
+  // Resize follows the window
+  const r0 = (await pv(page)).resizes.length;
+  await page.evaluate(() => document.querySelector('.win:not(.hidden) .ctl button[aria-label="Maximise"]').click());
+  await sleep(700);
+  const rs = (await pv(page)).resizes;
+  check('terminal: maximising resizes the PTY to the new grid', rs.length > r0 && rs.at(-1).cols > log.opened[0].cols, JSON.stringify(rs.at(-1)));
+  check('terminal: status bar shows the grid size', /\d+×\d+/.test(await text(page, '.status .mono')));
+  await shot(page, '15-terminal-maximised');
+  await page.evaluate(() => document.querySelector('.win:not(.hidden) .ctl button[aria-label="Restore"]').click());
+  await sleep(500);
+
+  // Clear
+  await page.evaluate(() => document.querySelector('.tools .icon-btn.text').click());
+  await sleep(200);
+  check('terminal: Clear wipes the screen', !(await termText(page)).includes('héllo'));
+
+  // Shell ended (as if the user typed `exit`)
+  const endedId = (await pv(page)).opened[0].id;
+  await page.evaluate((id) => window.__vlinuxTerminalPreview.end(id, { kind: 'exited', code: 0 }), endedId);
+  await page.waitForSelector('.ended');
+  check('terminal: an ended shell shows a banner with Restart/Close and a grey indicator', (await text(page, '.ended')).includes('ended') && (await count(page, '.tab.on .dot.exited')) === 1);
+  await shot(page, '17-terminal-ended');
+  const openedBefore = (await pv(page)).opened.length;
+  await clickText(page, '.ended .btn', 'Restart');
+  await sleep(600);
+  log = await pv(page);
+  check('terminal: Restart starts a fresh session in the same distro and drops the old one', log.opened.length === openedBefore + 1 && log.opened.at(-1).distro === 'Ubuntu-24.04' && log.closed.includes(endedId) && (await count(page, '.tab')) === 3 && (await count(page, '.ended')) === 0);
+
+  // Close confirmation guards running sessions
+  await page.keyboard.down('Alt'); await page.keyboard.press('KeyW'); await page.keyboard.up('Alt');
+  await page.waitForSelector('.panel[aria-label^="Close Terminal"]');
+  check('terminal: closing the window with live sessions asks first', (await text(page, '.panel[aria-label^="Close Terminal"] p')).includes('3 terminal sessions'));
+  await shot(page, '16-terminal-close-confirm');
+  await clickText(page, '.panel[aria-label^="Close Terminal"] .btn', 'Keep it open');
+  await sleep(200);
+  check('terminal: "Keep it open" keeps the window and the sessions', (await count(page, '.panel[aria-label^="Close Terminal"]')) === 0 && (await count(page, '.tab')) === 3);
+  await page.click('.win:not(.hidden) .ctl .x');
+  await page.waitForSelector('.panel[aria-label^="Close Terminal"]');
+  await clickText(page, '.panel[aria-label^="Close Terminal"] .btn', 'Close Terminal');
+  await sleep(400);
+  log = await pv(page);
+  check('terminal: confirming closes the window and every session it owned', (await count(page, '.win')) === 0 && log.closed.length === log.opened.length, JSON.stringify([log.opened.length, log.closed.length]));
+  await page.close();
+
+  // Setup → Open terminal in a specific distro
+  page = await fresh(1600, 900, '?wsl=ready');
+  await setSelected(page, '');
+  await openApp(page, 'Linux Setup');
+  await page.waitForSelector('.distro[data-name="archlinux"]');
+  await page.evaluate(() => { const b = [...document.querySelectorAll('.distro[data-name="archlinux"] button')].find((x) => x.textContent.includes('Open terminal')); b.click(); });
+  await sleep(900);
+  await page.waitForSelector('.pane.active .xterm-rows');
+  log = await pv(page);
+  check('terminal: "Open terminal" in Linux Setup starts a session in that exact distro', log.opened.length === 1 && log.opened[0].distro === 'archlinux', JSON.stringify(log.opened));
+  check('terminal: that session is not used to change the selected/default distro', (await page.evaluate(() => JSON.parse(localStorage.getItem('vlinux.config') ?? '{}').runtime?.selected_distro ?? '')) === '');
   await page.close();
 
   console.log('Responsive layouts (no overflow, nothing off-screen)');

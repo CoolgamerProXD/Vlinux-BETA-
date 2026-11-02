@@ -27,6 +27,12 @@ export class WindowManager {
   workspace = $state(0);
   focusedId = $state<number | null>(null);
   bounds = $state({ w: 1280, h: 720 });
+  /**
+   * Apps may veto an immediate close by returning a message (e.g. a terminal with running
+   * shells). The shell then asks the user; `closeNow` closes without asking.
+   */
+  guards: Record<string, () => string | null> = {};
+  pendingClose = $state<{ id: number; title: string; message: string } | null>(null);
   private nextId = 1;
   private zTop = 1;
   private cascade = 0;
@@ -97,9 +103,22 @@ export class WindowManager {
     this.focusedId = top ? top.id : null;
   }
 
-  close(id: number) {
+  /** Close without asking (used after the user confirmed, and by apps that have no guard). */
+  closeNow(id: number) {
     this.windows = this.windows.filter((w) => w.id !== id);
+    if (this.pendingClose?.id === id) this.pendingClose = null;
     if (this.focusedId === id) this.refocus();
+  }
+
+  /** User-initiated close: asks first when the app registered a guard that objects. */
+  close(id: number) {
+    const w = this.get(id);
+    const message = w ? this.guards[w.appId]?.() ?? null : null;
+    if (w && message) {
+      this.pendingClose = { id, title: w.title, message };
+      return;
+    }
+    this.closeNow(id);
   }
 
   closeFocused() {

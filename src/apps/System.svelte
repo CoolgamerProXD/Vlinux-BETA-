@@ -12,8 +12,8 @@
     { id: 'M0', name: 'Foundation — project, config, build', state: 'done' },
     { id: 'M1', name: 'Desktop shell — bar, dock, launcher, exit to Windows', state: 'done' },
     { id: 'M2', name: 'WSL detection, distro adapters, safe setup workflow, storage model', state: 'done' },
-    { id: 'M3', name: 'Linux terminal (real pseudoterminal)', state: 'next' },
-    { id: 'M4', name: 'File manager', state: 'planned' },
+    { id: 'M3', name: 'Linux terminal (real pseudoterminal, tabs)', state: 'done' },
+    { id: 'M4', name: 'File manager and shared-folder mapping', state: 'next' },
     { id: 'M5', name: 'Distribution manager', state: 'planned' },
     { id: 'M6', name: 'Polish, resource limits, installer testing', state: 'planned' },
   ];

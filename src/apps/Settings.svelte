@@ -39,6 +39,8 @@
     ['Alt + Shift + Q', 'Open the power / exit menu'],
     ['Ctrl + Alt + Q', 'Return to Windows immediately'],
     ['Esc', 'Close the open menu'],
+    ['Ctrl + Shift + T / W', 'Terminal: new tab / close tab'],
+    ['Ctrl + Shift + C / V', 'Terminal: copy selection / paste (Ctrl + C is the shell\'s interrupt)'],
   ];
 
   // ---- Linux folders (saved preferences; applied from M4 on) ----

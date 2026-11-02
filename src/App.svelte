@@ -8,6 +8,7 @@
   import { ui } from './lib/ui.svelte';
   import { wm } from './lib/wm.svelte';
   import AppHost from './components/AppHost.svelte';
+  import CloseConfirm from './components/CloseConfirm.svelte';
   import Dock from './components/Dock.svelte';
   import Launcher from './components/Launcher.svelte';
   import PowerMenu from './components/PowerMenu.svelte';
@@ -114,6 +115,7 @@
   {#if ui.overlay === 'launcher'}<Launcher />{/if}
   {#if ui.overlay === 'status'}<StatusPanel />{/if}
   {#if ui.overlay === 'power'}<PowerMenu />{/if}
+  <CloseConfirm />
   <Toasts />
 </div>
 
