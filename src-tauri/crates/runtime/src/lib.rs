@@ -22,11 +22,13 @@
 //! * [`probe`]      — allow-listed read-only in-distribution commands (M5)
 //! * [`packages`]   — package-manager capabilities, search parsing, reviewable plans (M5)
 //! * [`overview`]   — Distribution Manager cards and the preferred-distribution status (M5)
+//! * [`winconf`]   — read-only Windows `.wslconfig` (M5)
 //! * [`terminal`]  — interactive terminal sessions on a pseudoterminal (M3)
 //! * [`testing`]   — fake process runner and helpers for tests
 
 pub mod adapters;
 pub mod detect;
+pub mod diag;
 pub mod distroconf;
 pub mod encoding;
 pub mod exec;
@@ -45,6 +47,7 @@ pub mod shared;
 pub mod storage;
 pub mod terminal;
 pub mod testing;
+pub mod winconf;
 pub mod wsl;
 
 /// Seconds since the Unix epoch (0 if the clock is before it).

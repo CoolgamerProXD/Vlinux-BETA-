@@ -341,7 +341,7 @@ mod tests {
 
         let (w, _) = client(FakeRunner::new().on("wsl.exe", &["-d", "Debian", "--exec", "/bin/true"], Err(RunError::Timeout(Duration::from_secs(60)))));
         let e = start(&w, &base(), "Debian", &|| unreachable!()).unwrap_err();
-        assert!(matches!(e, LifecycleError::Failed(m) if m.contains("60 s") && m.contains("Refresh")));
+        assert!(matches!(e, LifecycleError::Failed(m) if m.contains("60 s") && m.contains("refresh")));
     }
 
     #[test]
