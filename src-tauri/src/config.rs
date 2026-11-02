@@ -219,9 +219,61 @@ fn preserve_invalid(path: &Path) -> std::io::Result<PathBuf> {
     Ok(dest)
 }
 
-/// Atomically write the config (temp file in the same directory, then rename).
+/// Keys that are skipped when `None`, so they legitimately vanish from a freshly serialised config.
+/// Everything that is neither written by the current schema nor listed here is *unknown* (for
+/// example a setting added by a newer VLINUX) and is carried over on save.
+fn is_optional_known(path: &[String]) -> bool {
+    match path {
+        [a, b] => a == "runtime" && b == "selected_distro",
+        [a, _, c] => a == "storage" && c == "windows_path",
+        _ => false,
+    }
+}
+
+/// Copy keys that the current schema does not know from the file on disk into the new document.
+/// Known keys always take the new value. Returns how many top-level or nested keys were carried.
+fn carry_unknown(existing: &toml::Table, fresh: &mut toml::Table, path: &mut Vec<String>) -> usize {
+    let mut carried = 0;
+    for (key, old) in existing {
+        path.push(key.clone());
+        if fresh.contains_key(key) {
+            if let (Some(toml::Value::Table(new_table)), toml::Value::Table(old_table)) = (fresh.get_mut(key), old) {
+                carried += carry_unknown(old_table, new_table, path);
+            }
+        } else if !is_optional_known(path) {
+            fresh.insert(key.clone(), old.clone());
+            carried += 1;
+        }
+        path.pop();
+    }
+    carried
+}
+
+/// Serialise `cfg`, keeping any settings in the existing file that this version does not know
+/// (so saving never discards what a newer or older VLINUX wrote). Comments are not preserved.
+fn render(path: &Path, cfg: &Config) -> Result<(String, usize), AppError> {
+    let plain = toml::to_string_pretty(cfg).map_err(|e| AppError::Config(e.to_string()))?;
+    let Some(old) = fs::read_to_string(path).ok().and_then(|t| t.parse::<toml::Table>().ok()) else {
+        return Ok((plain, 0));
+    };
+    let Ok(toml::Value::Table(mut fresh)) = toml::Value::try_from(cfg) else {
+        return Ok((plain, 0));
+    };
+    let carried = carry_unknown(&old, &mut fresh, &mut Vec::new());
+    if carried == 0 {
+        return Ok((plain, 0));
+    }
+    match toml::to_string_pretty(&fresh) {
+        Ok(text) => Ok((text, carried)),
+        Err(e) => Err(AppError::Config(format!("could not keep the unknown settings in {} ({e}); nothing was written", path.display()))),
+    }
+}
+
+/// Atomically write the config (temp file in the same directory, then rename). Settings this
+/// version does not know are kept; if they cannot be kept the save is refused rather than
+/// silently dropping them.
 pub fn save(path: &Path, cfg: &Config) -> Result<(), AppError> {
-    let text = toml::to_string_pretty(cfg).map_err(|e| AppError::Config(e.to_string()))?;
+    let (text, _carried) = render(path, cfg)?;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -396,5 +448,45 @@ mod tests {
         assert_eq!(c.appearance.wallpaper, Wallpaper::Dusk);
         assert_eq!(c.dock.position, DockPosition::Left);
         assert!(serde_json::from_str::<Config>(r#"{"dock":{"position":"top"}}"#).is_err());
+    }
+
+    #[test]
+    fn saving_keeps_settings_this_version_does_not_know() {
+        let dir = temp_dir("unknown-keys");
+        let path = dir.join("config.toml");
+        fs::write(
+            &path,
+            "future_top = 7\nschema_version = 2\n\n[shell]\nworkspace_count = 5\nfuture_shell_flag = true\n\n[future_section]\nname = \"x\"\n\n[runtime]\nselected_distro = \"Old\"\n",
+        )
+        .unwrap();
+        let mut cfg = load(&path).config;
+        assert_eq!(cfg.runtime.selected_distro.as_deref(), Some("Old"));
+        cfg.shell.workspace_count = 6;
+        cfg.runtime.selected_distro = None;
+        save(&path, &cfg).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let table: toml::Table = text.parse().unwrap();
+        assert_eq!(table["future_top"].as_integer(), Some(7));
+        assert_eq!(table["future_section"]["name"].as_str(), Some("x"));
+        assert_eq!(table["shell"]["future_shell_flag"].as_bool(), Some(true));
+        assert_eq!(table["shell"]["workspace_count"].as_integer(), Some(6));
+        // A known optional key that was cleared really is cleared (it is not resurrected).
+        assert!(table.get("runtime").and_then(|r| r.get("selected_distro")).is_none(), "{text}");
+        // The result still loads as a normal config.
+        assert_eq!(load(&path).config.shell.workspace_count, 6);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_without_unknown_settings_is_unchanged() {
+        let dir = temp_dir("no-unknown");
+        let path = dir.join("config.toml");
+        let cfg = Config::default();
+        save(&path, &cfg).unwrap();
+        let first = fs::read_to_string(&path).unwrap();
+        save(&path, &cfg).unwrap();
+        assert_eq!(first, fs::read_to_string(&path).unwrap());
+        assert_eq!(first, toml::to_string_pretty(&cfg).unwrap());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

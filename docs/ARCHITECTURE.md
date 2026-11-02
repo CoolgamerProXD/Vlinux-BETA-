@@ -1,4 +1,4 @@
-# VLINUX architecture (M0 – M4)
+# VLINUX architecture (M0 – M5)
 
 ## Principles
 * **Honest framing.** The VLINUX desktop is a *Windows-rendered shell* (a Tauri/WebView2 window). It is not a Wayland compositor and not a bare-metal Linux install. Linux will run through WSL2, which is virtualised.
@@ -185,3 +185,56 @@ Temp directories serve as distro roots, with a fake distro-ops layer that applie
 * No trash/undo for deletes, no permission editing, no file preview, no search, no multi-window or tabs in Files, no drag and drop from/to Explorer. Open-with uses the default Windows association only.
 * UNC/network shared-folder *targets* are browsable from Windows but not auto-linked into Linux.
 * Opening files from WSL via `\\wsl.localhost` depends on Windows' handling of that path by the associated program.
+
+
+## M5: Distribution management, lifecycle and compatibility
+
+### Modules (all Tauri-free in `crates/runtime/src/`, bound by `src-tauri/src/distros.rs`)
+* `packages` — the package-manager adapter surface. `PackageSupport::for_manager` (APT, pacman, DNF, *Unknown*) gives the probe binary, a read-only search command and the *plans* for install/update; `capabilities(availability)` returns, per capability (*detect, version, search, install, update*), `available`, `plan_only` or `unsupported` with a reason. Availability is `not_checked | present{version} | absent` and comes from probing, never from the distribution's name. Distro adapters (`adapters.rs`) only say which manager family to expect; distro-specific behaviour stays there and in `packages`.
+* `probe` — the one place that runs fixed read-only commands in a distribution (`wsl.exe -d <name> --exec …`, no shell): `cat /etc/os-release`, `uname -r`, `uname -m`, `id -un`, `id -u`, and `<binary> --version` for apt-get/pacman/dnf/apk/zypper (a non-zero exit means *absent*). The allow-list `is_allowed_probe` is checked before any command reaches the runner, so nothing else (no shell, no `sudo`) can be run through it. A stopped distribution is touched only with `allow_start`; the result records `started_by_inspection`.
+* `inspect` — builds and caches (`inspections.json`) an `Inspection`. Raw manager probes are stored and capabilities are derived at display time (`resolve_packages`): an unidentified distribution adopts a manager only if exactly one *supported* one is present; apk/zypper are reported found-but-unsupported.
+* `lifecycle` — `OpRegistry` (one operation per distribution; a second request is refused as *busy*), `check_target` (name validated, exact match to a registered distribution, internal and mid-change distributions refused), start (`/bin/true` via `--exec`, only if not already running, verified by re-detecting) and stop (`wsl.exe --terminate <name>`, needs `confirmed`, verified). It uses the `WslClient` allow-list, on which the forbidden verbs do not exist; a test asserts `--shutdown --unregister --set-default --set-version --import --export --mount` are all rejected.
+* `overview` — `Overview`/`DistroCard`: state (`detected|running|stopped|starting|installing|inspecting|unavailable|failed`), per-action enabled/disabled with a reason, `PreferredStatus` (`none|ok|missing|internal|busy|unchecked`) and the warning text. Internal distributions (docker-desktop etc.) get every action disabled except Refresh.
+* `distroconf` — an `IniDoc` that parses `/etc/wsl.conf` keeping every line (comments, unknown keys, ordering, line endings) and edits only six curated settings (`automount.enabled/root`, `interop.enabled/appendWindowsPath`, `boot.systemd`, `user.default`) with typed validation. `plan` builds a diff; `apply` checks the fingerprint, takes a backup in VLINUX's data (`wslconf-backups.json`, 20 per distribution), writes a temp file and renames, reads back, and restores automatically if the read-back differs. `PermissionDenied` becomes `NotWritable` with the proposed text and manual instructions — **no elevation**. `restore` refuses if the file changed since VLINUX wrote it unless forced, and backs up what it replaces. Every outcome has `verified_active: false` and states that a restart is needed.
+* `winconf` — a read-only reader for the Windows `.wslconfig` (shown as `%USERPROFILE%\.wslconfig`); never written.
+* `diag` — the diagnostics engine (see below).
+* `src-tauri/src/distros.rs` — 16 async commands (`distro_overview/set_preferred/start/stop/inspect/inspect_cancel/pkg_plan/pkg_search`, `wslconf_read/preview/apply/backups/restore`, `wslconfig_windows`, `diag_run/cancel`) and the events `vlinux://distro-op`, `vlinux://diag-progress`. Startup only constructs state. Blocking work runs off the main thread. The frontend names a distribution and typed requests; **it never supplies file text** (apply recomputes the plan from the current file and compares `based_on`).
+
+### Discovery and lifecycle
+Discovery is the M2 detection (lazy, cached 60 s, read-only, never starts a distribution); `distro_overview(force)` reads it and merges inspections, busy operations and failures. Nothing polls: refreshes happen on window open, on Refresh, and after an operation the user started. Obsolete refreshes are coalesced in the store. Start/Inspect/Stop register in `OpRegistry`, so a double click or a second window cannot run two operations on one distribution. Inspection can be cancelled (`distro_inspect_cancel`); child processes are bounded by timeouts and a cancel token.
+
+### Preferred distribution
+`[runtime] selected_distro` (the existing M2 field; no schema change). `distro_set_preferred` validates the name against the registered, non-internal distributions, saves it through the config store and returns a fresh overview. It never calls `wsl --set-default`. If the preferred distribution disappears, the overview warns and **nothing is switched**; terminals already open are not affected because sessions are bound to their own distribution at open time.
+
+### Package capabilities (what is real)
+| | APT | pacman | DNF | Unknown |
+|---|---|---|---|---|
+| Detect / version | probed (`apt-get`, `pacman`, `dnf`) | | | unsupported (adopts a single supported manager if probing finds exactly one) |
+| Search | read-only (`apt-cache search --names-only`) | `pacman -Ss` | `dnf --quiet search` | unsupported |
+| Install / Update | **plan only** (`sudo apt install …`; `sudo apt update` + `sudo apt upgrade`) | plan only (`sudo pacman -S --needed …`; `-Syu`, with the partial-upgrade warning) | plan only (`sudo dnf install …`; `dnf upgrade --refresh`) | unsupported |
+
+Install/update are never executed by VLINUX: they need root, and VLINUX has no unattended privilege escalation. The plan carries `executed: false`, the exact command text, and a note; the UI offers *Open terminal in this distribution*. Package names are validated (an ASCII letter or digit first, then letters, digits and `+ . _ -`, at most 100 characters; at most 20 names per request), search queries follow the same rule with at most 64 characters, and the command arrays are fixed — no frontend string is ever interpreted by a shell.
+
+### Configuration management
+Managed by the distribution: `/etc/wsl.conf` (editable, reversible). Managed by Windows: `.wslconfig` (read-only). Reading requires the distribution to be running (otherwise `needs_start`, and the UI asks you to start it explicitly). Missing, malformed (editing disabled, lines reported), too-large and unsupported cases are all handled before any write. `config.toml` itself: saving now carries over keys this version does not know (`config.rs::carry_unknown`); keys that are skipped when empty (`runtime.selected_distro`, `storage.*.windows_path`) are not resurrected. This is **new in M5** — before it, a newer file's unknown keys were dropped on the next save (invalid files were already kept as `config.toml.invalid-<ts>`). Comments in `config.toml` are not preserved.
+
+### Diagnostics
+`diag::run(options, env)` runs the five categories (Runtime, Terminal, Filesystem, Shared folders, Desktop) as a list of named checks. Each `CheckResult` has `outcome` (`passed|failed|skipped|unsupported|not_tested`), `evidence` (`real_wsl|host|simulated|none`), `modified`, `checked`, `message`, `guidance`, `distro`. A check that did not execute has evidence `none` and can never be `passed`. The environment is injected (`Mode::Real` in the desktop app, `Mode::Simulated` only in tests and the browser preview), so a mock cannot produce a *Real WSL* result and the headline of a simulated report says it proves nothing. Writing checks (terminal sessions, create/rename/copy/move, link, odd names) require `allow_write`; starting a stopped distribution requires `allow_start`; both default to off and are shown before the run. All writes go under one `/tmp/vlinux-diag-<token>` folder; cleanup first verifies the exact path and removes only that folder. One run at a time; cancellable. The text report is redacted (user and host names become `<user>`) and holds no file contents. `desktop.file_association` is always *Not tested* — there is no safe read-only query for it yet.
+
+### Frontend
+`lib/distros-types.ts` (JSON mirrors), `lib/distros-view.ts` (pure view logic, unit-tested), `lib/distros.svelte.ts` (store; listeners attach on open and detach on close; immediate *Starting/Stopping/Inspecting* states), `apps/Distros.svelte` with `PackagesPanel`, `WslConfigPanel` (also used by Settings → WSL configuration) and `DiagnosticsPanel`, and `lib/distros-preview.ts` — the browser-only **simulation** (`?wsl=multi`: Arch + Windows default running, Ubuntu stopped, Debian on WSL 1, Fedora stopped, Alpine with an unsupported manager, docker-desktop internal). The desktop app never loads it.
+
+### Security restrictions
+No `wsl --unregister|--shutdown|--set-default|--set-version|--import|--export|--mount`; no sudo or elevation, no admin request; no package operation at startup or automatic upgrade; no arbitrary command strings over IPC; distribution names validated against the registered list before use; the frontend cannot supply paths or file text; config writes need preview + confirmation + backup; `.wslconfig` is never written; no secrets in diagnostics; symlinks in the diagnostics folder are created and removed only through the allow-listed `ln`/`unlink`.
+
+### Testing strategy
+Rust unit tests per module with fake `wsl.exe` output (probe, inspect, lifecycle incl. busy/timeout/cancel, overview, adapters/capabilities, plan validation including hostile strings, `IniDoc` round trips, apply/backup/restore with injected write failures and read-back mismatch, diagnostics classification, cleanup, cancel, redaction). Vitest covers the view logic. The headless-browser e2e renders the Distribution Manager against the simulation (multi-distro states, start/stop/inspect, confirmations, dangerous operations absent, preferred ≠ Windows default, package plans, configuration diff/apply/restore/not-writable, diagnostics, empty and failed discovery, listener clean-up) and re-runs every M0–M4 check.
+
+### Known limitations (M5)
+* **Nothing has been run against a real WSL distribution.** Real start/stop/inspect, real `wsl.conf` writes (which will usually be refused for a non-root default user), real diagnostics, `wslpath`, and WebView2 rendering are unverified.
+* Package install/update are plan-only by design; there is no in-app package execution or progress.
+* Only six `wsl.conf` settings are editable; `.wslconfig` is read-only.
+* Diagnostics measure what VLINUX can observe; they do not assert compatibility of any distribution. File associations are not tested.
+* Reading `/etc/wsl.conf` goes through `\\wsl.localhost` and needs the distribution running; a distribution that is running but has not finished booting may give transient errors.
+* Stopping uses `wsl.exe --terminate <name>` for one distribution; WSL itself decides when the VM shuts down.
+* `config.toml` comments are not preserved when VLINUX saves it.

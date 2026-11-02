@@ -307,7 +307,7 @@ async function support(name: string): Promise<PackageCaps> {
   return caps;
 }
 
-const valid = (p: string) => /^[a-z0-9][a-z0-9+._-]{0,63}$/.test(p);
+const valid = (p: string) => /^[A-Za-z0-9][A-Za-z0-9+._-]{0,99}$/.test(p);
 
 export async function pkgPlan(name: string, op: 'install' | 'update', packages: string[]): Promise<PackagePlan> {
   const caps = await support(name);
