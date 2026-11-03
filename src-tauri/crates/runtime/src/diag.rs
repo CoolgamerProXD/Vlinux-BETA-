@@ -1287,37 +1287,65 @@ impl<'a, 'p> Run<'a, 'p> {
     /// The steps of `fs.home_roundtrip`. Everything happens inside `<home>/.vlinux-validate-<token>`,
     /// which this run creates and removes; it is removed even when a step fails.
     fn home_roundtrip(&self, home: &str) -> Res {
-        let token = self.env.token.strip_prefix("vlx-").unwrap_or("x").to_string();
+        let token = self
+            .env
+            .token
+            .strip_prefix("vlx-")
+            .unwrap_or("x")
+            .to_string();
         let name = format!("{HOME_TEST_PREFIX}{token}");
         let dir = format!("{home}/{name}");
-        let Some(spaces) = self.spaces.clone() else { return skip("No file share.") };
+        let Some(spaces) = self.spaces.clone() else {
+            return skip("No file share.");
+        };
         let loc = |rel: &str| Location::linux(&format!("{dir}/{rel}"));
         if let Err(e) = ops::create_dir(&spaces, &Location::linux(home), &name) {
-            return fail(e.message, "The default user could not create a folder in its home; nothing was changed.");
+            return fail(
+                e.message,
+                "The default user could not create a folder in its home; nothing was changed.",
+            );
         }
         let steps = (|| -> Result<(), String> {
-            ops::create_file(&spaces, &Location::linux(&dir), "t1.txt").map_err(|e| format!("create: {}", e.message))?;
-            let host = spaces.resolve_entry(&loc("t1.txt")).map_err(|e| format!("create: {}", e.message))?.host;
+            ops::create_file(&spaces, &Location::linux(&dir), "t1.txt")
+                .map_err(|e| format!("create: {}", e.message))?;
+            let host = spaces
+                .resolve_entry(&loc("t1.txt"))
+                .map_err(|e| format!("create: {}", e.message))?
+                .host;
             let text = "vlinux home check \u{2713}";
             fs::write(&host, text).map_err(|e| format!("write: {e}"))?;
             if fs::read_to_string(&host).ok().as_deref() != Some(text) {
                 return Err("write: the text read back differently".into());
             }
-            ops::rename(&spaces, &loc("t1.txt"), "t2.txt").map_err(|e| format!("rename: {}", e.message))?;
+            ops::rename(&spaces, &loc("t1.txt"), "t2.txt")
+                .map_err(|e| format!("rename: {}", e.message))?;
             let names = self.names_at(&spaces, &dir);
             if !names.contains(&"t2.txt".to_string()) || names.contains(&"t1.txt".to_string()) {
                 return Err("rename: the listing disagrees with the result".into());
             }
-            ops::create_dir(&spaces, &Location::linux(&dir), "a").map_err(|e| format!("copy: {}", e.message))?;
-            ops::create_dir(&spaces, &Location::linux(&dir), "b").map_err(|e| format!("move: {}", e.message))?;
-            self.run_transfer(&loc("t2.txt"), &loc("a"), TransferMode::Copy).map_err(|m| format!("copy: {m}"))?;
-            let copied = spaces.resolve_entry(&loc("a/t2.txt")).ok().and_then(|e| fs::read_to_string(e.host).ok());
+            ops::create_dir(&spaces, &Location::linux(&dir), "a")
+                .map_err(|e| format!("copy: {}", e.message))?;
+            ops::create_dir(&spaces, &Location::linux(&dir), "b")
+                .map_err(|e| format!("move: {}", e.message))?;
+            self.run_transfer(&loc("t2.txt"), &loc("a"), TransferMode::Copy)
+                .map_err(|m| format!("copy: {m}"))?;
+            let copied = spaces
+                .resolve_entry(&loc("a/t2.txt"))
+                .ok()
+                .and_then(|e| fs::read_to_string(e.host).ok());
             if copied.as_deref() != Some(text) {
                 return Err("copy: the copy is missing or differs".into());
             }
-            self.run_transfer(&loc("a/t2.txt"), &loc("b"), TransferMode::Move).map_err(|m| format!("move: {m}"))?;
-            let moved = spaces.resolve_entry(&loc("b/t2.txt")).ok().and_then(|e| fs::read_to_string(e.host).ok());
-            let left = spaces.resolve_entry(&loc("a/t2.txt")).ok().and_then(|e| fs::symlink_metadata(e.host).ok());
+            self.run_transfer(&loc("a/t2.txt"), &loc("b"), TransferMode::Move)
+                .map_err(|m| format!("move: {m}"))?;
+            let moved = spaces
+                .resolve_entry(&loc("b/t2.txt"))
+                .ok()
+                .and_then(|e| fs::read_to_string(e.host).ok());
+            let left = spaces
+                .resolve_entry(&loc("a/t2.txt"))
+                .ok()
+                .and_then(|e| fs::symlink_metadata(e.host).ok());
             if moved.as_deref() != Some(text) || left.is_some() {
                 return Err("move: the file is not only in the destination".into());
             }
@@ -1330,7 +1358,9 @@ impl<'a, 'p> Run<'a, 'p> {
             let mut r = Runner::new(&never, &mut cb);
             let res = ops::delete(&spaces, &[Location::linux(&dir)], true, &mut r);
             let rep = r.finish();
-            res.is_ok() && rep.failed.is_empty() && self.names_at(&spaces, home).iter().all(|n| n != &name)
+            res.is_ok()
+                && rep.failed.is_empty()
+                && self.names_at(&spaces, home).iter().all(|n| n != &name)
         } else {
             false
         };
@@ -1345,7 +1375,15 @@ impl<'a, 'p> Run<'a, 'p> {
 
     fn names_at(&self, spaces: &Spaces, path: &str) -> Vec<String> {
         let store = ListStore::new();
-        match store.open_dir(spaces, &Location::linux(path), &ListOptions { show_hidden: true, ..Default::default() }, 1000) {
+        match store.open_dir(
+            spaces,
+            &Location::linux(path),
+            &ListOptions {
+                show_hidden: true,
+                ..Default::default()
+            },
+            1000,
+        ) {
             Ok(head) => {
                 store.close(&head.id);
                 head.page.entries.into_iter().map(|e| e.name).collect()
@@ -2388,7 +2426,10 @@ mod tests {
         assert!(home_entries.is_empty(), "{home_entries:?}");
         assert!(get(&r, "fs.home_roundtrip").modified);
         assert!(!get(&r, "fs.home_listing").message.contains("dana"));
-        assert!(!r.text.contains("dana"), "the report must not name the user");
+        assert!(
+            !r.text.contains("dana"),
+            "the report must not name the user"
+        );
         assert!(get(&r, "fs.cleanup").modified);
         assert!(get(&r, "terminal.io").modified && !get(&r, "fs.enumerate").modified);
         // Results are grouped by category in order, clean-up last in its group.

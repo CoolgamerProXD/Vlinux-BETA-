@@ -575,8 +575,14 @@ mod tests {
             }
         }
         // A folder that merely contains the word elsewhere in a longer name is not flagged.
-        assert!(matches!(sup(r"C:\Users\Someone\My OneDrive notes"), Verdict::Supported { .. }));
-        assert!(matches!(sup(r"C:\Users\Someone\Documents"), Verdict::Supported { .. }));
+        assert!(matches!(
+            sup(r"C:\Users\Someone\My OneDrive notes"),
+            Verdict::Supported { .. }
+        ));
+        assert!(matches!(
+            sup(r"C:\Users\Someone\Documents"),
+            Verdict::Supported { .. }
+        ));
     }
 
     #[test]
