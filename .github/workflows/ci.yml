@@ -374,7 +374,9 @@ jobs:
           $desk = $LASTEXITCODE
           $dtext = (Get-Content artifacts/desktop-smoke.log -Raw)
           if ($dtext.Length -gt 3500) { $dtext = $dtext.Substring(0, 3500) }
-          Write-Host ("::notice title=Desktop smoke log (exit $desk)::" + ($dtext -replace "`r","" -replace "%","%25" -replace "`n","%0A"))
+          $global:LASTEXITCODE = 0
+          # (a warning, not a notice: this step already uses up GitHub's notice-annotation allowance)
+          Write-Host ("::warning title=Desktop smoke log (exit $desk)::" + ($dtext -replace "`r","" -replace "%","%25" -replace "`n","%0A"))
           Note "Desktop smoke exit code: $desk"
 
           # ---- exit and clean up ----

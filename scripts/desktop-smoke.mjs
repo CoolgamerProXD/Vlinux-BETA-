@@ -15,6 +15,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 
+process.on('uncaughtException', (e) => { console.log('FAIL  desktop smoke crashed: ' + (e?.stack ?? e)); process.exit(3); });
+process.on('unhandledRejection', (e) => { console.log('FAIL  desktop smoke crashed: ' + (e?.stack ?? e)); process.exit(3); });
+
 const port = process.env.CDP_PORT ?? '9222';
 const out = process.env.OUT_DIR ?? 'artifacts';
 const proc = process.env.VLX_PROC ?? 'vlinux-cdp';
