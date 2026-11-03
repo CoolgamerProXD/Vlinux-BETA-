@@ -2,7 +2,7 @@
 # Sends REAL keystrokes to the foreground window and moves/restores the REAL window; it touches
 # nothing but the process named by -Proc and never needs administrator rights.
 param(
-  [Parameter(Mandatory = $true)][ValidateSet('focus', 'keys', 'move', 'iconic', 'restore')][string]$Action,
+  [Parameter(Mandatory = $true)][ValidateSet('focus', 'keys', 'move', 'iconic', 'restore', 'info')][string]$Action,
   [string]$Arg = '',
   [string]$Proc = 'vlinux-cdp'
 )
@@ -20,6 +20,7 @@ public static class VlxWin {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
 }
 "@
 $p = Get-Process -Name $Proc -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
@@ -41,6 +42,7 @@ switch ($Action) {
   'focus'   { Set-Focus; Write-Output 'ok' }
   'keys'    { Set-Focus; [System.Windows.Forms.SendKeys]::SendWait($Arg); Start-Sleep -Milliseconds 200; Write-Output 'ok' }
   'move'    { $v = $Arg.Split(',') | ForEach-Object { [int]$_ }; [void][VlxWin]::MoveWindow($h, $v[0], $v[1], $v[2], $v[3], $true); Write-Output 'ok' }
+  'info'    { $fg = [VlxWin]::GetForegroundWindow(); Write-Output ("session=$($p.SessionId) interactive=$([Environment]::UserInteractive) foregroundIsVlinux=$($fg -eq $h) visible=$([VlxWin]::IsWindowVisible($h)) iconic=$([VlxWin]::IsIconic($h))") }
   'iconic'  { Write-Output ([VlxWin]::IsIconic($h)) }
   'restore' { [void][VlxWin]::ShowWindow($h, 9); Set-Focus; Write-Output 'ok' }
 }

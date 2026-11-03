@@ -68,11 +68,26 @@ const until = async (pred, ms = 5000) => {
   return s;
 };
 
-// Which kind of keys can we use?
+// Which kind of keys can we use? A canary decides: type three letters with REAL OS keystrokes into a
+// text box in the page. If they arrive, shortcuts are tested with real keystrokes; if Windows (or this
+// CI session) drops injected input, shortcuts are tested with CDP-injected keys and labelled so.
 let os = false;
-try { ps('focus'); await sleep(400); os = (await state()).focus; } catch (e) { console.log('focus helper failed: ' + String(e).slice(0, 200)); }
+let info = '';
+try {
+  ps('focus');
+  await sleep(300);
+  info = ps('info');
+  await page.evaluate(() => { const i = document.createElement('input'); i.id = 'vlx-canary'; i.style.cssText = 'position:fixed;left:0;top:0;z-index:99999'; document.body.appendChild(i); i.focus(); });
+  ps('keys', 'vlx');
+  await sleep(300);
+  const typed = await page.evaluate(() => document.getElementById('vlx-canary')?.value ?? '');
+  os = typed === 'vlx';
+  console.log(`canary: typed ${JSON.stringify(typed)} (expected "vlx"); ${info}`);
+} catch (e) { console.log('focus/canary helper failed: ' + String(e).slice(0, 300)); }
+await page.evaluate(() => document.getElementById('vlx-canary')?.remove());
+await page.evaluate(() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur());
 const kind = os ? '[OS key]' : '[CDP key]';
-console.log(`::notice title=Desktop smoke input::${os ? 'real operating-system keystrokes (SendKeys) reached the foreground window' : 'Windows did not give VLINUX the foreground; falling back to keys injected over CDP'}`);
+console.log(`::notice title=Desktop smoke input::${os ? 'real operating-system keystrokes (SendKeys) reach the page' : 'real OS keystrokes did NOT reach the page in this CI session (' + info + '); shortcuts are tested with keys injected over CDP, which proves the app\'s key handling but not Windows\' delivery'}`);
 
 const CDP = { 'F11': ['F11'], 'ESC': ['Escape'], 'ALTF1': ['Alt', 'F1'], 'ALT2': ['Alt', 'Digit2'], 'ALT1': ['Alt', 'Digit1'], 'ALTW': ['Alt', 'KeyW'], 'POWER': ['Alt', 'Shift', 'KeyQ'], 'CAQ': ['Control', 'Alt', 'KeyQ'] };
 const SEND = { 'F11': '{F11}', 'ESC': '{ESC}', 'ALTF1': '%{F1}', 'ALT2': '%2', 'ALT1': '%1', 'ALTW': '%w', 'POWER': '%+q', 'CAQ': '^%q' };
@@ -88,7 +103,7 @@ check('the shell starts in full screen (default setting)', s0.fs === true, `full
 
 await press('F11');
 let s = await until((x) => x.fs === false);
-check(`${kind} F11 leaves full screen`, s.fs === false);
+check(`${kind} F11 leaves full screen`, s.fs === false, `fullscreen=${s.fs}`);
 
 // resize the real window
 try {
@@ -103,16 +118,18 @@ try {
   await page.screenshot({ path: path.join(out, 'desktop-resized.png') });
 } catch (e) { check('window resize helper ran', false, String(e).slice(0, 200)); }
 
+const beforeEnter = (await state()).fs;
 await press('F11');
 s = await until((x) => x.fs === true);
-check(`${kind} F11 enters full screen`, s.fs === true);
+check(`${kind} F11 enters full screen`, beforeEnter === false && s.fs === true, `before=${beforeEnter}, after=${s.fs}`);
 
 await press('ALTF1');
 s = await until((x) => x.launcher);
+const lOpen = s.launcher;
 check(`${kind} Alt+F1 opens the launcher`, s.launcher);
 await press('ESC');
 s = await until((x) => !x.launcher);
-check(`${kind} Esc closes the launcher`, !s.launcher);
+check(`${kind} Esc closes the launcher`, lOpen && !s.launcher);
 
 await press('ALT2');
 s = await until((x) => x.ws === '2');
@@ -123,10 +140,11 @@ check(`${kind} Alt+1 switches back to workspace 1`, s.ws === '1', `workspace ${s
 
 await press('POWER');
 s = await until((x) => x.power);
+const pOpen = s.power;
 check(`${kind} Alt+Shift+Q opens the power menu`, s.power);
 await press('ESC');
 s = await until((x) => !x.power);
-check(`${kind} Esc closes the power menu`, !s.power);
+check(`${kind} Esc closes the power menu`, pOpen && !s.power);
 
 // window close and reopen (Settings: needs no distribution)
 const openSettings = async () => {
@@ -142,10 +160,11 @@ s = await until((x) => x.wins === before + 1);
 check('a window opens from the dock', s.wins === before + 1, `${s.wins} visible`);
 await press('ALTW');
 s = await until((x) => x.wins === before);
-check(`${kind} Alt+W closes the focused window`, s.wins === before, `${s.wins} visible`);
+const closedOk = s.wins === before;
+check(`${kind} Alt+W closes the focused window`, closedOk, `${s.wins} visible`);
 await openSettings();
 s = await until((x) => x.wins === before + 1);
-check('the same window opens again after being closed', s.wins === before + 1);
+check('the same window opens again after being closed', closedOk && s.wins === before + 1);
 await press('ALTW');
 await until((x) => x.wins === before);
 
