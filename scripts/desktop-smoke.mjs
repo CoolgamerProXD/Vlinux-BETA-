@@ -84,23 +84,19 @@ try {
   os = typed === 'vlx';
   console.log(`canary: typed ${JSON.stringify(typed)} (expected "vlx"); ${info}`);
 } catch (e) { console.log('focus/canary helper failed: ' + String(e).slice(0, 300)); }
-// Diagnose WHERE real keystrokes go: log every keydown the page receives, then send a harmless key
-// (F7 - no handler) with nothing focused, and again with a text box focused.
+// Diagnose WHERE real keystrokes go: log every keydown the page receives (capture phase). A harmless
+// letter is sent first with nothing focused. (Not F7: that opens Chromium's caret-browsing prompt and
+// steals the keyboard.)
+await page.evaluate(() => document.getElementById('vlx-canary')?.remove());
 await page.evaluate(() => { window.__keys = []; window.addEventListener('keydown', (e) => window.__keys.push(`${e.ctrlKey ? 'Ctrl+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.code || 'key:' + e.key}${e.defaultPrevented ? '(handled)' : ''}`), true); });
 const keysSeen = () => page.evaluate(() => [...window.__keys]);
-let delivered = { nothingFocused: null, textBoxFocused: null };
+let delivered = null;
 if (os) {
-  await page.evaluate(() => { const i = document.getElementById('vlx-canary'); i?.blur(); document.body.focus?.(); });
-  await page.evaluate(() => { window.__keys.length = 0; });
-  ps('keys', 'F7'); await sleep(300);
-  delivered.nothingFocused = (await keysSeen()).some((k) => k.includes('F7'));
-  await page.evaluate(() => { window.__keys.length = 0; document.getElementById('vlx-canary')?.focus(); });
-  ps('keys', 'F7'); await sleep(300);
-  delivered.textBoxFocused = (await keysSeen()).some((k) => k.includes('F7'));
-  console.log(`delivery of a plain F7 key: nothing focused=${delivered.nothingFocused}, text box focused=${delivered.textBoxFocused}`);
+  ps('keys', 'Z'); await sleep(300);
+  delivered = (await keysSeen()).some((k) => k.includes('KeyZ'));
+  console.log(`delivery of a plain key with nothing focused: ${delivered}; page saw [${(await keysSeen()).join(', ')}]`);
   await page.evaluate(() => { window.__keys.length = 0; });
 }
-await page.evaluate(() => document.getElementById('vlx-canary')?.remove());
 await page.evaluate(() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur());
 const kind = os ? '[OS key]' : '[CDP key]';
 console.log(`::notice title=Desktop smoke input::${os ? 'real operating-system keystrokes (keybd_event with scan codes) reach the page' : 'real OS keystrokes did NOT reach the page in this CI session (' + info + '); shortcuts are tested with keys injected over CDP, which proves the app\'s key handling but not Windows\' delivery'}`);
