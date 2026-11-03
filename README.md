@@ -18,7 +18,7 @@ npm run tauri:dev
 
 **2-minute check on your own PC** (nothing is installed, started or changed unless you press a button):
 1. Launch VLINUX → the *Welcome* card explains the steps. Press **Show my distributions**: your existing WSL distributions are listed (read-only, nothing is started). Press **Set as preferred** on yours.
-2. **Distributions → Diagnostics → Run** (tick *Allow creating temporary files* and *Allow starting …* if you want the real terminal, filesystem and shared-folder checks; it only writes inside `/tmp/vlinux-diag-…` in the distribution and removes that folder afterwards). Every result is labelled *Real WSL / Host / Simulated / Not tested*. **Copy report** gives you a redacted text you can paste anywhere.
+2. **Distributions → Diagnostics → Run** (tick *Allow creating temporary files* and *Allow starting …* if you want the real terminal, filesystem and shared-folder checks; it writes only inside two folders it creates itself — `/tmp/vlinux-diag-…` and one hidden `~/.vlinux-validate-…` in your Linux home — and removes just those; none of your files are touched). Every result is labelled *Real WSL / Host / Simulated / Not tested*. **Copy report** gives you a redacted text you can paste anywhere.
 3. Open **Terminal**: run `whoami` and `echo $HOME` yourself; open **Files**: browse your Linux home.
 
 ## What works now

@@ -58,7 +58,7 @@
     <div class="perm">
       <label class="dm-check">
         <input type="checkbox" bind:checked={allowWrite} data-testid="diag-allow-write" />
-        <span><strong>Allow creating temporary files.</strong> Needed for the terminal, create/rename/copy/move, link, and file-name checks. Everything is created in one temporary folder inside the distribution (<code>/tmp/vlinux-diag-…</code>) and only that folder is removed afterwards.</span>
+        <span><strong>Allow creating temporary files.</strong> Needed for the terminal, create/rename/copy/move, link, and file-name checks. Almost everything is created in one temporary folder inside the distribution (<code>/tmp/vlinux-diag-…</code>). The home-folder test creates one hidden, uniquely named folder in your Linux home (<code>~/.vlinux-validate-…</code>), works only inside it and removes only it. Nothing else is touched.</span>
       </label>
       <label class="dm-check">
         <input type="checkbox" bind:checked={allowStart} data-testid="diag-allow-start" />

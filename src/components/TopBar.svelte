@@ -4,7 +4,6 @@
   import { host } from '../lib/host.svelte';
   import { ui } from '../lib/ui.svelte';
   import { wm } from '../lib/wm.svelte';
-  import { setFullscreen } from '../lib/ipc';
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
 
@@ -23,7 +22,7 @@
 
   async function toggleFullscreen() {
     try {
-      await setFullscreen(!host.fullscreen);
+      await host.toggleFullscreen();
     } catch (e) {
       ui.toast(`Could not change full-screen: ${String(e)}`, 'error');
     }

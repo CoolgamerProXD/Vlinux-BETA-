@@ -184,7 +184,16 @@ await until((x) => x.wins === before);
 await press('CAQ');
 s = await until((x) => x.vis === 'hidden' && x.fs === false, 6000);
 const iconic = ps('iconic');
-check(`${kind} Ctrl+Alt+Q returns to Windows (leaves full screen and minimises)`, s.fs === false && (iconic === 'True' || s.vis === 'hidden'), `fullscreen=${s.fs}, visibility=${s.vis}, minimised=${iconic}`);
+const returned = s.fs === false && (iconic === 'True' || s.vis === 'hidden');
+check(`${kind} Ctrl+Alt+Q returns to Windows (leaves full screen and minimises)`, returned, `fullscreen=${s.fs}, visibility=${s.vis}, minimised=${iconic}`);
+if (!returned) {
+  // Is it the key path or the Rust command? Report the toast, then call the command directly.
+  const toast = await page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent.trim()).join(' | '));
+  console.log(`  toast after Ctrl+Alt+Q: ${toast || '(none)'}`);
+  const r = await page.evaluate(async () => { try { await window.__TAURI_INTERNALS__.invoke('exit_to_windows'); return 'ok'; } catch (e) { return String(e?.message ?? e); } });
+  await sleep(1500);
+  console.log(`  direct exit_to_windows invoke: ${r}; minimised=${ps('iconic')}`);
+}
 
 ps('restore');
 s = await until((x) => x.vis === 'visible', 6000);

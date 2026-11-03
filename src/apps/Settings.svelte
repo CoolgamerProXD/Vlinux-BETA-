@@ -6,7 +6,7 @@
   import { openFilesAt } from '../lib/open-files';
   import { runtime } from '../lib/runtime.svelte';
   import { host } from '../lib/host.svelte';
-  import { setFullscreen, storageOverview, storageValidatePath } from '../lib/ipc';
+  import { storageOverview, storageValidatePath } from '../lib/ipc';
   import type { StorageOverview, Verdict } from '../lib/runtime-types';
   import { defaultStorage, FOLDER_IDS, type FolderId } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
@@ -135,7 +135,7 @@
 
   async function fullscreenNow() {
     try {
-      await setFullscreen(!host.fullscreen);
+      await host.toggleFullscreen();
     } catch (e) {
       ui.toast(`Could not change full-screen: ${String(e)}`, 'error');
     }

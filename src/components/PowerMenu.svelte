@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { exitToWindows, quitApp, setFullscreen } from '../lib/ipc';
+  import { exitToWindows, quitApp } from '../lib/ipc';
   import { host } from '../lib/host.svelte';
   import { ui } from '../lib/ui.svelte';
   import { terminals } from '../lib/terminal.svelte';
@@ -42,7 +42,7 @@
           <strong>Return to Windows</strong>
           <span>Leaves full screen and minimises VLINUX to the taskbar. Nothing is stopped; click VLINUX in the taskbar to come back.</span>
         </button>
-        <button class="tile" onclick={() => run(() => setFullscreen(!host.fullscreen))} disabled={busy}>
+        <button class="tile" onclick={() => run(() => host.toggleFullscreen())} disabled={busy}>
           <Icon name={host.fullscreen ? 'shrink' : 'expand'} size={30} />
           <strong>{host.fullscreen ? 'Leave full screen' : 'Enter full screen'}</strong>
           <span>{host.fullscreen ? 'Show VLINUX in a regular window.' : 'Fill the whole display.'}</span>

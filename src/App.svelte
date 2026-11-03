@@ -3,7 +3,7 @@
   import { clock } from './lib/clock.svelte';
   import { config } from './lib/config.svelte';
   import { host } from './lib/host.svelte';
-  import { exitToWindows, setFullscreen } from './lib/ipc';
+  import { exitToWindows } from './lib/ipc';
   import { applyTheme } from './lib/theme';
   import { ui } from './lib/ui.svelte';
   import { wm } from './lib/wm.svelte';
@@ -95,7 +95,7 @@
     }
     if (e.code === 'F11') {
       e.preventDefault();
-      void guarded(() => setFullscreen(!host.fullscreen));
+      void guarded(() => host.toggleFullscreen());
       return;
     }
     if (e.code === 'Escape' && ui.overlay) {

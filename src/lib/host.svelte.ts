@@ -22,6 +22,18 @@ class Host {
     this.info = await ipc.getSystemInfo().catch(() => null);
     this.fullscreen = await ipc.isFullscreen().catch(() => false);
     this.disposers.push(await ipc.onFullscreenChange((on) => (this.fullscreen = on)));
+    // The change event is only a hint (the desktop app de-duplicates it); the window itself is the
+    // truth. Re-read it, debounced, when the window is resized, so the label can never go stale.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const resync = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void ipc.isFullscreen().then((v) => (this.fullscreen = v)).catch(() => {}), 150);
+    };
+    window.addEventListener('resize', resync);
+    this.disposers.push(() => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', resync);
+    });
 
     const on = () => (this.online = true);
     const off = () => (this.online = false);
@@ -48,6 +60,15 @@ class Host {
         /* no battery information available — leave null */
       }
     }
+  }
+
+  /**
+   * Toggle full screen from what the window REALLY is right now, never from a cached flag: a stale
+   * flag once made F11 and the top-bar button do nothing after leaving full screen.
+   */
+  async toggleFullscreen() {
+    const current = await ipc.isFullscreen();
+    this.fullscreen = await ipc.setFullscreen(!current);
   }
 
   dispose() {
