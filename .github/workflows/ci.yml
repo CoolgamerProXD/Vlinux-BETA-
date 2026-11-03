@@ -368,6 +368,15 @@ jobs:
           Start-Sleep -Seconds 8
           $null = Measure-Tree $p.Id 'settled, 8 s after the smoke test'
 
+          # ---- desktop integration in the REAL window: real OS keystrokes, full screen, resize,
+          # return to Windows. Not fatal in this milestone: the result is reported either way. ----
+          node scripts/desktop-smoke.mjs 2>&1 | Tee-Object -FilePath artifacts/desktop-smoke.log
+          $desk = $LASTEXITCODE
+          $dtext = (Get-Content artifacts/desktop-smoke.log -Raw)
+          if ($dtext.Length -gt 3500) { $dtext = $dtext.Substring(0, 3500) }
+          Write-Host ("::notice title=Desktop smoke log (exit $desk)::" + ($dtext -replace "`r","" -replace "%","%25" -replace "`n","%0A"))
+          Note "Desktop smoke exit code: $desk"
+
           # ---- exit and clean up ----
           Stop-Process -Id $p.Id -Force
           Start-Sleep -Seconds 6

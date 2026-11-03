@@ -414,9 +414,14 @@ struct Run<'a, 'p> {
     automount: bool,
     diag_dir: Option<String>,
     session: Option<String>,
+    /// User names discovered while running (the terminal's `id -un`); they are scrubbed from the
+    /// copyable report even when the caller did not know them in advance.
+    learned: Vec<String>,
 }
 
 const DIAG_PREFIX: &str = "vlinux-diag-";
+/// The hidden folder `fs.home_roundtrip` creates (and removes) inside the user's home.
+const HOME_TEST_PREFIX: &str = ".vlinux-validate-";
 
 impl<'a, 'p> Run<'a, 'p> {
     fn wants(&self, c: Category) -> bool {
@@ -791,7 +796,11 @@ impl<'a, 'p> Run<'a, 'p> {
                 if !sink.wait_text(&id, ":END\r\n", s.env.step_timeout) {
                     return fail(format!("The shell did not answer within {} ms.", s.env.step_timeout.as_millis()), "The shell may be slow to start; try again.");
                 }
-                match parse_identity(&sink.text(&id)) {
+                let ident = parse_identity(&sink.text(&id));
+                if let Some((user, _)) = &ident {
+                    s.learned.push(user.clone());
+                }
+                match ident {
                     None => fail("The answer could not be read.", "Report this."),
                     Some((user, _)) if user == "root" => fail("The terminal runs as root.", "VLINUX opens your distribution's default user. Check `[user] default=` in /etc/wsl.conf (VLINUX will not change it)."),
                     Some((_, home)) if home.is_empty() || !home.starts_with('/') => fail("HOME is not set to an absolute folder.", "Check the distribution's login configuration."),
@@ -1223,6 +1232,126 @@ impl<'a, 'p> Run<'a, 'p> {
                 }
             },
         );
+
+        // ---- the real home folder (M6.1) ----------------------------------------------------
+        self.check(
+            spec("fs.home_listing", cat, "Home folder listing", "Lists your Linux home folder through the same code the Files app uses (read-only). Only counts are reported - never file names."),
+            |s| {
+                if let Some(v) = s.need_share() {
+                    return v;
+                }
+                let Some(home) = s.home.clone() else {
+                    return fail("The home folder of the default user could not be determined.", "Check that the distribution starts and has a default user.");
+                };
+                let Some(spaces) = s.spaces() else { return skip("No file share.") };
+                let store = ListStore::new();
+                match store.open_dir(spaces, &Location::linux(&home), &ListOptions { show_hidden: true, ..Default::default() }, 500) {
+                    Ok(head) => {
+                        store.close(&head.id);
+                        let count = |k: EntryKind| head.page.entries.iter().filter(|e| e.kind == k).count();
+                        pass(format!(
+                            "Listed {} entries ({} folders, {} files, {} symbolic links{}).",
+                            head.total,
+                            count(EntryKind::Dir),
+                            count(EntryKind::File),
+                            count(EntryKind::Symlink),
+                            if (head.total as usize) > head.page.entries.len() { "; counts cover the first page only" } else { "" }
+                        ))
+                    }
+                    Err(e) if e.kind == FsErrorKind::PermissionDenied => fail("Your home folder was refused as a permission error.", "The default user should own its home folder; check the distribution's permissions."),
+                    Err(e) => fail(e.message, "See the notes in the Files app."),
+                }
+            },
+        );
+
+        self.check(
+            write_spec("fs.home_roundtrip", cat, "Create, rename, copy, move and delete in your home", "Inside ONE new hidden folder in your home (`.vlinux-validate-<token>`) creates a test file, renames it, copies it, moves the copy, then deletes that folder and nothing else. No existing file or folder is read, changed or removed."),
+            |s| {
+                if let Some(v) = s.need_share() {
+                    return v;
+                }
+                if !valid_token(&s.env.token) {
+                    return fail("Internal error: bad diagnostic token.", "Report this.");
+                }
+                let Some(home) = s.home.clone() else {
+                    return fail("The home folder of the default user could not be determined.", "Check that the distribution starts and has a default user.");
+                };
+                if home == "/" || !home.starts_with('/') || home.ends_with('/') {
+                    return skip("The home folder is not an ordinary folder, so no test files were created in it.");
+                }
+                s.home_roundtrip(&home)
+            },
+        );
+    }
+
+    /// The steps of `fs.home_roundtrip`. Everything happens inside `<home>/.vlinux-validate-<token>`,
+    /// which this run creates and removes; it is removed even when a step fails.
+    fn home_roundtrip(&self, home: &str) -> Res {
+        let token = self.env.token.strip_prefix("vlx-").unwrap_or("x").to_string();
+        let name = format!("{HOME_TEST_PREFIX}{token}");
+        let dir = format!("{home}/{name}");
+        let Some(spaces) = self.spaces.clone() else { return skip("No file share.") };
+        let loc = |rel: &str| Location::linux(&format!("{dir}/{rel}"));
+        if let Err(e) = ops::create_dir(&spaces, &Location::linux(home), &name) {
+            return fail(e.message, "The default user could not create a folder in its home; nothing was changed.");
+        }
+        let steps = (|| -> Result<(), String> {
+            ops::create_file(&spaces, &Location::linux(&dir), "t1.txt").map_err(|e| format!("create: {}", e.message))?;
+            let host = spaces.resolve_entry(&loc("t1.txt")).map_err(|e| format!("create: {}", e.message))?.host;
+            let text = "vlinux home check \u{2713}";
+            fs::write(&host, text).map_err(|e| format!("write: {e}"))?;
+            if fs::read_to_string(&host).ok().as_deref() != Some(text) {
+                return Err("write: the text read back differently".into());
+            }
+            ops::rename(&spaces, &loc("t1.txt"), "t2.txt").map_err(|e| format!("rename: {}", e.message))?;
+            let names = self.names_at(&spaces, &dir);
+            if !names.contains(&"t2.txt".to_string()) || names.contains(&"t1.txt".to_string()) {
+                return Err("rename: the listing disagrees with the result".into());
+            }
+            ops::create_dir(&spaces, &Location::linux(&dir), "a").map_err(|e| format!("copy: {}", e.message))?;
+            ops::create_dir(&spaces, &Location::linux(&dir), "b").map_err(|e| format!("move: {}", e.message))?;
+            self.run_transfer(&loc("t2.txt"), &loc("a"), TransferMode::Copy).map_err(|m| format!("copy: {m}"))?;
+            let copied = spaces.resolve_entry(&loc("a/t2.txt")).ok().and_then(|e| fs::read_to_string(e.host).ok());
+            if copied.as_deref() != Some(text) {
+                return Err("copy: the copy is missing or differs".into());
+            }
+            self.run_transfer(&loc("a/t2.txt"), &loc("b"), TransferMode::Move).map_err(|m| format!("move: {m}"))?;
+            let moved = spaces.resolve_entry(&loc("b/t2.txt")).ok().and_then(|e| fs::read_to_string(e.host).ok());
+            let left = spaces.resolve_entry(&loc("a/t2.txt")).ok().and_then(|e| fs::symlink_metadata(e.host).ok());
+            if moved.as_deref() != Some(text) || left.is_some() {
+                return Err("move: the file is not only in the destination".into());
+            }
+            Ok(())
+        })();
+        // Remove exactly the folder this run created (checked against the expected path).
+        let cleaned = if dir == format!("{home}/{HOME_TEST_PREFIX}{token}") {
+            let never = CancelToken::new();
+            let mut cb = |_: &Progress| {};
+            let mut r = Runner::new(&never, &mut cb);
+            let res = ops::delete(&spaces, &[Location::linux(&dir)], true, &mut r);
+            let rep = r.finish();
+            res.is_ok() && rep.failed.is_empty() && self.names_at(&spaces, home).iter().all(|n| n != &name)
+        } else {
+            false
+        };
+        let remove_hint = format!("Remove the folder named {name} from your home folder yourself (it holds only the test files).");
+        match (steps, cleaned) {
+            (Ok(()), true) => pass("Created a folder, a file, renamed, copied and moved it, and removed that folder. Nothing else was touched.").modified(),
+            (Ok(()), false) => fail("The test worked but its folder could not be removed completely.", remove_hint).modified(),
+            (Err(m), true) => fail(format!("A step failed ({m}). The test folder was removed."), "Open the Files app to see the same error in context.").modified(),
+            (Err(m), false) => fail(format!("A step failed ({m}) and the test folder could not be removed."), remove_hint).modified(),
+        }
+    }
+
+    fn names_at(&self, spaces: &Spaces, path: &str) -> Vec<String> {
+        let store = ListStore::new();
+        match store.open_dir(spaces, &Location::linux(path), &ListOptions { show_hidden: true, ..Default::default() }, 1000) {
+            Ok(head) => {
+                store.close(&head.id);
+                head.page.entries.into_iter().map(|e| e.name).collect()
+            }
+            Err(_) => Vec::new(),
+        }
     }
 
     fn entries_in(&self, rel: &str) -> Vec<crate::fs::Entry> {
@@ -1665,6 +1794,7 @@ pub fn run(
         automount: true,
         diag_dir: None,
         session: None,
+        learned: Vec::new(),
     };
     // Runtime always runs: every other category depends on what it finds.
     r.runtime();
@@ -1702,7 +1832,9 @@ pub fn run(
         cancelled,
         diag_dir: r.diag_dir.clone(),
     };
-    report.text = render_text(&report, &env.scrub);
+    let mut scrub = env.scrub.clone();
+    scrub.extend(r.learned.iter().cloned());
+    report.text = render_text(&report, &scrub);
     report
 }
 
@@ -2200,6 +2332,8 @@ mod tests {
             "terminal.close",
             "fs.share_access",
             "fs.enumerate",
+            "fs.home_listing",
+            "fs.home_roundtrip",
             "fs.create_dir",
             "fs.create_file",
             "fs.read_file",
@@ -2246,6 +2380,15 @@ mod tests {
             "x"
         );
         assert!(r.diag_dir.is_none());
+        // The home-folder test removed its own hidden folder and left the user's home as it was.
+        let home_entries: Vec<String> = fs::read_dir(w.root.join("home/dana"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(home_entries.is_empty(), "{home_entries:?}");
+        assert!(get(&r, "fs.home_roundtrip").modified);
+        assert!(!get(&r, "fs.home_listing").message.contains("dana"));
+        assert!(!r.text.contains("dana"), "the report must not name the user");
         assert!(get(&r, "fs.cleanup").modified);
         assert!(get(&r, "terminal.io").modified && !get(&r, "fs.enumerate").modified);
         // Results are grouped by category in order, clean-up last in its group.
@@ -2552,6 +2695,7 @@ mod tests {
             automount: true,
             diag_dir: Some("/home/dana".into()),
             session: None,
+            learned: Vec::new(),
         };
         run_.cleanup();
         assert_eq!(run_.results[0].outcome, Outcome::Failed);
@@ -2775,5 +2919,57 @@ mod tests {
             None
         );
         assert_eq!(parse_identity("nothing here"), None);
+    }
+
+    #[test]
+    fn home_checks_never_touch_existing_files_and_need_permission_to_write() {
+        let w = world(Running);
+        fs::write(w.root.join("home/dana/precious.txt"), "mine").unwrap();
+        fs::create_dir_all(w.root.join("home/dana/Projects")).unwrap();
+        fs::write(w.root.join("home/dana/Projects/x"), "x").unwrap();
+        // Without permission: listing runs (read-only), the write test does not.
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                allow_write: false,
+                ..full()
+            },
+            None,
+        );
+        assert_eq!(get(&r, "fs.home_roundtrip").outcome, Outcome::NotTested);
+        assert!(get(&r, "fs.home_listing").message.contains("2 entries"));
+        assert_eq!(fs::read_dir(w.root.join("home/dana")).unwrap().count(), 2);
+        // With permission: only the test folder appears and disappears.
+        let r = go_with_shell(&w, Mode::Simulated, full());
+        assert_eq!(get(&r, "fs.home_roundtrip").outcome, Outcome::Passed);
+        assert_eq!(fs::read_dir(w.root.join("home/dana")).unwrap().count(), 2);
+        assert_eq!(
+            fs::read_to_string(w.root.join("home/dana/precious.txt")).unwrap(),
+            "mine"
+        );
+        assert_eq!(
+            fs::read_to_string(w.root.join("home/dana/Projects/x")).unwrap(),
+            "x"
+        );
+    }
+
+    #[test]
+    fn a_missing_home_fails_the_roundtrip_without_creating_anything() {
+        let mut w = world(Running);
+        w.ops = FakeDistro::new(w.root.path(), "/home/ghost");
+        let r = go(
+            &w,
+            Mode::Simulated,
+            Options {
+                categories: Some(vec![Category::Filesystem]),
+                ..full()
+            },
+            None,
+        );
+        assert_eq!(get(&r, "fs.home_roundtrip").outcome, Outcome::Failed);
+        assert_ne!(get(&r, "fs.home_listing").outcome, Outcome::Passed);
+        assert!(!w.root.join("home/ghost").exists());
+        assert_eq!(fs::read_dir(w.root.join("home")).unwrap().count(), 1);
     }
 }

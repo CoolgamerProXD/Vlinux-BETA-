@@ -586,6 +586,8 @@ const ROWS: Row[] = [
   { id: 'terminal.close', category: 'terminal', title: 'Session closes', checked: 'The session ends and no process of the diagnostics terminal is left.', writes: true, running: true },
   { id: 'fs.share_access', category: 'filesystem', title: 'File share reachable', checked: "Whether the distribution's files can be reached from Windows and the root listed.", running: true },
   { id: 'fs.enumerate', category: 'filesystem', title: 'Folder listing', checked: 'Listing /etc through the same code the Files app uses.', running: true },
+  { id: 'fs.home_listing', category: 'filesystem', title: 'Home folder listing', checked: 'Lists your Linux home folder through the same code the Files app uses (read-only). Only counts are reported - never file names.', running: true },
+  { id: 'fs.home_roundtrip', category: 'filesystem', title: 'Create, rename, copy, move and delete in your home', checked: 'Inside ONE new hidden folder in your home (`.vlinux-validate-<token>`) creates a test file, renames it, copies it, moves the copy, then deletes that folder and nothing else. No existing file or folder is read, changed or removed.', writes: true, running: true },
   { id: 'fs.create_dir', category: 'filesystem', title: 'Create a folder', checked: 'Creates a temporary folder /tmp/vlinux-diag-<token>.', writes: true, running: true },
   { id: 'fs.create_file', category: 'filesystem', title: 'Create a file', checked: 'Creates an empty file in the diagnostic folder.', writes: true, running: true },
   { id: 'fs.rename', category: 'filesystem', title: 'Rename', checked: 'Renames a file and checks the old name is gone.', writes: true, running: true },

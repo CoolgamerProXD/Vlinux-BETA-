@@ -265,18 +265,22 @@
                 <div class="macts"><button class="btn" data-act="undo" disabled={mapping.busy === f.id} onclick={() => distro && mapping.undo(distro, f.id)}>Undo link</button></div>
               {:else if st.state.state === 'ready'}
                 <small>{st.state.note}</small>
-                {#if st.state.needs && confirming === f.id}
-                  <div class="confirm" role="group" aria-label="Confirm replacing the empty folder">
-                    <p>{st.linux_path} is an empty folder. Confirming replaces <strong>only that empty folder</strong> with a link to your Windows folder. It can be undone.</p>
+                {#if confirming === f.id}
+                  {@const replacing = st.state.needs}
+                  <div class="confirm" role="group" aria-label="Confirm linking {f.label}">
+                    {#if replacing}
+                      <p>{st.linux_path} is an empty folder. Confirming replaces <strong>only that empty folder</strong> with a link to your Windows folder. It can be undone.</p>
+                    {:else}
+                      <p>Confirming creates <strong>one new symbolic link</strong> inside {distro}: <code class="mono">{st.linux_path}</code> will point to <code class="mono">{f.points_to}</code>. Nothing else changes — no file is copied, moved, renamed or deleted, and nothing happens on the Windows side. <strong>Undo link</strong> removes only this link.</p>
+                    {/if}
                     <div class="macts">
-                      <button class="btn danger" data-act="confirm-apply" disabled={mapping.busy === f.id} onclick={() => applyFolder(f.id, st.state.state === 'ready' ? st.state.needs : null)}>Yes, replace the empty folder</button>
+                      <button class="btn danger" data-act="confirm-apply" disabled={mapping.busy === f.id} onclick={() => applyFolder(f.id, st.state.state === 'ready' ? st.state.needs : null)}>{replacing ? 'Yes, replace the empty folder' : 'Yes, create the link'}</button>
                       <button class="btn" onclick={() => (confirming = null)}>Cancel</button>
                     </div>
                   </div>
                 {:else}
                   <div class="macts">
-                    <button class="btn primary" data-act="apply" disabled={mapping.busy === f.id}
-                            onclick={() => (st.state.state === 'ready' && st.state.needs ? (confirming = f.id) : applyFolder(f.id, null))}>{st.state.needs ? 'Review and apply…' : 'Apply'}</button>
+                    <button class="btn primary" data-act="apply" disabled={mapping.busy === f.id} onclick={() => (confirming = f.id)}>Review and apply…</button>
                   </div>
                 {/if}
               {:else if st.state.state === 'conflict'}

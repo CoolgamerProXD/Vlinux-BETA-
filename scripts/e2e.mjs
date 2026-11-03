@@ -630,7 +630,10 @@ try {
   check('Confirm is disabled until the user picks an option', await page.$eval('.folder[data-folder="documents"] [data-act="apply-resolution"]', (b) => b.disabled));
   check('the foreign symlink is described and has its own offer', (await text(page, '.folder[data-folder="music"] .conflict')).includes('/opt/music') && (await count(page, '.folder[data-folder="music"] .offer')) >= 1);
 
-  await page.click('.folder[data-folder="downloads"] [data-act="apply"]'); await sleep(500);
+  await page.click('.folder[data-folder="downloads"] [data-act="apply"]'); await sleep(250);
+  const dlText = await text(page, '.folder[data-folder="downloads"] .confirm');
+  check('M6.1: even a plain Apply first says exactly what will change and waits for a click', (await st3('downloads')) === 'ready' && dlText.includes('one new symbolic link') && dlText.includes('~/Downloads') && dlText.includes('no file is copied, moved, renamed or deleted') && dlText.includes('Undo link'), dlText);
+  await page.click('.folder[data-folder="downloads"] [data-act="confirm-apply"]'); await sleep(500);
   check('Apply on a missing folder connects it, verified', (await st3('downloads')) === 'applied' && (await text(page, '.folder[data-folder="downloads"] [data-badge]')) === 'Connected');
   await page.click('.folder[data-folder="pictures"] [data-act="apply"]'); await sleep(250);
   check('replacing an empty folder asks for explicit confirmation first', (await count(page, '.folder[data-folder="pictures"] [data-act="confirm-apply"]')) === 1 && (await st3('pictures')) === 'ready');

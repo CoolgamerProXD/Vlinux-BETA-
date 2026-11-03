@@ -348,6 +348,10 @@ pub fn windows_to_wsl(path: &str, mount_root: &str, drives: &dyn DriveInspector)
             wsl_path,
             message: format!("Drive {}: is removable media; the folder will be unavailable while it is disconnected.", letter.to_ascii_uppercase()),
         },
+        _ if comps.iter().any(|c| c.to_ascii_lowercase().starts_with("onedrive")) => Verdict::Warning {
+            wsl_path,
+            message: "This folder is synchronised by OneDrive. Online-only files may not open from Linux until Windows downloads them, and changes made from Linux are synchronised to the cloud.".to_string(),
+        },
         _ => Verdict::Supported { wsl_path },
     }
 }
@@ -553,6 +557,26 @@ mod tests {
 
     fn sup(p: &str) -> Verdict {
         windows_to_wsl(p, "/mnt", &fixed())
+    }
+
+    #[test]
+    fn onedrive_folders_are_usable_but_carry_a_caveat() {
+        for p in [
+            r"C:\Users\Someone\OneDrive\Documents",
+            r"C:\Users\Someone\OneDrive - Contoso Ltd\Pictures",
+            r"D:\onedrive\Desktop",
+        ] {
+            match sup(p) {
+                Verdict::Warning { wsl_path, message } => {
+                    assert!(wsl_path.starts_with("/mnt/"), "{wsl_path}");
+                    assert!(message.contains("OneDrive"), "{message}");
+                }
+                other => panic!("{p}: {other:?}"),
+            }
+        }
+        // A folder that merely contains the word elsewhere in a longer name is not flagged.
+        assert!(matches!(sup(r"C:\Users\Someone\My OneDrive notes"), Verdict::Supported { .. }));
+        assert!(matches!(sup(r"C:\Users\Someone\Documents"), Verdict::Supported { .. }));
     }
 
     #[test]
