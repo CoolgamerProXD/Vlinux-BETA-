@@ -10,7 +10,27 @@ $ErrorActionPreference = 'Stop'
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class VlxWin {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder sb, int n);
+  // The top-level window of a process whose title starts with `title` (found even when minimised;
+  // Process.MainWindowHandle can pick one of WebView2's tiny helper windows instead).
+  public static IntPtr FindByTitle(uint pid, string title) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows(delegate (IntPtr h, IntPtr l) {
+      uint p;
+      GetWindowThreadProcessId(h, out p);
+      if (p == pid) {
+        StringBuilder sb = new StringBuilder(256);
+        GetWindowText(h, sb, 256);
+        if (sb.ToString().StartsWith(title)) { found = h; return false; }
+      }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool r);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
@@ -29,7 +49,8 @@ public static class VlxWin {
 "@
 $p = Get-Process -Name $Proc -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $p) { throw "no window for process $Proc" }
-$h = $p.MainWindowHandle
+$h = [VlxWin]::FindByTitle([uint32]$p.Id, 'VLINUX')
+if ($h -eq [IntPtr]::Zero) { $h = $p.MainWindowHandle }
 
 function Set-Focus {
   $fg = [VlxWin]::GetForegroundWindow()
@@ -67,8 +88,8 @@ switch ($Action) {
   'focus'   { Set-Focus; Write-Output 'ok' }
   'keys'    { Set-Focus; foreach ($ch in ($Arg -split ' ')) { if ($ch) { Send-Chord $ch } }; Start-Sleep -Milliseconds 200; Write-Output 'ok' }
   'move'    { $v = $Arg.Split(',') | ForEach-Object { [int]$_ }; [void][VlxWin]::MoveWindow($h, $v[0], $v[1], $v[2], $v[3], $true); Write-Output 'ok' }
-  'info'    { $fg = [VlxWin]::GetForegroundWindow(); Write-Output ("session=$($p.SessionId) interactive=$([Environment]::UserInteractive) foregroundIsVlinux=$($fg -eq $h) visible=$([VlxWin]::IsWindowVisible($h)) iconic=$([VlxWin]::IsIconic($h))") }
-  'watch'   { 1..16 | ForEach-Object { $r = New-Object VlxWin+RECT; [void][VlxWin]::GetWindowRect($h, [ref]$r); $st = [VlxWin]::GetWindowLongPtr($h, -16).ToInt64(); Write-Output ("t=$($_ * 200)ms iconic=$([VlxWin]::IsIconic($h)) visible=$([VlxWin]::IsWindowVisible($h)) left=$($r.L) top=$($r.T) w=$($r.R - $r.L) h=$($r.B - $r.T) minimizeStyle=$(($st -band 0x20000000) -ne 0)"); Start-Sleep -Milliseconds 200 } }
+  'info'    { $fg = [VlxWin]::GetForegroundWindow(); Write-Output ("window=0x$($h.ToString('X')) session=$($p.SessionId) interactive=$([Environment]::UserInteractive) foregroundIsVlinux=$($fg -eq $h) visible=$([VlxWin]::IsWindowVisible($h)) iconic=$([VlxWin]::IsIconic($h))") }
+  'watch'   { 1..16 | ForEach-Object { $r = New-Object VlxWin+RECT; [void][VlxWin]::GetWindowRect($h, [ref]$r); $st = [VlxWin]::GetWindowLongPtr($h, -16).ToInt64(); Write-Output ("t=$($_ * 200)ms hwnd=0x$($h.ToString('X')) iconic=$([VlxWin]::IsIconic($h)) visible=$([VlxWin]::IsWindowVisible($h)) left=$($r.L) top=$($r.T) w=$($r.R - $r.L) h=$($r.B - $r.T) minimizeStyle=$(($st -band 0x20000000) -ne 0)"); Start-Sleep -Milliseconds 200 } }
   'iconic'  { Write-Output ([VlxWin]::IsIconic($h)) }
   'restore' { [void][VlxWin]::ShowWindow($h, 9); Set-Focus; Write-Output 'ok' }
 }
