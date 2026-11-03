@@ -84,6 +84,22 @@ try {
   os = typed === 'vlx';
   console.log(`canary: typed ${JSON.stringify(typed)} (expected "vlx"); ${info}`);
 } catch (e) { console.log('focus/canary helper failed: ' + String(e).slice(0, 300)); }
+// Diagnose WHERE real keystrokes go: log every keydown the page receives, then send a harmless key
+// (F7 - no handler) with nothing focused, and again with a text box focused.
+await page.evaluate(() => { window.__keys = []; window.addEventListener('keydown', (e) => window.__keys.push(`${e.ctrlKey ? 'Ctrl+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.code}${e.defaultPrevented ? '(handled)' : ''}`), true); });
+const keysSeen = () => page.evaluate(() => [...window.__keys]);
+let delivered = { nothingFocused: null, textBoxFocused: null };
+if (os) {
+  await page.evaluate(() => { const i = document.getElementById('vlx-canary'); i?.blur(); document.body.focus?.(); });
+  await page.evaluate(() => { window.__keys.length = 0; });
+  ps('keys', '{F7}'); await sleep(300);
+  delivered.nothingFocused = (await keysSeen()).some((k) => k.includes('F7'));
+  await page.evaluate(() => { window.__keys.length = 0; document.getElementById('vlx-canary')?.focus(); });
+  ps('keys', '{F7}'); await sleep(300);
+  delivered.textBoxFocused = (await keysSeen()).some((k) => k.includes('F7'));
+  console.log(`delivery of a plain F7 key: nothing focused=${delivered.nothingFocused}, text box focused=${delivered.textBoxFocused}`);
+  await page.evaluate(() => { window.__keys.length = 0; });
+}
 await page.evaluate(() => document.getElementById('vlx-canary')?.remove());
 await page.evaluate(() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur());
 const kind = os ? '[OS key]' : '[CDP key]';
@@ -92,7 +108,7 @@ console.log(`::notice title=Desktop smoke input::${os ? 'real operating-system k
 const CDP = { 'F11': ['F11'], 'ESC': ['Escape'], 'ALTF1': ['Alt', 'F1'], 'ALT2': ['Alt', 'Digit2'], 'ALT1': ['Alt', 'Digit1'], 'ALTW': ['Alt', 'KeyW'], 'POWER': ['Alt', 'Shift', 'KeyQ'], 'CAQ': ['Control', 'Alt', 'KeyQ'] };
 const SEND = { 'F11': '{F11}', 'ESC': '{ESC}', 'ALTF1': '%{F1}', 'ALT2': '%2', 'ALT1': '%1', 'ALTW': '%w', 'POWER': '%+q', 'CAQ': '^%q' };
 async function press(id) {
-  if (os) { ps('keys', SEND[id]); return; }
+  if (os) { await page.evaluate(() => { window.__keys.length = 0; }); ps('keys', SEND[id]); await sleep(150); console.log(`  sent ${id}: page saw [${(await keysSeen()).join(', ')}]`); return; }
   const keys = CDP[id];
   for (const k of keys) await page.keyboard.down(k);
   for (const k of [...keys].reverse()) await page.keyboard.up(k);

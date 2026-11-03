@@ -373,7 +373,7 @@ jobs:
           node scripts/desktop-smoke.mjs 2>&1 | Tee-Object -FilePath artifacts/desktop-smoke.log
           $desk = $LASTEXITCODE
           $dtext = (Get-Content artifacts/desktop-smoke.log -Raw)
-          if ($dtext.Length -gt 3500) { $dtext = $dtext.Substring(0, 3500) }
+          if ($dtext.Length -gt 9000) { $dtext = $dtext.Substring(0, 9000) }
           $global:LASTEXITCODE = 0
           # (a warning, not a notice: this step already uses up GitHub's notice-annotation allowance)
           Write-Host ("::warning title=Desktop smoke log (exit $desk)::" + ($dtext -replace "`r","" -replace "%","%25" -replace "`n","%0A"))
