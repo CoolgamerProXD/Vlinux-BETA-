@@ -1,4 +1,4 @@
-# VLINUX validation evidence (M6)
+# VLINUX validation evidence (M6 and M6.1)
 
 This page separates **what was actually run, and where**. Three kinds of evidence exist:
 
@@ -90,3 +90,74 @@ New in M6: `terminal.identity` diagnostic with unit tests (the echoed command is
 * Everything involving a real distribution is unverified until run on the target PC (one short workflow is in the README).
 * WebView2 remote debugging could not be enabled through the environment variable, so the CDP smoke uses a copy built with the flag; the installed production binary was only checked for launch, memory and CPU, not driven.
 * Performance numbers are from a CI runner.
+
+---
+
+# M6.1 — real Arch integration validation and fixes
+
+## 7. What the user confirmed on the real PC (reported, not reproduced here)
+
+| Item | Result |
+|---|---|
+| Installer runs, desktop launches | **Works** (user-reported) |
+| `archlinux` is listed, accessible and can be set as preferred | **Works** (user-reported) |
+| Terminal opens; `whoami` | **`SMP`** (user-reported) |
+| Diagnostics report, Files browsing, shared folders, desktop shortcuts | **Not yet reported** — see the checklist in section 11 |
+
+## 8. Gaps found, and what was done
+
+| Area | Finding | Action | Evidence |
+|---|---|---|---|
+| Files / Linux filesystem | Diagnostics only wrote inside `/tmp/vlinux-diag-…`; nothing ever listed or wrote in the real home. | Two new checks: `fs.home_listing` (read-only, counts only, no names) and `fs.home_roundtrip` (needs the write permission): creates ONE hidden uniquely named folder `~/.vlinux-validate-<token>`, then create/write/read/rename/copy/move **inside it**, deletes **only that folder** (path asserted first) and verifies it is gone. Existing files are never opened, renamed, copied or deleted. | 3 new unit tests (existing home files and folders survive; no write without permission; a missing home fails without creating anything). **Simulated** until the PC run. |
+| Shared folders | "Apply" could create the link straight from the button. | Apply now always opens a review panel stating the exact change: one new symbolic link, its target, "no file is copied, moved, renamed or deleted", and that **Undo link** removes only that link. | e2e (264/264). |
+| Known Folders | Redirected folders are resolved by the OS (`SHGetKnownFolderPath`), correct for OneDrive/other drives, but a OneDrive-synced folder gave no hint that online-only files may not open from Linux. | New verdict **Warning** for any path component starting with `OneDrive`. Linking is still allowed (it is a caveat, not a block). | 1 new unit test. |
+| Diagnostics privacy | The Linux user was scrubbed only if the distribution had been inspected first. | The terminal check now adds the user it discovers (`id -un`) to the scrub list for that run's copyable report. | Covered by the existing "no user names" tests; real run still needed. |
+| Full-screen toggle | **Real bug, found in the real window:** after leaving full screen, F11 and the top-bar button did nothing (they toggled from a cached flag that the window's change event had not refreshed). | `host.toggleFullscreen()` asks the window for its real state, and the flag is re-read (debounced) on every resize. | 3 new vitest tests + real-window smoke (below). |
+| Return to Windows / shortcuts | Never exercised in a real window. | New real-window desktop smoke (section 9). | CI-real. |
+
+## 9. Desktop integration in the REAL window (CI-real, GitHub runner — not the Dell)
+
+`scripts/desktop-smoke.mjs` + `scripts/win-input.ps1` drive the real `vlinux.exe` window under WebView2 on the runner. Keys are **real operating-system key events** (`keybd_event` with hardware scan codes, delivered to the foreground window — a first attempt with `SendKeys` was dropped because it omits scan codes and Chromium then reports an empty `KeyboardEvent.code`; that was a test-tool artefact, not an app bug). A canary types three letters into a text box first; if real keys did not arrive the script says so and falls back to CDP-injected keys, labelling every check.
+
+Last run (commit `9a13473`, **18/18 with real OS keystrokes**):
+
+| Check | Result |
+|---|---|
+| Starts in full screen (default setting) | pass |
+| F11 leaves full screen / F11 enters full screen | pass / pass |
+| Real window resized to ~904×601; dock and top bar stay fully inside | pass / pass |
+| Alt+F1 opens the launcher, Esc closes it | pass / pass |
+| Alt+2 → workspace 2, Alt+1 → workspace 1 | pass / pass |
+| Alt+Shift+Q opens the power menu, Esc closes it | pass / pass |
+| A window opens from the dock, Alt+W closes it, it opens again | pass / pass / pass |
+| **Ctrl+Alt+Q** leaves full screen **and the window is really minimised** (`IsIconic`) | pass |
+| Restore from minimised: the desktop is unchanged | pass |
+| Top-bar button enters full screen; no script errors | pass / pass |
+
+Honest notes: restoring was done by the test with `ShowWindow(SW_RESTORE)`, not by clicking the taskbar button; the Windows key/Alt+Tab were not exercised; only one monitor of 1024×768; the earlier failing runs (a stale full-screen flag, and my own helper picking WebView2's 16×16 helper window instead of the app window) were fixed before this result.
+
+## 10. Real vs simulated — summary
+
+| Layer | Real? |
+|---|---|
+| Windows build, installer, shortcuts, launch, uninstall, WebView2 rendering, IPC, CSP, shortcuts, full-screen, resize, minimise | **CI-real** (GitHub runner) |
+| WSL detection, listing, state, preferred selection, terminal as `SMP` | **Real on the user's PC** (user-reported) — but no VLINUX test produced evidence for it |
+| Terminal I/O, resize, close through WSL | Real PTY on `sh`/`cmd.exe` in CI; **not** through WSL |
+| Files in `/home/SMP` over `\\wsl.localhost` | **Not verified** until the home round-trip runs on the PC |
+| Shared-folder mapping on the user's Arch | **Not verified, nothing applied**; the engine is tested against temp-dir distro roots |
+| `/etc/wsl.conf` read/preview/backup/restore | Simulated |
+| Desktop **shortcut/Start Menu entries** | Created and found by the installer e2e on the runner; not opened on the PC |
+
+## 11. Safe tests for the real machine (all optional, all reversible)
+
+**A. Real home-folder round-trip (one click).** Distributions → Diagnostics → tick both permission boxes → Run → Copy report. The `fs.home_listing` and `fs.home_roundtrip` rows say *Real WSL* when they ran against your Arch. The only thing written is one hidden folder `~/.vlinux-validate-<token>` that is removed again; a leftover would be named in the failure message and can be deleted by hand. *Status: unverified until you report it.*
+
+**B. Shared folder, in a dedicated empty folder.**
+1. In Windows create an **empty** folder, for example `D:\VlinuxTest` (or any local drive; not a OneDrive folder).
+2. VLINUX → Settings → Linux folders → choose an unused folder you do not need (Videos is a good one) → set it to *Shared*, paste the Windows path into the box, press **Check**, then **Use this folder** (this only saves a preference; no link exists yet).
+3. **Check status** (looks inside your Arch, and starts it if it is stopped, as the page says): it shows whether the link exists. If `~/Videos` already holds files VLINUX stops and says so; it never replaces a non-empty folder.
+4. **Review and apply…**: read the panel (one symbolic link, target, nothing copied/moved/deleted) and confirm. Open Files → `~/Videos`; create a file there and see it in the Windows folder.
+5. **Undo link** removes only the link; the Windows folder and its files stay.
+
+Do not point a mapping at Documents, Desktop or Pictures first: they are usually OneDrive-redirected (the app warns), and they hold your real files.
+
