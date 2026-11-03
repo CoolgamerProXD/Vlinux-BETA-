@@ -2,7 +2,7 @@
 # Sends REAL keystrokes to the foreground window and moves/restores the REAL window; it touches
 # nothing but the process named by -Proc and never needs administrator rights.
 param(
-  [Parameter(Mandatory = $true)][ValidateSet('focus', 'keys', 'move', 'iconic', 'restore', 'info')][string]$Action,
+  [Parameter(Mandatory = $true)][ValidateSet('focus', 'keys', 'move', 'iconic', 'restore', 'info', 'watch')][string]$Action,
   [string]$Arg = '',
   [string]$Proc = 'vlinux-cdp'
 )
@@ -22,6 +22,9 @@ public static class VlxWin {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint type);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int i);
 }
 "@
 $p = Get-Process -Name $Proc -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
@@ -65,6 +68,7 @@ switch ($Action) {
   'keys'    { Set-Focus; foreach ($ch in ($Arg -split ' ')) { if ($ch) { Send-Chord $ch } }; Start-Sleep -Milliseconds 200; Write-Output 'ok' }
   'move'    { $v = $Arg.Split(',') | ForEach-Object { [int]$_ }; [void][VlxWin]::MoveWindow($h, $v[0], $v[1], $v[2], $v[3], $true); Write-Output 'ok' }
   'info'    { $fg = [VlxWin]::GetForegroundWindow(); Write-Output ("session=$($p.SessionId) interactive=$([Environment]::UserInteractive) foregroundIsVlinux=$($fg -eq $h) visible=$([VlxWin]::IsWindowVisible($h)) iconic=$([VlxWin]::IsIconic($h))") }
+  'watch'   { 1..16 | ForEach-Object { $r = New-Object VlxWin+RECT; [void][VlxWin]::GetWindowRect($h, [ref]$r); $st = [VlxWin]::GetWindowLongPtr($h, -16).ToInt64(); Write-Output ("t=$($_ * 200)ms iconic=$([VlxWin]::IsIconic($h)) visible=$([VlxWin]::IsWindowVisible($h)) left=$($r.L) top=$($r.T) w=$($r.R - $r.L) h=$($r.B - $r.T) minimizeStyle=$(($st -band 0x20000000) -ne 0)"); Start-Sleep -Milliseconds 200 } }
   'iconic'  { Write-Output ([VlxWin]::IsIconic($h)) }
   'restore' { [void][VlxWin]::ShowWindow($h, 9); Set-Focus; Write-Output 'ok' }
 }

@@ -35,7 +35,7 @@ const skipNote = (name, why) => {
   console.log(`SKIP  ${name}  -  ${why}`);
 };
 const ps = (action, arg = '') =>
-  execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', helper, '-Action', action, '-Arg', arg, '-Proc', proc], { encoding: 'utf8', timeout: 30000 }).trim();
+  execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', helper, '-Action', action, '-Arg', arg, '-Proc', proc], { encoding: 'utf8', timeout: 90000 }).trim();
 
 let browser;
 for (let i = 0; i < 30 && !browser; i++) {
@@ -73,7 +73,7 @@ const until = async (pred, ms = 5000) => {
 // CI session) drops injected input, shortcuts are tested with CDP-injected keys and labelled so.
 let os = false;
 let info = '';
-try {
+for (let attempt = 0; attempt < 2 && !os; attempt++) try {
   ps('focus');
   await sleep(300);
   info = ps('info');
@@ -87,7 +87,7 @@ try {
 // Diagnose WHERE real keystrokes go: log every keydown the page receives (capture phase). A harmless
 // letter is sent first with nothing focused. (Not F7: that opens Chromium's caret-browsing prompt and
 // steals the keyboard.)
-await page.evaluate(() => document.getElementById('vlx-canary')?.remove());
+await page.evaluate(() => document.querySelectorAll('#vlx-canary').forEach((e) => e.remove()));
 await page.evaluate(() => { window.__keys = []; window.addEventListener('keydown', (e) => window.__keys.push(`${e.ctrlKey ? 'Ctrl+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.code || 'key:' + e.key}${e.defaultPrevented ? '(handled)' : ''}`), true); });
 const keysSeen = () => page.evaluate(() => [...window.__keys]);
 let delivered = null;
@@ -104,7 +104,7 @@ console.log(`::notice title=Desktop smoke input::${os ? 'real operating-system k
 const CDP = { 'F11': ['F11'], 'ESC': ['Escape'], 'ALTF1': ['Alt', 'F1'], 'ALT2': ['Alt', 'Digit2'], 'ALT1': ['Alt', 'Digit1'], 'ALTW': ['Alt', 'KeyW'], 'POWER': ['Alt', 'Shift', 'KeyQ'], 'CAQ': ['Control', 'Alt', 'KeyQ'] };
 const SEND = { 'F11': 'F11', 'ESC': 'Esc', 'ALTF1': 'Alt+F1', 'ALT2': 'Alt+2', 'ALT1': 'Alt+1', 'ALTW': 'Alt+W', 'POWER': 'Alt+Shift+Q', 'CAQ': 'Ctrl+Alt+Q' };
 async function press(id) {
-  if (os) { await page.evaluate(() => { window.__keys.length = 0; }); ps('keys', SEND[id]); await sleep(150); console.log(`  sent ${id}: page saw [${(await keysSeen()).join(', ')}]`); return; }
+  if (os) { await page.evaluate(() => { window.__keys.length = 0; }); try { ps('keys', SEND[id]); } catch (e) { console.log(`  OS key helper failed for ${id}: ${String(e).slice(0, 120)}`); } await sleep(150); console.log(`  sent ${id}: page saw [${(await keysSeen()).join(', ')}]`); return; }
   const keys = CDP[id];
   for (const k of keys) await page.keyboard.down(k);
   for (const k of [...keys].reverse()) await page.keyboard.up(k);
@@ -192,7 +192,8 @@ if (!returned) {
   console.log(`  toast after Ctrl+Alt+Q: ${toast || '(none)'}`);
   const r = await page.evaluate(async () => { try { await window.__TAURI_INTERNALS__.invoke('exit_to_windows'); return 'ok'; } catch (e) { return String(e?.message ?? e); } });
   await sleep(1500);
-  console.log(`  direct exit_to_windows invoke: ${r}; minimised=${ps('iconic')}`);
+  console.log(`  direct exit_to_windows invoke: ${r}`);
+  console.log('  window timeline after the direct call:\n    ' + ps('watch').replace(/\r?\n/g, '\n    '));
 }
 
 ps('restore');
