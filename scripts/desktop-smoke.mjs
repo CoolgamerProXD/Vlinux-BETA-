@@ -3,7 +3,7 @@
 //   full screen, F11, Ctrl+Alt+Q (return to Windows), resize, launcher, workspaces, power menu and
 //   closing/reopening windows.
 //
-// Keys are sent as REAL operating-system keystrokes (scripts/win-input.ps1 -> SendKeys) to the
+// Keys are sent as REAL operating-system keystrokes (scripts/win-input.ps1 -> keybd_event) to the
 // foreground window, so they pass through Windows and WebView2 the way a user's keyboard does. When
 // Windows will not give the window the foreground (a CI session quirk), the same checks fall back to
 // keys injected over CDP and are labelled "[CDP key]" - those prove the app's key handling, not
@@ -78,7 +78,7 @@ try {
   await sleep(300);
   info = ps('info');
   await page.evaluate(() => { const i = document.createElement('input'); i.id = 'vlx-canary'; i.style.cssText = 'position:fixed;left:0;top:0;z-index:99999'; document.body.appendChild(i); i.focus(); });
-  ps('keys', 'vlx');
+  ps('keys', 'V L X');
   await sleep(300);
   const typed = await page.evaluate(() => document.getElementById('vlx-canary')?.value ?? '');
   os = typed === 'vlx';
@@ -86,16 +86,16 @@ try {
 } catch (e) { console.log('focus/canary helper failed: ' + String(e).slice(0, 300)); }
 // Diagnose WHERE real keystrokes go: log every keydown the page receives, then send a harmless key
 // (F7 - no handler) with nothing focused, and again with a text box focused.
-await page.evaluate(() => { window.__keys = []; window.addEventListener('keydown', (e) => window.__keys.push(`${e.ctrlKey ? 'Ctrl+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.code}${e.defaultPrevented ? '(handled)' : ''}`), true); });
+await page.evaluate(() => { window.__keys = []; window.addEventListener('keydown', (e) => window.__keys.push(`${e.ctrlKey ? 'Ctrl+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.code || 'key:' + e.key}${e.defaultPrevented ? '(handled)' : ''}`), true); });
 const keysSeen = () => page.evaluate(() => [...window.__keys]);
 let delivered = { nothingFocused: null, textBoxFocused: null };
 if (os) {
   await page.evaluate(() => { const i = document.getElementById('vlx-canary'); i?.blur(); document.body.focus?.(); });
   await page.evaluate(() => { window.__keys.length = 0; });
-  ps('keys', '{F7}'); await sleep(300);
+  ps('keys', 'F7'); await sleep(300);
   delivered.nothingFocused = (await keysSeen()).some((k) => k.includes('F7'));
   await page.evaluate(() => { window.__keys.length = 0; document.getElementById('vlx-canary')?.focus(); });
-  ps('keys', '{F7}'); await sleep(300);
+  ps('keys', 'F7'); await sleep(300);
   delivered.textBoxFocused = (await keysSeen()).some((k) => k.includes('F7'));
   console.log(`delivery of a plain F7 key: nothing focused=${delivered.nothingFocused}, text box focused=${delivered.textBoxFocused}`);
   await page.evaluate(() => { window.__keys.length = 0; });
@@ -103,10 +103,10 @@ if (os) {
 await page.evaluate(() => document.getElementById('vlx-canary')?.remove());
 await page.evaluate(() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur());
 const kind = os ? '[OS key]' : '[CDP key]';
-console.log(`::notice title=Desktop smoke input::${os ? 'real operating-system keystrokes (SendKeys) reach the page' : 'real OS keystrokes did NOT reach the page in this CI session (' + info + '); shortcuts are tested with keys injected over CDP, which proves the app\'s key handling but not Windows\' delivery'}`);
+console.log(`::notice title=Desktop smoke input::${os ? 'real operating-system keystrokes (keybd_event with scan codes) reach the page' : 'real OS keystrokes did NOT reach the page in this CI session (' + info + '); shortcuts are tested with keys injected over CDP, which proves the app\'s key handling but not Windows\' delivery'}`);
 
 const CDP = { 'F11': ['F11'], 'ESC': ['Escape'], 'ALTF1': ['Alt', 'F1'], 'ALT2': ['Alt', 'Digit2'], 'ALT1': ['Alt', 'Digit1'], 'ALTW': ['Alt', 'KeyW'], 'POWER': ['Alt', 'Shift', 'KeyQ'], 'CAQ': ['Control', 'Alt', 'KeyQ'] };
-const SEND = { 'F11': '{F11}', 'ESC': '{ESC}', 'ALTF1': '%{F1}', 'ALT2': '%2', 'ALT1': '%1', 'ALTW': '%w', 'POWER': '%+q', 'CAQ': '^%q' };
+const SEND = { 'F11': 'F11', 'ESC': 'Esc', 'ALTF1': 'Alt+F1', 'ALT2': 'Alt+2', 'ALT1': 'Alt+1', 'ALTW': 'Alt+W', 'POWER': 'Alt+Shift+Q', 'CAQ': 'Ctrl+Alt+Q' };
 async function press(id) {
   if (os) { await page.evaluate(() => { window.__keys.length = 0; }); ps('keys', SEND[id]); await sleep(150); console.log(`  sent ${id}: page saw [${(await keysSeen()).join(', ')}]`); return; }
   const keys = CDP[id];
