@@ -1003,7 +1003,6 @@ mod tests {
         assert!(rep.failed.is_empty());
     }
 
-
     // ---- M6.2: link deletion (real diagnostic: "Deleting the link reported errors") --------
 
     #[cfg(unix)]
@@ -1015,13 +1014,21 @@ mod tests {
         l.file("home/me/target-dir/inside.txt", "inside");
         l.file("home/me/target-file.txt", "file");
         symlink(l.join("home/me/target-dir"), l.join("home/me/dir-link")).unwrap();
-        symlink(l.join("home/me/target-file.txt"), l.join("home/me/file-link")).unwrap();
+        symlink(
+            l.join("home/me/target-file.txt"),
+            l.join("home/me/file-link"),
+        )
+        .unwrap();
         symlink(l.join("home/me/does-not-exist"), l.join("home/me/dangling")).unwrap();
         let s = spaces(&l, &w);
         let (r, rep, _) = run_with(|run| {
             delete(
                 &s,
-                &[lin("/home/me/dir-link"), lin("/home/me/file-link"), lin("/home/me/dangling")],
+                &[
+                    lin("/home/me/dir-link"),
+                    lin("/home/me/file-link"),
+                    lin("/home/me/dangling"),
+                ],
                 true,
                 run,
             )
@@ -1030,10 +1037,19 @@ mod tests {
         assert!(rep.failed.is_empty(), "{:?}", rep.failed);
         assert_eq!(rep.items_done, 3);
         for gone in ["dir-link", "file-link", "dangling"] {
-            assert!(fs::symlink_metadata(l.join(&format!("home/me/{gone}"))).is_err(), "{gone}");
+            assert!(
+                fs::symlink_metadata(l.join(&format!("home/me/{gone}"))).is_err(),
+                "{gone}"
+            );
         }
-        assert_eq!(fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(), "inside");
-        assert_eq!(fs::read_to_string(l.join("home/me/target-file.txt")).unwrap(), "file");
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
+            "inside"
+        );
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/target-file.txt")).unwrap(),
+            "file"
+        );
     }
 
     /// Makes `dir` unwritable for this (non-root) user so removing an entry in it fails on the host
@@ -1098,7 +1114,11 @@ mod tests {
         use std::os::unix::fs::symlink;
         l.file("home/me/target-dir/inside.txt", "inside");
         l.dir("home/me/links");
-        symlink(l.join("home/me/target-dir"), l.join("home/me/links/dir-link")).unwrap();
+        symlink(
+            l.join("home/me/target-dir"),
+            l.join("home/me/links/dir-link"),
+        )
+        .unwrap();
         Locked::new(l.join("home/me/links"))
     }
 
@@ -1107,7 +1127,9 @@ mod tests {
     fn a_link_windows_cannot_remove_is_unlinked_inside_the_distribution() {
         let l = TempDir::new("l");
         let w = TempDir::new("w");
-        let Some(lock) = locked_link_world(&l) else { return };
+        let Some(lock) = locked_link_world(&l) else {
+            return;
+        };
         let s = spaces(&l, &w);
         let rm = FakeUnlink {
             calls: Default::default(),
@@ -1122,9 +1144,15 @@ mod tests {
         r.unwrap();
         assert!(rep.failed.is_empty(), "{:?}", rep.failed);
         assert_eq!(rep.items_done, 1);
-        assert_eq!(*rm.calls.borrow(), vec!["/home/me/links/dir-link".to_string()]);
+        assert_eq!(
+            *rm.calls.borrow(),
+            vec!["/home/me/links/dir-link".to_string()]
+        );
         assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_err());
-        assert_eq!(fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(), "inside");
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
+            "inside"
+        );
     }
 
     #[cfg(unix)]
@@ -1132,9 +1160,14 @@ mod tests {
     fn a_link_nobody_can_remove_is_reported_with_both_reasons_and_nothing_else_is_touched() {
         let l = TempDir::new("l");
         let w = TempDir::new("w");
-        let Some(lock) = locked_link_world(&l) else { return };
+        let Some(lock) = locked_link_world(&l) else {
+            return;
+        };
         let s = spaces(&l, &w);
-        for (succeed, expect) in [(false, "also failed (Permission denied)"), (true, "still present")] {
+        for (succeed, expect) in [
+            (false, "also failed (Permission denied)"),
+            (true, "still present"),
+        ] {
             let rm = FakeUnlink {
                 calls: Default::default(),
                 root: l.path().to_path_buf(),
@@ -1148,9 +1181,16 @@ mod tests {
             r.unwrap();
             assert_eq!(rep.items_done, 0);
             assert_eq!(rep.failed.len(), 1, "{:?}", rep.failed);
-            assert!(rep.failed[0].message.contains(expect), "{}", rep.failed[0].message);
+            assert!(
+                rep.failed[0].message.contains(expect),
+                "{}",
+                rep.failed[0].message
+            );
             assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_ok());
-            assert_eq!(fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(), "inside");
+            assert_eq!(
+                fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
+                "inside"
+            );
         }
         // Without a fallback the host error is reported unchanged, never hidden.
         let (_, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/links/dir-link")], true, run));
@@ -1167,7 +1207,12 @@ mod tests {
         l.file("f.txt", "x");
         symlink(l.join("d"), l.join("dlink")).unwrap();
         symlink(l.join("f.txt"), l.join("flink")).unwrap();
-        for (name, is_link) in [("d", false), ("f.txt", false), ("dlink", true), ("flink", true)] {
+        for (name, is_link) in [
+            ("d", false),
+            ("f.txt", false),
+            ("dlink", true),
+            ("flink", true),
+        ] {
             let own = fs::symlink_metadata(l.join(name)).unwrap();
             let listed = enumerated_meta(&l.join(name)).expect(name);
             assert_eq!(linkish(&own), is_link, "{name} (own)");
@@ -1178,11 +1223,20 @@ mod tests {
 
     #[test]
     fn link_paths_for_the_distribution_come_only_from_inside_its_root() {
-        let ctx = DelCtx { root: Some(Path::new("/r/root")), remover: None };
-        assert_eq!(ctx.linux_path(Path::new("/r/root/tmp/x/link")).as_deref(), Some("/tmp/x/link"));
+        let ctx = DelCtx {
+            root: Some(Path::new("/r/root")),
+            remover: None,
+        };
+        assert_eq!(
+            ctx.linux_path(Path::new("/r/root/tmp/x/link")).as_deref(),
+            Some("/tmp/x/link")
+        );
         assert_eq!(ctx.linux_path(Path::new("/r/root")), None);
         assert_eq!(ctx.linux_path(Path::new("/elsewhere/link")), None);
-        let none = DelCtx { root: None, remover: None };
+        let none = DelCtx {
+            root: None,
+            remover: None,
+        };
         assert_eq!(none.linux_path(Path::new("/r/root/a")), None);
     }
 

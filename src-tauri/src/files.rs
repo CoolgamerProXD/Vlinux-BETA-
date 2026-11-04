@@ -20,8 +20,9 @@ use tauri::{AppHandle, Emitter, State};
 use vlinux_runtime::exec::{CancelToken, CommandRunner, SystemRunner};
 use vlinux_runtime::fs::filetype::open_policy;
 use vlinux_runtime::fs::{
-    ops, Conflict, DistroLinkRemover, FsError, FsErrorKind, FsResult, ListOptions, ListStore, ListingHead, Location,
-    LinkRemover, OpReport, Page, Progress, Runner, Spaces, TransferMode, WindowsRoot,
+    ops, Conflict, DistroLinkRemover, FsError, FsErrorKind, FsResult, LinkRemover, ListOptions,
+    ListStore, ListingHead, Location, OpReport, Page, Progress, Runner, Spaces, TransferMode,
+    WindowsRoot,
 };
 use vlinux_runtime::parse::valid_distro_name;
 use vlinux_runtime::shared::engine::{self, same_path, Ctx};

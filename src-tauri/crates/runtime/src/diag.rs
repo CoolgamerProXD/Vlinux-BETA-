@@ -29,8 +29,8 @@ use serde::{Deserialize, Serialize};
 use crate::exec::{CancelToken, CommandRunner};
 use crate::fs::path::linux_components;
 use crate::fs::{
-    ops, Conflict, DistroLinkRemover, LinkRemover, EntryKind, FsErrorKind, ListOptions, ListStore, Location, Progress, Runner,
-    Spaces, TransferMode,
+    ops, Conflict, DistroLinkRemover, EntryKind, FsErrorKind, LinkRemover, ListOptions, ListStore,
+    Location, Progress, Runner, Spaces, TransferMode,
 };
 use crate::lifecycle::check_target;
 use crate::model::{DistroKind, DistroState, RuntimeStatus, WslReport};
@@ -250,7 +250,9 @@ fn count_of(hay: &[u8], needle: &[u8]) -> usize {
 
 /// The part of `scan` that could be the start of a query completed by the next chunk.
 fn unfinished_query(scan: &[u8]) -> Vec<u8> {
-    let Some(at) = scan.iter().rposition(|b| *b == 0x1b) else { return Vec::new() };
+    let Some(at) = scan.iter().rposition(|b| *b == 0x1b) else {
+        return Vec::new();
+    };
     let rest = &scan[at..];
     let partial = [QUERY_DSR, QUERY_DA1, QUERY_DA1_ZERO]
         .iter()
@@ -365,8 +367,12 @@ fn red_before(raw: &str, marker: &str) -> bool {
             start += 1;
         }
         for piece in head[start..].split('\u{1b}').skip(1) {
-            let Some(body) = piece.strip_prefix('[') else { continue };
-            let Some(end) = body.find(|c: char| c.is_ascii_alphabetic()) else { continue };
+            let Some(body) = piece.strip_prefix('[') else {
+                continue;
+            };
+            let Some(end) = body.find(|c: char| c.is_ascii_alphabetic()) else {
+                continue;
+            };
             if !body[end..].starts_with('m') {
                 continue;
             }
@@ -559,7 +565,9 @@ fn parse_identity(text: &str) -> Option<(String, String)> {
     let mut from = 0;
     while let Some(i) = text[from..].find("VLXID:") {
         let start = from + i + "VLXID:".len();
-        let Some(e) = text[start..].find(":END") else { break };
+        let Some(e) = text[start..].find(":END") else {
+            break;
+        };
         let body = &text[start..start + e];
         if !body.contains(['%', '$', '\n', '\r']) {
             if let Some((user, home)) = body.split_once(':') {
@@ -1713,7 +1721,8 @@ impl<'a, 'p> Run<'a, 'p> {
         })();
         // Remove exactly the folder this run created (checked against the expected path).
         let cleaned = if dir == format!("{home}/{HOME_TEST_PREFIX}{token}") {
-            let (res, rep, _) = delete_through_files_layer(self.env, &spaces, &[Location::linux(&dir)]);
+            let (res, rep, _) =
+                delete_through_files_layer(self.env, &spaces, &[Location::linux(&dir)]);
             res.is_ok()
                 && rep.failed.is_empty()
                 && self.names_at(&spaces, home).iter().all(|n| n != &name)
@@ -1854,7 +1863,8 @@ impl<'a, 'p> Run<'a, 'p> {
                 if attempt > 0 {
                     std::thread::sleep(Duration::from_millis(250));
                 }
-                let (res, rep, used) = delete_through_files_layer(env, spaces, &[Location::linux(&dir)]);
+                let (res, rep, used) =
+                    delete_through_files_layer(env, spaces, &[Location::linux(&dir)]);
                 via_distro += used;
                 problems = match res {
                     Err(e) => e.message,
@@ -1874,7 +1884,11 @@ impl<'a, 'p> Run<'a, 'p> {
             } else if problems.is_empty() {
                 fail(format!("{dir} is still there after the clean-up."), hint).modified()
             } else {
-                fail(format!("{dir} could not be removed completely: {problems}"), hint).modified()
+                fail(
+                    format!("{dir} could not be removed completely: {problems}"),
+                    hint,
+                )
+                .modified()
             }
         } else {
             fail(
@@ -3341,7 +3355,9 @@ mod tests {
         cfg: Conpty,
     ) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
-            let Some(p) = backend.wait_proc(0, Duration::from_secs(5)) else { return };
+            let Some(p) = backend.wait_proc(0, Duration::from_secs(5)) else {
+                return;
+            };
             p.output(b"\x1b[?9001h\x1b[?1004h\x1b[6n");
             let gate = Instant::now() + Duration::from_secs(10);
             while !p.written_text().contains("\x1b[1;1R") {
@@ -3415,11 +3431,19 @@ mod tests {
         let t0 = Instant::now();
         let r = run_conpty(&w, Conpty::default());
         for id in TERMINAL_STEPS {
-            assert_eq!(get(&r, id).outcome, Outcome::Passed, "{id}: {}", get(&r, id).message);
+            assert_eq!(
+                get(&r, id).outcome,
+                Outcome::Passed,
+                "{id}: {}",
+                get(&r, id).message
+            );
         }
         assert_eq!(get(&r, "terminal.close").outcome, Outcome::Passed);
         assert_eq!(w.mgr.live_count(), 0);
-        assert!(t0.elapsed() < Duration::from_secs(5), "no check should have waited for a timeout");
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "no check should have waited for a timeout"
+        );
         // The throw-away user name was learned for scrubbing, never printed.
         assert!(!r.text.contains("tester"));
     }
@@ -3429,9 +3453,20 @@ mod tests {
         let mut w = world(Running);
         w.step = Duration::from_millis(400);
         w.startup = Some(Duration::from_secs(8));
-        let r = run_conpty(&w, Conpty { delay: Duration::from_millis(1500), ..Conpty::default() });
+        let r = run_conpty(
+            &w,
+            Conpty {
+                delay: Duration::from_millis(1500),
+                ..Conpty::default()
+            },
+        );
         for id in TERMINAL_STEPS {
-            assert_eq!(get(&r, id).outcome, Outcome::Passed, "{id}: {}", get(&r, id).message);
+            assert_eq!(
+                get(&r, id).outcome,
+                Outcome::Passed,
+                "{id}: {}",
+                get(&r, id).message
+            );
         }
     }
 
@@ -3439,24 +3474,45 @@ mod tests {
     fn resize_that_never_reaches_the_shell_fails_with_the_size_the_shell_saw() {
         let mut w = world(Running);
         w.step = Duration::from_millis(1500);
-        let r = run_conpty(&w, Conpty { stuck_size: Some((24, 80)), ..Conpty::default() });
+        let r = run_conpty(
+            &w,
+            Conpty {
+                stuck_size: Some((24, 80)),
+                ..Conpty::default()
+            },
+        );
         for id in &TERMINAL_STEPS[..4] {
             assert_eq!(get(&r, id).outcome, Outcome::Passed, "{id}");
         }
         let rs = get(&r, "terminal.resize");
         assert_eq!(rs.outcome, Outcome::Failed);
-        assert!(rs.message.contains("24 80") && rs.message.contains("41 123"), "{}", rs.message);
+        assert!(
+            rs.message.contains("24 80") && rs.message.contains("41 123"),
+            "{}",
+            rs.message
+        );
         assert_eq!(get(&r, "terminal.close").outcome, Outcome::Passed);
     }
 
     #[test]
     fn colour_that_is_stripped_on_the_way_fails_the_ansi_check_only() {
         let w = world(Running);
-        let r = run_conpty(&w, Conpty { plain: true, ..Conpty::default() });
+        let r = run_conpty(
+            &w,
+            Conpty {
+                plain: true,
+                ..Conpty::default()
+            },
+        );
         let a = get(&r, "terminal.ansi");
         assert_eq!(a.outcome, Outcome::Failed);
         assert!(a.message.contains("without a red"), "{}", a.message);
-        for id in ["terminal.io", "terminal.identity", "terminal.unicode", "terminal.resize"] {
+        for id in [
+            "terminal.io",
+            "terminal.identity",
+            "terminal.unicode",
+            "terminal.resize",
+        ] {
             assert_eq!(get(&r, id).outcome, Outcome::Passed, "{id}");
         }
     }
@@ -3469,7 +3525,11 @@ mod tests {
         let r = go(&w, Mode::Simulated, terminal_only(), None);
         let io = get(&r, "terminal.io");
         assert_eq!(io.outcome, Outcome::Failed);
-        assert!(io.message.contains("bytes of output received"), "{}", io.message);
+        assert!(
+            io.message.contains("bytes of output received"),
+            "{}",
+            io.message
+        );
         for id in &TERMINAL_STEPS[1..] {
             assert_eq!(get(&r, id).outcome, Outcome::Skipped, "{id}");
         }
@@ -3518,7 +3578,8 @@ mod tests {
             Some(("dana".into(), "/home/dana".into()))
         );
         assert_eq!(
-            last_reported_size("printf 'VLXSZ:%s:END'\r\nVLXSZ:24 80:END\r\nVLXSZ:41 123:END\r\n").as_deref(),
+            last_reported_size("printf 'VLXSZ:%s:END'\r\nVLXSZ:24 80:END\r\nVLXSZ:41 123:END\r\n")
+                .as_deref(),
             Some("41 123")
         );
     }
@@ -3591,7 +3652,11 @@ mod tests {
         let first = &r.results[0];
         assert_eq!(first.outcome, Outcome::Failed, "{}", first.message);
         assert!(first.message.contains(dir), "{}", first.message);
-        assert!(first.guidance.as_deref().unwrap_or("").contains(&format!("rm -rf {dir}")));
+        assert!(first
+            .guidance
+            .as_deref()
+            .unwrap_or("")
+            .contains(&format!("rm -rf {dir}")));
         assert!(r.diag_dir.is_some(), "the folder is still to be cleaned up");
         assert!(host.exists() && host.join("locked/stuck.txt").exists());
         // Only this run's own folder was involved.
@@ -3599,7 +3664,12 @@ mod tests {
         // Retry once the obstacle is gone: it finishes the job and then passes.
         fs::set_permissions(host.join("locked"), fs::Permissions::from_mode(0o755)).unwrap();
         r.cleanup();
-        assert_eq!(r.results[1].outcome, Outcome::Passed, "{}", r.results[1].message);
+        assert_eq!(
+            r.results[1].outcome,
+            Outcome::Passed,
+            "{}",
+            r.results[1].message
+        );
         assert!(r.diag_dir.is_none());
         assert!(!host.exists());
     }
@@ -3609,8 +3679,14 @@ mod tests {
         let w = world(Running);
         let dir = "/tmp/vlinux-diag-abcdef1234";
         fs::create_dir_all(w.root.join("tmp/vlinux-diag-abcdef1234")).unwrap();
-        let target = Target { name: "Debian".into(), label: "Debian".into() };
-        let info = w.mgr.open_target(&target, &w.programs, PtySize::DEFAULT).unwrap();
+        let target = Target {
+            name: "Debian".into(),
+            label: "Debian".into(),
+        };
+        let info = w
+            .mgr
+            .open_target(&target, &w.programs, PtySize::DEFAULT)
+            .unwrap();
         assert_eq!(w.mgr.live_count(), 1);
         let report = w.report.clone();
         let detect = || w.report.clone();
@@ -3621,7 +3697,12 @@ mod tests {
         r.session = Some(info.id);
         r.cleanup();
         assert_eq!(w.mgr.live_count(), 0);
-        assert_eq!(r.results[0].outcome, Outcome::Passed, "{}", r.results[0].message);
+        assert_eq!(
+            r.results[0].outcome,
+            Outcome::Passed,
+            "{}",
+            r.results[0].message
+        );
         assert!(!w.root.join("tmp/vlinux-diag-abcdef1234").exists());
     }
 
