@@ -53,6 +53,8 @@ pub const DIAG_EVENT: &str = "vlinux://diag-progress";
 
 const DIAG_BUDGET: Duration = Duration::from_secs(120);
 const DIAG_STEP: Duration = Duration::from_secs(8);
+/// The first terminal answer may wait for the shell to start (profile scripts, systemd).
+const DIAG_STARTUP: Duration = Duration::from_secs(20);
 
 type Dm<'a> = State<'a, Arc<DistroMgmt>>;
 type Cfg<'a> = State<'a, ConfigStore>;
@@ -830,6 +832,7 @@ impl DistroMgmt {
             token: diag_token(seq),
             budget: DIAG_BUDGET,
             step_timeout: DIAG_STEP,
+            startup_timeout: DIAG_STARTUP,
             scrub,
         };
         let mut index = 0usize;

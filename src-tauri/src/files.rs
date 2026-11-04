@@ -20,8 +20,8 @@ use tauri::{AppHandle, Emitter, State};
 use vlinux_runtime::exec::{CancelToken, CommandRunner, SystemRunner};
 use vlinux_runtime::fs::filetype::open_policy;
 use vlinux_runtime::fs::{
-    ops, Conflict, FsError, FsErrorKind, FsResult, ListOptions, ListStore, ListingHead, Location,
-    OpReport, Page, Progress, Runner, Spaces, TransferMode, WindowsRoot,
+    ops, Conflict, DistroLinkRemover, FsError, FsErrorKind, FsResult, ListOptions, ListStore, ListingHead, Location,
+    LinkRemover, OpReport, Page, Progress, Runner, Spaces, TransferMode, WindowsRoot,
 };
 use vlinux_runtime::parse::valid_distro_name;
 use vlinux_runtime::shared::engine::{self, same_path, Ctx};
@@ -630,8 +630,20 @@ pub async fn fs_delete(
         }
         let refs: Vec<&Location> = targets.iter().collect();
         let spaces = fs.spaces(distro.as_deref(), &cfg, &refs)?;
+        // A link that Windows cannot remove through the file share is removed with `unlink`
+        // inside the distribution instead (only ever for an entry classified as a link).
+        let in_distro = distro.as_deref().and_then(|d| fs.distro_ops(d).ok());
         fs.start_job("delete", move |run| {
-            ops::delete(&spaces, &targets, true, run)
+            let remover = in_distro
+                .as_ref()
+                .map(|o| DistroLinkRemover(o as &dyn DistroOps));
+            ops::delete_with(
+                &spaces,
+                &targets,
+                true,
+                run,
+                remover.as_ref().map(|r| r as &dyn LinkRemover),
+            )
         })
     })
     .await

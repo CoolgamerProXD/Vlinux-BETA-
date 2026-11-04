@@ -76,6 +76,9 @@ cd src-tauri && cargo test --workspace         # + the Tauri app crate (needs th
 ```
 `.github/workflows/ci.yml` has a fast Ubuntu job for the runtime crate, and a `windows-latest` job that runs everything, builds the installer and smoke-launches the real app. The browser e2e uses *simulated* WSL data (`?wsl=missing|empty|ready|reboot|multi`, clearly labelled in the UI); real detection only exists in the desktop app.
 
+## Verification status (M6.2)
+Your first real-Arch diagnostic found seven failures in three groups (terminal checks timing out; deleting a link; leftover diagnostic folder). Causes and fixes are in [docs/VALIDATION.md](docs/VALIDATION.md#12-m62--fixes-for-the-first-real-arch-diagnostic). The causes are **inferred from the code and the failure pattern**, and the fixes are tested against simulated, temp-dir and real-Linux-PTY environments only — **they are not yet confirmed on your Arch**; re-run Diagnostics there.
+
 ## Verification status (M6.1)
 New since M6, all in [docs/VALIDATION.md](docs/VALIDATION.md) (sections 7–11): the Diagnostics run now also lists your Linux home (read-only) and does a create/write/rename/copy/move round-trip inside one hidden folder it creates and removes itself; Apply for shared folders always shows the exact change first; OneDrive folders get a caveat; the copied report scrubs the Linux user it discovers. A **real-window desktop smoke on the CI runner** (real OS keystrokes: F11, Alt+F1, Alt+1/2, Alt+Shift+Q, Alt+W, Ctrl+Alt+Q with a real minimise, resize) passed 18/18 and found one real bug (F11/full-screen button doing nothing after leaving full screen), now fixed. What you reported (installer, desktop, `archlinux` selectable, Terminal, `whoami` → `SMP`) is recorded as user-reported. **Still unverified on the PC:** Files over `\\wsl.localhost`, the home round-trip, shared-folder apply/undo, and the shortcut icons.
 

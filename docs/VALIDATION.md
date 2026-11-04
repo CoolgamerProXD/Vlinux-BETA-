@@ -161,3 +161,19 @@ Honest notes: restoring was done by the test with `ShowWindow(SW_RESTORE)`, not 
 
 Do not point a mapping at Documents, Desktop or Pictures first: they are usually OneDrive-redirected (the app warns), and they hold your real files.
 
+
+## 12. M6.2 — fixes for the first real-Arch diagnostic
+
+The M6.1 run on the user's Arch (WSL 3.0.3.0) reported 29 passed / 7 failed / 1 not tested. The seven failures fall into three groups. **Root causes below come from reading the code and from the failure pattern; none was observed on a real Windows pseudo-console from this environment.**
+
+| Group | Failure | Cause (best evidence) | Fix |
+|---|---|---|---|
+| A | `terminal.io`, `identity`, `ansi`, `unicode`, `resize` all timed out at 8 s while the interactive Terminal worked | The diagnostics recorder never answered the pseudo-console's cursor-position request (`ESC[6n`). ConPTY asks it at start-up and holds back output until it is answered. xterm.js answers in the app (and the M3 test collector answers), the diagnostics recorder did not | The recorder answers `ESC[6n` and device-attributes queries (also when split across chunks), acknowledges output, waits up to 20 s for the first answer (typing the harmless command again every 3 s), matches on text with escape sequences removed, uses markers the echoed command cannot contain, polls the resize until `stty size` shows 41 123 and reports what the shell saw otherwise. Failure messages now carry bytes received and queries answered. Later steps are *skipped* (not failed) when the first one did not pass |
+| B | `fs.symlink_no_follow` – "Deleting the link reported errors" | Host-side removal of a link over `\\wsl.localhost` failed and the real message was hidden | The file layer classifies links from the entry itself **and** from its parent's directory listing (never descending into a link or any reparse-point folder). If Windows cannot remove a link and it is still there, the link – and only the link – is removed with `unlink` inside the distribution (an existing allow-listed operation), then verified gone. If both fail the message names both reasons. The diagnostic prints the real message |
+| C | `fs.cleanup` left `/tmp/vlinux-diag-adac2816d661` | The folder still contained the link from B | Clean-up closes any open diagnostics terminal first, uses the same link-aware delete, retries once, verifies the folder is gone, and otherwise fails naming what remains with an exact `rm -rf` line for that one folder. It never reports a pass while anything remains |
+
+**Not affected:** every check that passed on the PC is unchanged. Nothing is ever unregistered, reset or reinstalled, and `/etc/wsl.conf`, the account and the default distro are not touched.
+
+**Tests added (simulated / real-PTY, none is real WSL):** a ConPTY-like fake shell that prints nothing until its cursor query is answered, with split markers and repaint sequences (all five checks pass, no timeout); a slow shell start; a resize that never arrives (fails naming `24 80`); stripped colour; a silent terminal (one failure, rest skipped, bounded time); recorder query handling incl. split sequences; the exact marker commands on a real Linux PTY (`/bin/sh -i`, real `stty`); link deletion (file, folder and dangling links keep their targets; a locked folder forces the in-distribution fallback; both failing reports both reasons; paths come only from inside the root); a clean-up that cannot finish (fails, names the folder, is retry-safe, then passes) and one that closes a still-open terminal first.
+
+**Retest on the PC:** Distributions → Diagnostics → tick both boxes → Run → Copy report. If any line still fails, its message now says why. If the cleanup line fails, run the `rm -rf` line it prints in the Arch terminal (it only names the diagnostic folder).

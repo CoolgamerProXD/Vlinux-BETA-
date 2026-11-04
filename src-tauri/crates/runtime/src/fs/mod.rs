@@ -20,5 +20,5 @@ pub(crate) mod testutil;
 
 pub use error::{FsError, FsErrorKind, FsResult};
 pub use list::{Entry, EntryKind, ListOptions, ListStore, ListingHead, Page, SortKey};
-pub use ops::{Conflict, OpReport, Progress, Runner, TransferMode};
+pub use ops::{Conflict, DistroLinkRemover, LinkRemover, OpReport, Progress, Runner, TransferMode};
 pub use space::{Location, Spaces, WindowsRoot};

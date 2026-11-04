@@ -252,14 +252,128 @@ fn remove_link(p: &Path) -> io::Result<()> {
     fs::remove_file(p).or_else(|_| fs::remove_dir(p))
 }
 
-fn remove_any(path: &Path, run: &mut Runner<'_>, depth: u32) -> Result<(), Stop> {
+/// Removes a symbolic link from INSIDE the distribution (`unlink`, which cannot remove a directory
+/// and never follows a link). Used only as a fallback when Windows could not remove a link that
+/// the file share presents (Windows delete semantics for links on `\\wsl.localhost` are not the
+/// same as Linux's).
+pub trait LinkRemover {
+    fn remove_link(&self, linux_path: &str) -> Result<(), String>;
+}
+
+/// Adapts the allow-listed in-distribution operations ([`DistroOps::remove_symlink`]).
+pub struct DistroLinkRemover<'a>(pub &'a dyn crate::shared::DistroOps);
+
+impl LinkRemover for DistroLinkRemover<'_> {
+    fn remove_link(&self, linux_path: &str) -> Result<(), String> {
+        self.0.remove_symlink(linux_path).map_err(|e| e.to_string())
+    }
+}
+
+struct DelCtx<'a> {
+    root: Option<&'a Path>,
+    remover: Option<&'a dyn LinkRemover>,
+}
+
+impl DelCtx<'_> {
+    /// The Linux path of a host path under the distribution root.
+    fn linux_path(&self, host: &Path) -> Option<String> {
+        let rel = host.strip_prefix(self.root?).ok()?;
+        let mut out = String::new();
+        for c in rel.components() {
+            match c {
+                std::path::Component::Normal(n) => {
+                    out.push('/');
+                    out.push_str(n.to_str()?);
+                }
+                _ => return None,
+            }
+        }
+        if out.is_empty() {
+            None
+        } else {
+            Some(out)
+        }
+    }
+}
+
+fn vanished(p: &Path) -> bool {
+    matches!(fs::symlink_metadata(p), Err(e) if e.kind() == io::ErrorKind::NotFound)
+}
+
+/// Remove ONE symbolic link, never its target. `path` was just classified as a link by
+/// `symlink_metadata` (which does not follow it). Windows first; if that fails and the link is
+/// still there, ask the distribution to `unlink` it. The result is verified, never assumed.
+fn remove_symlink_entry(path: &Path, ctx: &DelCtx<'_>) -> io::Result<()> {
+    let first = match remove_link(path) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    if vanished(path) {
+        return Ok(());
+    }
+    let (Some(remover), Some(linux)) = (ctx.remover, ctx.linux_path(path)) else {
+        return Err(first);
+    };
+    match remover.remove_link(&linux) {
+        Ok(()) if vanished(path) => Ok(()),
+        Ok(()) => Err(io::Error::other(format!(
+            "Windows could not remove the link ({first}) and it was still present after unlink inside the distribution"
+        ))),
+        Err(msg) => Err(io::Error::other(format!(
+            "Windows could not remove the link ({first}); removing it inside the distribution also failed ({msg})"
+        ))),
+    }
+}
+
+#[cfg(windows)]
+fn reparse_dir(m: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const DIRECTORY: u32 = 0x10;
+    const REPARSE_POINT: u32 = 0x400;
+    let a = m.file_attributes();
+    a & REPARSE_POINT != 0 && a & DIRECTORY != 0
+}
+#[cfg(not(windows))]
+fn reparse_dir(_m: &fs::Metadata) -> bool {
+    false
+}
+
+/// Whether an entry is a link — or any other "folder that is really a pointer" (a Windows
+/// reparse-point directory such as a junction or a WSL link to a folder, whatever its reparse tag).
+/// Such an entry is removed as one item and NEVER descended into: the real WSL share can present a
+/// link to a folder in a way that `is_dir()` alone would follow.
+fn linkish(m: &fs::Metadata) -> bool {
+    m.file_type().is_symlink() || reparse_dir(m)
+}
+
+/// The metadata of `path` as its PARENT's directory enumeration reports it (the same source the
+/// file listing uses, which never follows links). `None` if it cannot be found.
+fn enumerated_meta(path: &Path) -> Option<fs::Metadata> {
+    let parent = path.parent()?;
+    let name = path.file_name()?;
+    for entry in fs::read_dir(parent).ok()?.take(1_000_000) {
+        let entry = entry.ok()?;
+        if entry.file_name() == name {
+            return entry.metadata().ok();
+        }
+    }
+    None
+}
+
+fn remove_any(
+    path: &Path,
+    run: &mut Runner<'_>,
+    depth: u32,
+    ctx: &DelCtx<'_>,
+    seen: Option<fs::Metadata>,
+) -> Result<(), Stop> {
     if run.cancelled() {
         return Err(Stop::Cancelled);
     }
     let m = fs::symlink_metadata(path)?;
     let ft = m.file_type();
-    if ft.is_symlink() {
-        remove_link(path)?;
+    if linkish(&m) || seen.as_ref().is_some_and(linkish) {
+        remove_symlink_entry(path, ctx)?;
         run.file_done();
         return Ok(());
     }
@@ -270,7 +384,7 @@ fn remove_any(path: &Path, run: &mut Runner<'_>, depth: u32) -> Result<(), Stop>
         let mut partial = false;
         for child in fs::read_dir(path)? {
             let child = child?;
-            match remove_any(&child.path(), run, depth + 1) {
+            match remove_any(&child.path(), run, depth + 1, ctx, child.metadata().ok()) {
                 Ok(()) => {}
                 Err(Stop::Cancelled) => return Err(Stop::Cancelled),
                 Err(Stop::Partial) => partial = true,
@@ -301,6 +415,21 @@ pub fn delete(
     confirmed: bool,
     run: &mut Runner<'_>,
 ) -> FsResult<()> {
+    delete_with(spaces, targets, confirmed, run, None)
+}
+
+/// [`delete`] with an optional in-distribution fallback for removing symbolic links.
+pub fn delete_with(
+    spaces: &Spaces,
+    targets: &[Location],
+    confirmed: bool,
+    run: &mut Runner<'_>,
+    remover: Option<&dyn LinkRemover>,
+) -> FsResult<()> {
+    let ctx = DelCtx {
+        root: spaces.linux_root.as_deref(),
+        remover,
+    };
     if !confirmed {
         return Err(FsError::new(
             FsErrorKind::Refused,
@@ -326,7 +455,7 @@ pub fn delete(
             break;
         }
         run.current(&e.name);
-        match remove_any(&e.host, run, 0) {
+        match remove_any(&e.host, run, 0, &ctx, enumerated_meta(&e.host)) {
             Ok(()) => run.report.items_done += 1,
             Err(Stop::Cancelled) => {
                 run.report.cancelled = true;
@@ -393,7 +522,7 @@ fn copy_tree(src: &Path, dst: &Path, run: &mut Runner<'_>, depth: u32) -> Result
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if ft.is_symlink() {
+    if linkish(&m) {
         run.skip(&name, "a link (links are not copied)");
         return Err(Stop::Partial);
     }
@@ -434,7 +563,11 @@ fn move_by_copy(src: &Path, dst: &Path, run: &mut Runner<'_>) -> Result<(), Stop
     copy_tree(src, dst, run, 0)?;
     let was = run.counting;
     run.counting = false;
-    let removed = remove_any(src, run, 0);
+    let ctx = DelCtx {
+        root: None,
+        remover: None,
+    };
+    let removed = remove_any(src, run, 0, &ctx, enumerated_meta(src));
     run.counting = was;
     removed
 }
@@ -868,6 +1001,189 @@ mod tests {
             "do not delete"
         );
         assert!(rep.failed.is_empty());
+    }
+
+
+    // ---- M6.2: link deletion (real diagnostic: "Deleting the link reported errors") --------
+
+    #[cfg(unix)]
+    #[test]
+    fn file_directory_and_dangling_links_are_removed_and_their_targets_survive() {
+        use std::os::unix::fs::symlink;
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        l.file("home/me/target-dir/inside.txt", "inside");
+        l.file("home/me/target-file.txt", "file");
+        symlink(l.join("home/me/target-dir"), l.join("home/me/dir-link")).unwrap();
+        symlink(l.join("home/me/target-file.txt"), l.join("home/me/file-link")).unwrap();
+        symlink(l.join("home/me/does-not-exist"), l.join("home/me/dangling")).unwrap();
+        let s = spaces(&l, &w);
+        let (r, rep, _) = run_with(|run| {
+            delete(
+                &s,
+                &[lin("/home/me/dir-link"), lin("/home/me/file-link"), lin("/home/me/dangling")],
+                true,
+                run,
+            )
+        });
+        r.unwrap();
+        assert!(rep.failed.is_empty(), "{:?}", rep.failed);
+        assert_eq!(rep.items_done, 3);
+        for gone in ["dir-link", "file-link", "dangling"] {
+            assert!(fs::symlink_metadata(l.join(&format!("home/me/{gone}"))).is_err(), "{gone}");
+        }
+        assert_eq!(fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(), "inside");
+        assert_eq!(fs::read_to_string(l.join("home/me/target-file.txt")).unwrap(), "file");
+    }
+
+    /// Makes `dir` unwritable for this (non-root) user so removing an entry in it fails on the host
+    /// side, and restores it when dropped. `None` if the process can write anyway (root).
+    #[cfg(unix)]
+    struct Locked(PathBuf);
+    #[cfg(unix)]
+    impl Locked {
+        fn new(dir: PathBuf) -> Option<Locked> {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+            let probe = dir.join(".probe");
+            if fs::write(&probe, "").is_ok() {
+                let _ = fs::remove_file(&probe);
+                fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+                return None;
+            }
+            Some(Locked(dir))
+        }
+        fn unlock(&self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+    #[cfg(unix)]
+    impl Drop for Locked {
+        fn drop(&mut self) {
+            self.unlock();
+        }
+    }
+
+    /// Stands in for `unlink` inside the distribution: records the Linux path it was asked for.
+    #[cfg(unix)]
+    struct FakeUnlink<'a> {
+        calls: std::cell::RefCell<Vec<String>>,
+        root: PathBuf,
+        lock: &'a Locked,
+        succeed: bool,
+        really_remove: bool,
+    }
+    #[cfg(unix)]
+    impl LinkRemover for FakeUnlink<'_> {
+        fn remove_link(&self, linux_path: &str) -> Result<(), String> {
+            self.calls.borrow_mut().push(linux_path.to_string());
+            if !self.succeed {
+                return Err("Permission denied".into());
+            }
+            if self.really_remove {
+                self.lock.unlock();
+                let mut p = self.root.clone();
+                for c in linux_path.split('/').filter(|c| !c.is_empty()) {
+                    p.push(c);
+                }
+                fs::remove_file(p).map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        }
+    }
+
+    #[cfg(unix)]
+    fn locked_link_world(l: &TempDir) -> Option<Locked> {
+        use std::os::unix::fs::symlink;
+        l.file("home/me/target-dir/inside.txt", "inside");
+        l.dir("home/me/links");
+        symlink(l.join("home/me/target-dir"), l.join("home/me/links/dir-link")).unwrap();
+        Locked::new(l.join("home/me/links"))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_windows_cannot_remove_is_unlinked_inside_the_distribution() {
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        let Some(lock) = locked_link_world(&l) else { return };
+        let s = spaces(&l, &w);
+        let rm = FakeUnlink {
+            calls: Default::default(),
+            root: l.path().to_path_buf(),
+            lock: &lock,
+            succeed: true,
+            really_remove: true,
+        };
+        let (r, rep, _) = run_with(|run| {
+            delete_with(&s, &[lin("/home/me/links/dir-link")], true, run, Some(&rm))
+        });
+        r.unwrap();
+        assert!(rep.failed.is_empty(), "{:?}", rep.failed);
+        assert_eq!(rep.items_done, 1);
+        assert_eq!(*rm.calls.borrow(), vec!["/home/me/links/dir-link".to_string()]);
+        assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_err());
+        assert_eq!(fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(), "inside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_nobody_can_remove_is_reported_with_both_reasons_and_nothing_else_is_touched() {
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        let Some(lock) = locked_link_world(&l) else { return };
+        let s = spaces(&l, &w);
+        for (succeed, expect) in [(false, "also failed (Permission denied)"), (true, "still present")] {
+            let rm = FakeUnlink {
+                calls: Default::default(),
+                root: l.path().to_path_buf(),
+                lock: &lock,
+                succeed,
+                really_remove: false,
+            };
+            let (r, rep, _) = run_with(|run| {
+                delete_with(&s, &[lin("/home/me/links/dir-link")], true, run, Some(&rm))
+            });
+            r.unwrap();
+            assert_eq!(rep.items_done, 0);
+            assert_eq!(rep.failed.len(), 1, "{:?}", rep.failed);
+            assert!(rep.failed[0].message.contains(expect), "{}", rep.failed[0].message);
+            assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_ok());
+            assert_eq!(fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(), "inside");
+        }
+        // Without a fallback the host error is reported unchanged, never hidden.
+        let (_, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/links/dir-link")], true, run));
+        assert_eq!(rep.failed.len(), 1);
+        assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_are_recognised_from_both_the_entry_itself_and_its_parents_listing() {
+        use std::os::unix::fs::symlink;
+        let l = TempDir::new("l");
+        l.file("d/inside.txt", "x");
+        l.file("f.txt", "x");
+        symlink(l.join("d"), l.join("dlink")).unwrap();
+        symlink(l.join("f.txt"), l.join("flink")).unwrap();
+        for (name, is_link) in [("d", false), ("f.txt", false), ("dlink", true), ("flink", true)] {
+            let own = fs::symlink_metadata(l.join(name)).unwrap();
+            let listed = enumerated_meta(&l.join(name)).expect(name);
+            assert_eq!(linkish(&own), is_link, "{name} (own)");
+            assert_eq!(linkish(&listed), is_link, "{name} (listing)");
+        }
+        assert!(enumerated_meta(&l.join("missing")).is_none());
+    }
+
+    #[test]
+    fn link_paths_for_the_distribution_come_only_from_inside_its_root() {
+        let ctx = DelCtx { root: Some(Path::new("/r/root")), remover: None };
+        assert_eq!(ctx.linux_path(Path::new("/r/root/tmp/x/link")).as_deref(), Some("/tmp/x/link"));
+        assert_eq!(ctx.linux_path(Path::new("/r/root")), None);
+        assert_eq!(ctx.linux_path(Path::new("/elsewhere/link")), None);
+        let none = DelCtx { root: None, remover: None };
+        assert_eq!(none.linux_path(Path::new("/r/root/a")), None);
     }
 
     #[cfg(unix)]

@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use crate::exec::{CancelToken, CommandRunner};
 use crate::fs::path::linux_components;
 use crate::fs::{
-    ops, Conflict, EntryKind, FsErrorKind, ListOptions, ListStore, Location, Progress, Runner,
+    ops, Conflict, DistroLinkRemover, LinkRemover, EntryKind, FsErrorKind, ListOptions, ListStore, Location, Progress, Runner,
     Spaces, TransferMode,
 };
 use crate::lifecycle::check_target;
@@ -165,6 +165,53 @@ pub struct Report {
     pub diag_dir: Option<String>,
 }
 
+/// Deletes through the same file layer the Files app uses, with its in-distribution `unlink`
+/// fallback for links. Returns the result, the per-item report and how many links needed the
+/// fallback. Never cancellable: a half-finished clean-up would leave files behind.
+fn delete_through_files_layer(
+    env: &DiagEnv<'_>,
+    spaces: &Spaces,
+    locs: &[Location],
+) -> (crate::fs::FsResult<()>, crate::fs::OpReport, u32) {
+    struct Counting<'a> {
+        inner: DistroLinkRemover<'a>,
+        used: std::cell::Cell<u32>,
+    }
+    impl LinkRemover for Counting<'_> {
+        fn remove_link(&self, linux_path: &str) -> Result<(), String> {
+            self.used.set(self.used.get() + 1);
+            self.inner.remove_link(linux_path)
+        }
+    }
+    let never = CancelToken::new();
+    let mut cb = |_: &Progress| {};
+    let mut r = Runner::new(&never, &mut cb);
+    let remover = env.ops.map(|o| Counting {
+        inner: DistroLinkRemover(o),
+        used: std::cell::Cell::new(0),
+    });
+    let res = ops::delete_with(
+        spaces,
+        locs,
+        true,
+        &mut r,
+        remover.as_ref().map(|x| x as &dyn LinkRemover),
+    );
+    let rep = r.finish();
+    let used = remover.map(|x| x.used.get()).unwrap_or(0);
+    (res, rep, used)
+}
+
+/// The first few per-item failure messages, for a diagnostic line.
+fn failure_text(rep: &crate::fs::OpReport) -> String {
+    rep.failed
+        .iter()
+        .take(3)
+        .map(|f| f.message.clone())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// Terminal output recorder for diagnostics sessions (its own sink: diagnostics sessions never
 /// appear in the user's terminal tabs).
 #[derive(Default)]
@@ -177,9 +224,43 @@ pub struct DiagSink {
 struct SinkInner {
     out: HashMap<String, Vec<u8>>,
     ended: HashMap<String, SessionState>,
+    /// The end of the output, so a terminal query split across two chunks is still seen once.
+    tail: HashMap<String, Vec<u8>>,
+    /// Answers to terminal queries, waiting to be typed back into the session.
+    replies: HashMap<String, Vec<u8>>,
+    /// Output bytes the manager has not been told were consumed (flow control).
+    unacked: HashMap<String, usize>,
+    /// Total bytes seen and queries answered, for failure messages.
+    seen: HashMap<String, (usize, u32)>,
 }
 
 const SINK_CAP: usize = 256 * 1024;
+
+/// Terminal queries a pseudo-console sends and then waits for an answer to. A real terminal
+/// (xterm.js in the app) answers them; this headless recorder has to as well, or the output stalls.
+const QUERY_DSR: &[u8] = b"\x1b[6n";
+const QUERY_DA1: &[u8] = b"\x1b[c";
+const QUERY_DA1_ZERO: &[u8] = b"\x1b[0c";
+const REPLY_DSR: &[u8] = b"\x1b[1;1R";
+const REPLY_DA1: &[u8] = b"\x1b[?1;2c";
+
+fn count_of(hay: &[u8], needle: &[u8]) -> usize {
+    hay.windows(needle.len()).filter(|w| *w == needle).count()
+}
+
+/// The part of `scan` that could be the start of a query completed by the next chunk.
+fn unfinished_query(scan: &[u8]) -> Vec<u8> {
+    let Some(at) = scan.iter().rposition(|b| *b == 0x1b) else { return Vec::new() };
+    let rest = &scan[at..];
+    let partial = [QUERY_DSR, QUERY_DA1, QUERY_DA1_ZERO]
+        .iter()
+        .any(|q| rest.len() < q.len() && q.starts_with(rest));
+    if partial {
+        rest.to_vec()
+    } else {
+        Vec::new()
+    }
+}
 
 impl TerminalSink for DiagSink {
     fn output(&self, id: &str, data: &[u8]) {
@@ -188,6 +269,27 @@ impl TerminalSink for DiagSink {
             if buf.len() < SINK_CAP {
                 buf.extend_from_slice(data);
             }
+            *g.unacked.entry(id.to_string()).or_default() += data.len();
+            let mut scan = g.tail.remove(id).unwrap_or_default();
+            scan.extend_from_slice(data);
+            let dsr = count_of(&scan, QUERY_DSR);
+            let da1 = count_of(&scan, QUERY_DA1) + count_of(&scan, QUERY_DA1_ZERO);
+            if dsr + da1 > 0 {
+                let r = g.replies.entry(id.to_string()).or_default();
+                for _ in 0..dsr {
+                    r.extend_from_slice(REPLY_DSR);
+                }
+                for _ in 0..da1 {
+                    r.extend_from_slice(REPLY_DA1);
+                }
+            }
+            let rest = unfinished_query(&scan);
+            if !rest.is_empty() {
+                g.tail.insert(id.to_string(), rest);
+            }
+            let st = g.seen.entry(id.to_string()).or_default();
+            st.0 += data.len();
+            st.1 += (dsr + da1) as u32;
         }
         self.cv.notify_all();
     }
@@ -199,6 +301,86 @@ impl TerminalSink for DiagSink {
         }
         self.cv.notify_all();
     }
+}
+
+// The exact lines typed into the throw-away shell. Each prints its marker through `printf` with a
+// `%s` placeholder, so the typed (echoed) line can never contain the marker itself: only the real
+// output can satisfy a check. They use nothing but `printf`, `id` and `stty` and run in any POSIX
+// POSIX-style shell (bash, zsh, dash).
+const CMD_IO: &str = "printf 'VLX%sEND\\n' 42\r";
+const CMD_IDENTITY: &str = "printf 'VLXID:%s:%s:END\\n' \"$(id -un)\" \"$HOME\"\r";
+const CMD_ANSI: &str = "printf '\\033[31mVLX%s\\033[0m\\n' RED7\r";
+const CMD_UNICODE: &str = "printf '\\342\\234\\223VLX%s\\n' U7\r";
+const CMD_SIZE: &str = "printf 'VLXSZ:%s:END\\n' \"$(stty size)\"\r";
+
+/// Removes escape sequences (colours, cursor moves, titles) so markers can be matched on the text
+/// a person would read, however the pseudo-console decided to repaint it.
+#[allow(clippy::while_let_on_iterator)]
+pub fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut it = text.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('[') => {
+                // Parameters and intermediates, then one final byte.
+                for n in it.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&n) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                // Operating-system command: ends with BEL or ESC \.
+                while let Some(n) = it.next() {
+                    if n == '\u{7}' {
+                        break;
+                    }
+                    if n == '\u{1b}' {
+                        it.next();
+                        break;
+                    }
+                }
+            }
+            Some('(' | ')' | '*' | '+' | '#') => {
+                it.next();
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Whether `marker` is printed right after a red colour sequence (31, 91 or the 256-colour red).
+fn red_before(raw: &str, marker: &str) -> bool {
+    let mut from = 0;
+    while let Some(i) = raw[from..].find(marker) {
+        let at = from + i;
+        let head = &raw[..at];
+        let mut start = head.len().saturating_sub(64);
+        while !head.is_char_boundary(start) {
+            start += 1;
+        }
+        for piece in head[start..].split('\u{1b}').skip(1) {
+            let Some(body) = piece.strip_prefix('[') else { continue };
+            let Some(end) = body.find(|c: char| c.is_ascii_alphabetic()) else { continue };
+            if !body[end..].starts_with('m') {
+                continue;
+            }
+            let params = &body[..end];
+            if params.split(';').any(|p| p == "31" || p == "91")
+                || params.starts_with("38;5;1")
+                || params.starts_with("38;5;9")
+            {
+                return true;
+            }
+        }
+        from = at + marker.len();
+    }
+    false
 }
 
 impl DiagSink {
@@ -216,6 +398,11 @@ impl DiagSink {
                     .map(|b| String::from_utf8_lossy(b).into_owned())
             })
             .unwrap_or_default()
+    }
+
+    /// The output as readable text: escape sequences removed.
+    pub fn clean_text(&self, id: &str) -> String {
+        strip_ansi(&self.text(id))
     }
 
     pub fn wait_text(&self, id: &str, needle: &str, timeout: Duration) -> bool {
@@ -241,11 +428,84 @@ impl DiagSink {
         }
     }
 
+    /// Sleeps until new output or state arrives (or `slice` passes).
+    fn wait_change(&self, slice: Duration) {
+        if let Ok(g) = self.inner.lock() {
+            let _ = self.cv.wait_timeout(g, slice);
+        }
+    }
+
+    /// Answers waiting to be typed into the session, and the output bytes to acknowledge.
+    fn take_pending(&self, id: &str) -> (Vec<u8>, usize) {
+        match self.inner.lock() {
+            Ok(mut g) => (
+                g.replies.remove(id).unwrap_or_default(),
+                g.unacked.remove(id).unwrap_or(0),
+            ),
+            Err(_) => (Vec::new(), 0),
+        }
+    }
+
+    /// Bytes of output received and terminal queries answered so far.
+    pub fn stats(&self, id: &str) -> (usize, u32) {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|g| g.seen.get(id).copied())
+            .unwrap_or_default()
+    }
+
     pub fn ended(&self, id: &str) -> Option<SessionState> {
         self.inner
             .lock()
             .ok()
             .and_then(|g| g.ended.get(id).cloned())
+    }
+}
+
+/// Types the answers to terminal queries back into the session and acknowledges the output.
+fn pump(mgr: &TerminalManager, sink: &DiagSink, id: &str) {
+    let (replies, bytes) = sink.take_pending(id);
+    if !replies.is_empty() {
+        let _ = mgr.write(id, &replies);
+    }
+    if bytes > 0 {
+        mgr.ack(id, bytes);
+    }
+}
+
+/// Waits until `pred` accepts the readable output, answering the pseudo-console's queries all the
+/// while. With `resend`, the same (harmless, idempotent) input is typed again at that interval:
+/// a shell that was still starting may have missed the first copy.
+fn await_terminal(
+    mgr: &TerminalManager,
+    sink: &DiagSink,
+    id: &str,
+    total: Duration,
+    resend: Option<(&str, Duration)>,
+    pred: &dyn Fn(&str) -> bool,
+) -> bool {
+    let end = Instant::now() + total;
+    let mut last = Instant::now();
+    loop {
+        pump(mgr, sink, id);
+        if pred(&sink.clean_text(id)) {
+            return true;
+        }
+        if sink.ended(id).is_some() {
+            return false;
+        }
+        let now = Instant::now();
+        if now >= end {
+            return false;
+        }
+        if let Some((data, every)) = resend {
+            if now.duration_since(last) >= every {
+                let _ = mgr.write(id, data.as_bytes());
+                last = now;
+            }
+        }
+        sink.wait_change((end - now).min(Duration::from_millis(50)));
     }
 }
 
@@ -278,6 +538,8 @@ pub struct DiagEnv<'a> {
     pub budget: Duration,
     /// How long to wait for each terminal step.
     pub step_timeout: Duration,
+    /// How long the first terminal answer may take (the shell is still starting up).
+    pub startup_timeout: Duration,
     /// Names to scrub from the copyable text (Windows user, distribution user, ...).
     pub scrub: Vec<String>,
 }
@@ -293,14 +555,29 @@ struct Res {
 /// Read `VLXID:<user>:<home>:END` out of terminal output. The echoed command line also contains
 /// `VLXID:` but with format placeholders, so only an answer without `%` or `$` counts.
 fn parse_identity(text: &str) -> Option<(String, String)> {
-    text.lines().rev().find_map(|line| {
-        let rest = line.split("VLXID:").nth(1)?;
-        if rest.contains('%') || rest.contains('$') {
-            return None;
+    let mut best = None;
+    let mut from = 0;
+    while let Some(i) = text[from..].find("VLXID:") {
+        let start = from + i + "VLXID:".len();
+        let Some(e) = text[start..].find(":END") else { break };
+        let body = &text[start..start + e];
+        if !body.contains(['%', '$', '\n', '\r']) {
+            if let Some((user, home)) = body.split_once(':') {
+                best = Some((user.to_string(), home.to_string()));
+            }
         }
-        let body = rest.trim_end().strip_suffix(":END")?;
-        let (user, home) = body.split_once(':')?;
-        Some((user.to_string(), home.to_string()))
+        from = start;
+    }
+    best
+}
+
+/// The newest `VLXSZ:<rows> <cols>:END` answer in the output (never the echoed command line).
+fn last_reported_size(text: &str) -> Option<String> {
+    text.lines().rev().find_map(|line| {
+        let rest = line.split("VLXSZ:").nth(1)?;
+        let body = rest.split(":END").next()?;
+        let ok = !body.is_empty() && body.chars().all(|c| c.is_ascii_digit() || c == ' ');
+        ok.then(|| body.to_string())
     })
 }
 
@@ -745,26 +1022,50 @@ impl<'a, 'p> Run<'a, 'p> {
             },
         );
 
-        fn step(s: &mut Run<'_, '_>, send: &str, expect: &str, what: &str, hint: &str) -> Res {
+        /// Types `send`, waits (answering the pseudo-console's queries) until `pred` accepts the
+        /// readable output. `Err` is the finished verdict for every way this can go wrong.
+        fn exchange(
+            s: &Run<'_, '_>,
+            send: &str,
+            total: Duration,
+            resend: Option<Duration>,
+            pred: &dyn Fn(&str) -> bool,
+            hint: &str,
+        ) -> Result<String, Res> {
             let Some(id) = s.session.clone() else {
-                return skip("No terminal session is open.");
+                return Err(skip("No terminal session is open."));
             };
             let Some((mgr, sink)) = s.env.terminal else {
-                return not_tested("No terminal backend.");
+                return Err(not_tested("No terminal backend."));
             };
             if let Err(e) = mgr.write(&id, send.as_bytes()) {
-                return fail(format!("Could not send input: {e}"), hint);
+                return Err(fail(format!("Could not send input: {e}"), hint));
             }
-            if sink.wait_text(&id, expect, s.env.step_timeout) {
-                pass(what).modified()
+            if await_terminal(mgr, sink, &id, total, resend.map(|d| (send, d)), pred) {
+                return Ok(sink.text(&id));
+            }
+            let (bytes, answered) = sink.stats(&id);
+            let ended = sink.ended(&id).is_some();
+            Err(fail(
+                format!(
+                    "The expected output did not appear within {} ms ({} bytes of output received, {} terminal queries answered{}).",
+                    total.as_millis(),
+                    bytes,
+                    answered,
+                    if ended { ", the session had ended" } else { "" }
+                ),
+                hint,
+            ))
+        }
+
+        fn io_first(s: &Run<'_, '_>) -> Option<Res> {
+            if s.session.is_none() {
+                return Some(skip("No terminal session is open."));
+            }
+            if s.passed("terminal.io") {
+                None
             } else {
-                fail(
-                    format!(
-                        "The expected output did not appear within {} ms.",
-                        s.env.step_timeout.as_millis()
-                    ),
-                    hint,
-                )
+                Some(skip("The first terminal check (input and output) did not pass, so this one was not attempted."))
             }
         }
 
@@ -773,30 +1074,41 @@ impl<'a, 'p> Run<'a, 'p> {
                 "terminal.io",
                 cat,
                 "Input and output",
-                "Typed input reaches the shell and its output comes back (`printf 'VLX%sEND' 42`).",
+                "The shell starts, typed input reaches it and its output comes back (`printf 'VLX%sEND' 42`). Allows for a slow shell start.",
             ),
             |s| {
-                step(
+                // The shell may still be starting: type the (harmless) command again every few
+                // seconds until the first answer arrives or the start-up allowance runs out.
+                match exchange(
                     s,
-                    "printf 'VLX%sEND\\n' 42\r",
-                    "VLX42END",
-                    "Input reached the shell and output came back.",
-                    "The shell may be slow to start or has an unusual prompt; try again.",
-                )
+                    CMD_IO,
+                    s.env.startup_timeout,
+                    Some(Duration::from_secs(3)),
+                    &|t| t.contains("VLX42END"),
+                    "The shell may be slow to start or has an unusual start-up; open the Terminal app to compare.",
+                ) {
+                    Ok(_) => pass("Input reached the shell and output came back.").modified(),
+                    Err(v) => v,
+                }
             },
         );
         self.check(
             write_spec("terminal.identity", cat, "Runs as your normal user", "The terminal's shell reports its user and HOME (`id -un`, `$HOME`); it must not be root and HOME must be set. The user name is not shown or put in the report."),
             |s| {
-                let Some(id) = s.session.clone() else { return skip("No terminal session is open.") };
-                let Some((mgr, sink)) = s.env.terminal else { return not_tested("No terminal backend.") };
-                if let Err(e) = mgr.write(&id, "printf 'VLXID:%s:%s:END\\n' \"$(id -un)\" \"$HOME\"\r".as_bytes()) {
-                    return fail(format!("Could not send input: {e}"), "Try again.");
+                if let Some(v) = io_first(s) {
+                    return v;
                 }
-                if !sink.wait_text(&id, ":END\r\n", s.env.step_timeout) {
-                    return fail(format!("The shell did not answer within {} ms.", s.env.step_timeout.as_millis()), "The shell may be slow to start; try again.");
-                }
-                let ident = parse_identity(&sink.text(&id));
+                let ident = match exchange(
+                    s,
+                    CMD_IDENTITY,
+                    s.env.step_timeout,
+                    None,
+                    &|t| parse_identity(t).is_some(),
+                    "The shell may be slow; try again.",
+                ) {
+                    Ok(raw) => parse_identity(&strip_ansi(&raw)),
+                    Err(v) => return v,
+                };
                 if let Some((user, _)) = &ident {
                     s.learned.push(user.clone());
                 }
@@ -813,16 +1125,26 @@ impl<'a, 'p> Run<'a, 'p> {
                 "terminal.ansi",
                 cat,
                 "Colour and control sequences",
-                "ANSI escape sequences pass through unchanged (a red text sequence is printed).",
+                "ANSI escape sequences pass through (a red text sequence is printed and must arrive as red).",
             ),
             |s| {
-                step(
+                if let Some(v) = io_first(s) {
+                    return v;
+                }
+                // The marker is built by printf (`VLX%s` + `RED7`), so the echoed command line
+                // can never contain it: only real output counts.
+                match exchange(
                     s,
-                    "printf '\\033[31mVLXRED\\033[0m\\n'\r",
-                    "\u{1b}[31mVLXRED",
-                    "ANSI sequences arrived intact.",
+                    CMD_ANSI,
+                    s.env.step_timeout,
+                    None,
+                    &|t| t.contains("VLXRED7"),
                     "Something between the shell and the terminal is rewriting escape sequences.",
-                )
+                ) {
+                    Ok(raw) if red_before(&raw, "VLXRED7") => pass("The text arrived with its red colour sequence.").modified(),
+                    Ok(_) => fail("The text arrived but without a red colour sequence in front of it.", "Something between the shell and the terminal is removing colours."),
+                    Err(v) => v,
+                }
             },
         );
         self.check(
@@ -833,22 +1155,55 @@ impl<'a, 'p> Run<'a, 'p> {
                 "A non-ASCII character (a check mark) survives the round trip.",
             ),
             |s| {
-                step(
+                if let Some(v) = io_first(s) {
+                    return v;
+                }
+                match exchange(
                     s,
-                    "printf '\\342\\234\\223VLXU\\n'\r",
-                    "\u{2713}VLXU",
-                    "A non-ASCII character arrived intact.",
+                    CMD_UNICODE,
+                    s.env.step_timeout,
+                    None,
+                    &|t| t.contains("\u{2713}VLXU7"),
                     "Check the distribution's locale (UTF-8) and the terminal encoding.",
-                )
+                ) {
+                    Ok(_) => pass("A non-ASCII character arrived intact.").modified(),
+                    Err(v) => v,
+                }
             },
         );
-        self.check(write_spec("terminal.resize", cat, "Resize", "Resizing the terminal to 41 rows by 123 columns is seen by the shell (`stty size`)."), |s| {
+        self.check(write_spec("terminal.resize", cat, "Resize", "Resizing the terminal to 41 rows by 123 columns is seen by the shell (`stty size` asks the real pseudo-terminal)."), |s| {
+            if let Some(v) = io_first(s) {
+                return v;
+            }
             let Some(id) = s.session.clone() else { return skip("No terminal session is open.") };
-            let Some((mgr, _)) = s.env.terminal else { return not_tested("No terminal backend.") };
+            let Some((mgr, sink)) = s.env.terminal else { return not_tested("No terminal backend.") };
             if let Err(e) = mgr.resize(&id, 41, 123) {
                 return fail(format!("Resize failed: {e}"), "Report this.");
             }
-            step(s, "stty size\r", "41 123", "The shell saw the new size.", "The pseudo-terminal did not pass the new size on.")
+            // The new size reaches the shell a moment later (it travels through the pseudo-console
+            // and a signal), so ask repeatedly until the answer shows the new size.
+            let ask = CMD_SIZE;
+            match exchange(
+                s,
+                ask,
+                s.env.step_timeout,
+                Some(Duration::from_millis(700)),
+                &|t| t.contains("VLXSZ:41 123:END"),
+                "The pseudo-terminal did not pass the new size on.",
+            ) {
+                Ok(_) => pass("The shell saw the new size (41 rows by 123 columns).").modified(),
+                Err(v) if v.outcome == Outcome::Failed => {
+                    let seen = last_reported_size(&sink.clean_text(&id));
+                    match seen {
+                        Some(sz) => fail(
+                            format!("The shell reported \"{sz}\" (rows columns) instead of \"41 123\"."),
+                            "The pseudo-terminal did not pass the new size on.",
+                        ),
+                        None => v,
+                    }
+                }
+                Err(v) => v,
+            }
         });
         self.check(
             write_spec(
@@ -1193,20 +1548,25 @@ impl<'a, 'p> Run<'a, 'p> {
                     return skip("No link was created.");
                 }
                 let Some(spaces) = s.spaces() else { return skip("No file share.") };
-                let mut cb = |_: &Progress| {};
-                let mut r = Runner::new(s.cancel, &mut cb);
-                let res = ops::delete(spaces, &[s.loc("link-to-target")], true, &mut r);
-                let rep = r.finish();
+                let (res, rep, via_distro) = delete_through_files_layer(s.env, spaces, &[s.loc("link-to-target")]);
                 if let Err(e) = res {
-                    return fail(e.message, "Deleting the link failed.");
+                    return fail(format!("Deleting the link failed: {}", e.message), "Open the Files app and try Delete on the same link to see the error in context.");
                 }
                 if !rep.failed.is_empty() {
-                    return fail("Deleting the link reported errors.", "Check permissions in /tmp.").modified();
+                    return fail(
+                        format!("Deleting the link reported errors: {}", failure_text(&rep)),
+                        "The link's target folder was not deleted. Report this message.",
+                    )
+                    .modified();
                 }
                 let names = s.names_in("");
                 let inside = s.names_in("target");
                 if !names.contains(&"link-to-target".to_string()) && inside.contains(&"inside.txt".to_string()) {
-                    pass("The link is gone and the folder it pointed to still has its file.").modified()
+                    if via_distro > 0 {
+                        pass("The link is gone and the folder it pointed to still has its file. Windows could not delete the link through the file share, so it was removed with 'unlink' inside the distribution (the Files app does the same).").modified()
+                    } else {
+                        pass("The link is gone and the folder it pointed to still has its file.").modified()
+                    }
                 } else {
                     fail("Either the link remains or the link target lost its content.", "Do not use Delete on links until this is resolved, and report it.").modified()
                 }
@@ -1353,11 +1713,7 @@ impl<'a, 'p> Run<'a, 'p> {
         })();
         // Remove exactly the folder this run created (checked against the expected path).
         let cleaned = if dir == format!("{home}/{HOME_TEST_PREFIX}{token}") {
-            let never = CancelToken::new();
-            let mut cb = |_: &Progress| {};
-            let mut r = Runner::new(&never, &mut cb);
-            let res = ops::delete(&spaces, &[Location::linux(&dir)], true, &mut r);
-            let rep = r.finish();
+            let (res, rep, _) = delete_through_files_layer(self.env, &spaces, &[Location::linux(&dir)]);
             res.is_ok()
                 && rep.failed.is_empty()
                 && self.names_at(&spaces, home).iter().all(|n| n != &name)
@@ -1460,6 +1816,10 @@ impl<'a, 'p> Run<'a, 'p> {
         let Some(dir) = self.diag_dir.clone() else {
             return;
         };
+        // Never leave a diagnostics terminal holding the folder open: close it before removing.
+        if let (Some(id), Some((mgr, _))) = (self.session.take(), self.env.terminal) {
+            let _ = mgr.close(&id);
+        }
         // Runs even after a cancellation: it removes only what this run itself created.
         let token = self
             .env
@@ -1475,36 +1835,46 @@ impl<'a, 'p> Run<'a, 'p> {
                 "Nothing was removed.",
             )
         } else if let Some(spaces) = self.spaces.as_ref() {
-            let never = CancelToken::new();
-            let mut cb = |_: &Progress| {};
-            let mut r = Runner::new(&never, &mut cb);
-            let res = ops::delete(spaces, &[Location::linux(&dir)], true, &mut r);
-            let rep = r.finish();
-            let gone = self
-                .env
-                .linux_root
-                .map(|root| {
-                    let mut p = root.to_path_buf();
-                    for c in linux_components(&dir).unwrap_or_default() {
-                        p.push(c);
-                    }
-                    matches!(fs::symlink_metadata(&p), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
-                })
-                .unwrap_or(false);
-            match res {
-                Ok(()) if rep.failed.is_empty() && gone => pass(format!(
-                    "Removed {dir} and everything the run created in it."
-                ))
-                .modified(),
-                Ok(()) => fail(
-                    format!("{dir} could not be removed completely."),
-                    format!("Remove {dir} yourself (in a terminal: rm -r {dir})."),
-                )
-                .modified(),
-                Err(e) => fail(
-                    e.message,
-                    format!("Remove {dir} yourself (in a terminal: rm -r {dir})."),
-                ),
+            let env = self.env;
+            let gone = |dir: &str| -> bool {
+                env.linux_root
+                    .map(|root| {
+                        let mut p = root.to_path_buf();
+                        for c in linux_components(dir).unwrap_or_default() {
+                            p.push(c);
+                        }
+                        matches!(fs::symlink_metadata(&p), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+                    })
+                    .unwrap_or(false)
+            };
+            // A second attempt is safe: deleting what is already gone is a no-op.
+            let mut problems = String::new();
+            let mut via_distro = 0;
+            for attempt in 0..2 {
+                if attempt > 0 {
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                let (res, rep, used) = delete_through_files_layer(env, spaces, &[Location::linux(&dir)]);
+                via_distro += used;
+                problems = match res {
+                    Err(e) => e.message,
+                    Ok(()) => failure_text(&rep),
+                };
+                if problems.is_empty() && gone(&dir) {
+                    break;
+                }
+            }
+            let hint = format!("Remove it yourself in a Linux terminal: rm -rf {dir}  (only the diagnostic folder; nothing else is affected).");
+            if problems.is_empty() && gone(&dir) {
+                let mut m = format!("Removed {dir} and everything the run created in it.");
+                if via_distro > 0 {
+                    m.push_str(" A link in it was removed with 'unlink' inside the distribution because Windows could not delete it through the file share.");
+                }
+                pass(m).modified()
+            } else if problems.is_empty() {
+                fail(format!("{dir} is still there after the clean-up."), hint).modified()
+            } else {
+                fail(format!("{dir} could not be removed completely: {problems}"), hint).modified()
             }
         } else {
             fail(
@@ -2096,6 +2466,7 @@ mod tests {
         storage: StorageConfig,
         programs: Programs,
         step: Duration,
+        startup: Option<Duration>,
     }
 
     fn default_rules() -> FakeRunner {
@@ -2149,6 +2520,7 @@ mod tests {
             storage: StorageConfig::default(),
             programs: Programs::fake(),
             step: Duration::from_secs(3),
+            startup: None,
         }
     }
 
@@ -2172,12 +2544,12 @@ mod tests {
                         } else if line.contains("VLXID") {
                             p.output(b"VLXID:tester:/home/tester:END\r\n");
                         } else if line.contains("033[31m") {
-                            p.output(b"\x1b[31mVLXRED\x1b[0m\r\n");
+                            p.output(b"\x1b[31mVLXRED7\x1b[0m\r\n");
                         } else if line.contains("342") {
-                            p.output("\u{2713}VLXU\r\n".as_bytes());
+                            p.output("\u{2713}VLXU7\r\n".as_bytes());
                         } else if line.contains("stty size") {
                             let s = p.sizes().last().copied().unwrap_or(PtySize::DEFAULT);
-                            p.output(format!("{} {}\r\n", s.rows, s.cols).as_bytes());
+                            p.output(format!("VLXSZ:{} {}:END\r\n", s.rows, s.cols).as_bytes());
                         }
                     }
                     seen = w.len();
@@ -2214,6 +2586,7 @@ mod tests {
             token: TOKEN.into(),
             budget: Duration::from_secs(60),
             step_timeout: w.step,
+            startup_timeout: w.startup.unwrap_or(w.step),
             scrub: vec![],
         }
     }
@@ -2945,6 +3318,352 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ---- M6.2: the terminal checks against a ConPTY-like shell --------------------------------
+
+    #[derive(Clone, Copy, Default)]
+    struct Conpty {
+        /// The shell needs this long before it answers anything.
+        delay: Duration,
+        /// `stty size` always claims this size (a pseudo-console that never passes a resize on).
+        stuck_size: Option<(u32, u32)>,
+        /// Colour sequences are removed on the way.
+        plain: bool,
+    }
+
+    /// Behaves like a Windows pseudo-console: it asks the terminal where the cursor is and prints
+    /// NOTHING until that question is answered. It also repaints with cursor/visibility sequences
+    /// and splits its output into small chunks, in the middle of the markers.
+    fn conpty_shell(
+        backend: FakeBackend,
+        stop: Arc<AtomicBool>,
+        cfg: Conpty,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let Some(p) = backend.wait_proc(0, Duration::from_secs(5)) else { return };
+            p.output(b"\x1b[?9001h\x1b[?1004h\x1b[6n");
+            let gate = Instant::now() + Duration::from_secs(10);
+            while !p.written_text().contains("\x1b[1;1R") {
+                if stop.load(Ordering::SeqCst) || Instant::now() > gate {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            std::thread::sleep(cfg.delay);
+            p.output(b"\x1b[2J\x1b[m\x1b[H\x1b]0;shell\x07");
+            let red: &[u8] = if cfg.plain { b"" } else { b"\x1b[31m" };
+            let mut seen = 0usize;
+            while !stop.load(Ordering::SeqCst) {
+                let w = p.written_text();
+                if w.len() > seen {
+                    for line in w[seen..].split('\r').filter(|l| !l.is_empty()) {
+                        if line.contains("VLX%sEND") {
+                            p.output(b"VLX4");
+                            p.output(b"\x1b[?25l\x1b[K");
+                            p.output(b"2END\r\n\x1b[?25h");
+                        } else if line.contains("VLXID") {
+                            p.output(b"VLXID:tester:/home/te");
+                            p.output(b"ster:END\x1b[K\r\n");
+                        } else if line.contains("033[31m") {
+                            p.output(red);
+                            p.output(b"VLXRE");
+                            p.output(b"D7\x1b[m\r\n");
+                        } else if line.contains("342") {
+                            p.output(b"\xe2\x9c");
+                            p.output(b"\x93VLXU7\r\n");
+                        } else if line.contains("stty size") {
+                            let sz = p.sizes().last().copied().unwrap_or(PtySize::DEFAULT);
+                            let (r, c) = cfg.stuck_size.unwrap_or((sz.rows as u32, sz.cols as u32));
+                            p.output(format!("VLXSZ:{r} {c}:END\r\n").as_bytes());
+                        }
+                    }
+                    seen = w.len();
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        })
+    }
+
+    fn terminal_only() -> Options {
+        Options {
+            categories: Some(vec![Category::Terminal]),
+            ..full()
+        }
+    }
+
+    fn run_conpty(w: &World, cfg: Conpty) -> Report {
+        let stop = Arc::new(AtomicBool::new(false));
+        let h = conpty_shell(w.backend.clone(), stop.clone(), cfg);
+        let r = go(w, Mode::Simulated, terminal_only(), None);
+        stop.store(true, Ordering::SeqCst);
+        let _ = h.join();
+        r
+    }
+
+    const TERMINAL_STEPS: [&str; 5] = [
+        "terminal.io",
+        "terminal.identity",
+        "terminal.ansi",
+        "terminal.unicode",
+        "terminal.resize",
+    ];
+
+    #[test]
+    fn the_five_terminal_checks_pass_against_a_console_that_waits_for_its_queries_to_be_answered() {
+        let w = world(Running);
+        let t0 = Instant::now();
+        let r = run_conpty(&w, Conpty::default());
+        for id in TERMINAL_STEPS {
+            assert_eq!(get(&r, id).outcome, Outcome::Passed, "{id}: {}", get(&r, id).message);
+        }
+        assert_eq!(get(&r, "terminal.close").outcome, Outcome::Passed);
+        assert_eq!(w.mgr.live_count(), 0);
+        assert!(t0.elapsed() < Duration::from_secs(5), "no check should have waited for a timeout");
+        // The throw-away user name was learned for scrubbing, never printed.
+        assert!(!r.text.contains("tester"));
+    }
+
+    #[test]
+    fn a_slow_shell_start_is_allowed_for_by_the_start_up_wait_not_the_step_wait() {
+        let mut w = world(Running);
+        w.step = Duration::from_millis(400);
+        w.startup = Some(Duration::from_secs(8));
+        let r = run_conpty(&w, Conpty { delay: Duration::from_millis(1500), ..Conpty::default() });
+        for id in TERMINAL_STEPS {
+            assert_eq!(get(&r, id).outcome, Outcome::Passed, "{id}: {}", get(&r, id).message);
+        }
+    }
+
+    #[test]
+    fn resize_that_never_reaches_the_shell_fails_with_the_size_the_shell_saw() {
+        let mut w = world(Running);
+        w.step = Duration::from_millis(1500);
+        let r = run_conpty(&w, Conpty { stuck_size: Some((24, 80)), ..Conpty::default() });
+        for id in &TERMINAL_STEPS[..4] {
+            assert_eq!(get(&r, id).outcome, Outcome::Passed, "{id}");
+        }
+        let rs = get(&r, "terminal.resize");
+        assert_eq!(rs.outcome, Outcome::Failed);
+        assert!(rs.message.contains("24 80") && rs.message.contains("41 123"), "{}", rs.message);
+        assert_eq!(get(&r, "terminal.close").outcome, Outcome::Passed);
+    }
+
+    #[test]
+    fn colour_that_is_stripped_on_the_way_fails_the_ansi_check_only() {
+        let w = world(Running);
+        let r = run_conpty(&w, Conpty { plain: true, ..Conpty::default() });
+        let a = get(&r, "terminal.ansi");
+        assert_eq!(a.outcome, Outcome::Failed);
+        assert!(a.message.contains("without a red"), "{}", a.message);
+        for id in ["terminal.io", "terminal.identity", "terminal.unicode", "terminal.resize"] {
+            assert_eq!(get(&r, id).outcome, Outcome::Passed, "{id}");
+        }
+    }
+
+    #[test]
+    fn a_terminal_that_never_answers_fails_once_with_numbers_and_the_rest_are_not_attempted() {
+        let mut w = world(Running);
+        w.step = Duration::from_millis(150);
+        let t0 = Instant::now();
+        let r = go(&w, Mode::Simulated, terminal_only(), None);
+        let io = get(&r, "terminal.io");
+        assert_eq!(io.outcome, Outcome::Failed);
+        assert!(io.message.contains("bytes of output received"), "{}", io.message);
+        for id in &TERMINAL_STEPS[1..] {
+            assert_eq!(get(&r, id).outcome, Outcome::Skipped, "{id}");
+        }
+        assert!(t0.elapsed() < Duration::from_secs(3));
+        assert_eq!(w.mgr.live_count(), 0);
+    }
+
+    #[test]
+    fn the_recorder_answers_each_terminal_query_once_even_when_it_arrives_in_pieces() {
+        let sink = DiagSink::new();
+        sink.output("a", b"hello\x1b[6");
+        assert!(sink.take_pending("a").0.is_empty());
+        let second: &[u8] = b"n world\x1b[c";
+        sink.output("a", second);
+        let (reply, acked) = sink.take_pending("a");
+        assert_eq!(reply, [REPLY_DSR, REPLY_DA1].concat());
+        assert_eq!(acked, second.len());
+        // A later chunk does not make the earlier queries count again.
+        sink.output("a", b"plain");
+        sink.output("a", b"\x1b[0c");
+        assert_eq!(sink.take_pending("a").0, REPLY_DA1.to_vec());
+        assert!(sink.take_pending("a").0.is_empty());
+        // Other queries and other sessions are left alone.
+        sink.output("a", b"\x1b[?6n\x1b[5n");
+        sink.output("b", b"x");
+        assert!(sink.take_pending("a").0.is_empty() && sink.take_pending("b").0.is_empty());
+        assert_eq!(sink.stats("a").1, 3);
+    }
+
+    #[test]
+    fn readable_text_ignores_repaints_and_red_is_recognised_in_its_usual_spellings() {
+        assert_eq!(
+            strip_ansi("\x1b[31mre\x1b[?25ld\x1b[0m \x1b]0;title\x07ok \x1b(Bfine\x1b[2;1H!"),
+            "red ok fine!"
+        );
+        assert!(red_before("\x1b[31mVLXRED7", "VLXRED7"));
+        assert!(red_before("\x1b[1;31mVLXRED7", "VLXRED7"));
+        assert!(red_before("\x1b[91mVLXRED7", "VLXRED7"));
+        assert!(red_before("\x1b[38;5;1mVLXRED7", "VLXRED7"));
+        assert!(!red_before("VLXRED7", "VLXRED7"));
+        assert!(!red_before("\x1b[32mVLXRED7", "VLXRED7"));
+        // The echoed command line spells the escape out but contains no escape character.
+        assert!(!red_before("printf '\\033[31mVLX%s' RED7", "VLXRED7"));
+        assert_eq!(
+            parse_identity(&strip_ansi("VLXID:dana:/ho\x1b[Kme/dana:END\x1b[K\r\n")),
+            Some(("dana".into(), "/home/dana".into()))
+        );
+        assert_eq!(
+            last_reported_size("printf 'VLXSZ:%s:END'\r\nVLXSZ:24 80:END\r\nVLXSZ:41 123:END\r\n").as_deref(),
+            Some("41 123")
+        );
+    }
+
+    // ---- M6.2: clean-up ------------------------------------------------------------------------
+
+    fn cleanup_run<'a>(
+        w: &World,
+        e: &'a DiagEnv<'a>,
+        opts: &'a Options,
+        cancel: &'a CancelToken,
+        noop: &'a mut dyn FnMut(&CheckResult),
+        dir: &str,
+    ) -> Run<'a, 'a> {
+        Run {
+            env: e,
+            opts,
+            cancel,
+            progress: noop,
+            started: Instant::now(),
+            results: Vec::new(),
+            distro: Some("Debian".into()),
+            wsl_ready: true,
+            running: true,
+            share_ok: true,
+            spaces: Some(Spaces {
+                linux_root: Some(w.root.path().to_path_buf()),
+                linux_home: None,
+                mount_root: "/mnt".into(),
+                windows: vec![],
+                mapped_links: vec![],
+            }),
+            home: None,
+            mount_root: "/mnt".into(),
+            automount: true,
+            diag_dir: Some(dir.into()),
+            session: None,
+            learned: Vec::new(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_clean_up_that_cannot_finish_says_what_remains_never_passes_and_can_be_retried() {
+        use std::os::unix::fs::PermissionsExt;
+        let w = world(Running);
+        let dir = "/tmp/vlinux-diag-abcdef1234";
+        let host = w.root.join("tmp/vlinux-diag-abcdef1234");
+        fs::create_dir_all(host.join("locked")).unwrap();
+        fs::write(host.join("locked/stuck.txt"), "x").unwrap();
+        fs::write(host.join("fine.txt"), "x").unwrap();
+        fs::set_permissions(host.join("locked"), fs::Permissions::from_mode(0o555)).unwrap();
+        struct Unlock(PathBuf);
+        impl Drop for Unlock {
+            fn drop(&mut self) {
+                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+            }
+        }
+        let _guard = Unlock(host.join("locked"));
+        if fs::write(host.join("locked/probe"), "x").is_ok() {
+            return; // running as root: permissions do not stop it, nothing to simulate
+        }
+        let report = w.report.clone();
+        let detect = || w.report.clone();
+        let e = env(&w, Mode::Simulated, &report, &detect);
+        let (opts, cancel) = (Options::default(), CancelToken::new());
+        let mut noop = |_: &CheckResult| {};
+        let mut r = cleanup_run(&w, &e, &opts, &cancel, &mut noop, dir);
+        r.cleanup();
+        let first = &r.results[0];
+        assert_eq!(first.outcome, Outcome::Failed, "{}", first.message);
+        assert!(first.message.contains(dir), "{}", first.message);
+        assert!(first.guidance.as_deref().unwrap_or("").contains(&format!("rm -rf {dir}")));
+        assert!(r.diag_dir.is_some(), "the folder is still to be cleaned up");
+        assert!(host.exists() && host.join("locked/stuck.txt").exists());
+        // Only this run's own folder was involved.
+        assert!(w.root.join("home/dana").exists());
+        // Retry once the obstacle is gone: it finishes the job and then passes.
+        fs::set_permissions(host.join("locked"), fs::Permissions::from_mode(0o755)).unwrap();
+        r.cleanup();
+        assert_eq!(r.results[1].outcome, Outcome::Passed, "{}", r.results[1].message);
+        assert!(r.diag_dir.is_none());
+        assert!(!host.exists());
+    }
+
+    #[test]
+    fn clean_up_closes_a_terminal_session_that_is_still_open_before_removing_anything() {
+        let w = world(Running);
+        let dir = "/tmp/vlinux-diag-abcdef1234";
+        fs::create_dir_all(w.root.join("tmp/vlinux-diag-abcdef1234")).unwrap();
+        let target = Target { name: "Debian".into(), label: "Debian".into() };
+        let info = w.mgr.open_target(&target, &w.programs, PtySize::DEFAULT).unwrap();
+        assert_eq!(w.mgr.live_count(), 1);
+        let report = w.report.clone();
+        let detect = || w.report.clone();
+        let e = env(&w, Mode::Simulated, &report, &detect);
+        let (opts, cancel) = (Options::default(), CancelToken::new());
+        let mut noop = |_: &CheckResult| {};
+        let mut r = cleanup_run(&w, &e, &opts, &cancel, &mut noop, dir);
+        r.session = Some(info.id);
+        r.cleanup();
+        assert_eq!(w.mgr.live_count(), 0);
+        assert_eq!(r.results[0].outcome, Outcome::Passed, "{}", r.results[0].message);
+        assert!(!w.root.join("tmp/vlinux-diag-abcdef1234").exists());
+    }
+
+    /// The exact marker commands, typed into a REAL pseudo-terminal (`/bin/sh -i` on a Linux PTY):
+    /// real echo, real line discipline, real `stty`. Not WSL — but everything the checks do except
+    /// the Windows pseudo-console is exercised for real.
+    #[cfg(unix)]
+    #[test]
+    fn the_marker_commands_work_on_a_real_pseudo_terminal_with_the_real_recorder() {
+        use crate::terminal::launch::LaunchPlan;
+        use crate::terminal::NativePty;
+        let sink = Arc::new(DiagSink::new());
+        let mgr = TerminalManager::new(Arc::new(NativePty), sink.clone());
+        let id = mgr
+            .open_plan(
+                "diag-real-pty",
+                "Diag shell",
+                LaunchPlan::single("sh", "/bin/sh", &["-i"]),
+                PtySize::DEFAULT,
+            )
+            .expect("a real PTY session starts")
+            .id;
+        let t = Duration::from_secs(30);
+        let go = |cmd: &str, pred: &dyn Fn(&str) -> bool| {
+            mgr.write(&id, cmd.as_bytes()).unwrap();
+            assert!(
+                await_terminal(&mgr, &sink, &id, t, None, pred),
+                "{cmd:?} -> {:?}",
+                sink.clean_text(&id)
+            );
+        };
+        go(CMD_IO, &|t| t.contains("VLX42END"));
+        go(CMD_IDENTITY, &|t| parse_identity(t).is_some());
+        let (user, home) = parse_identity(&sink.clean_text(&id)).unwrap();
+        assert!(!user.is_empty() && home.starts_with('/'), "{user} {home}");
+        go(CMD_ANSI, &|t| t.contains("VLXRED7"));
+        assert!(red_before(&sink.text(&id), "VLXRED7"));
+        go(CMD_UNICODE, &|t| t.contains("\u{2713}VLXU7"));
+        mgr.resize(&id, 41, 123).unwrap();
+        go(CMD_SIZE, &|t| t.contains("VLXSZ:41 123:END"));
+        mgr.close(&id).unwrap();
+        assert_eq!(mgr.live_count(), 0);
     }
 
     #[test]
