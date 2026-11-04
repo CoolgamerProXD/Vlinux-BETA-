@@ -3382,7 +3382,9 @@ mod tests {
                             p.output(b"VLXID:tester:/home/te");
                             p.output(b"ster:END\x1b[K\r\n");
                         } else if line.contains("033[31m") {
-                            p.output(red);
+                            if !red.is_empty() {
+                                p.output(red);
+                            }
                             p.output(b"VLXRE");
                             p.output(b"D7\x1b[m\r\n");
                         } else if line.contains("342") {
