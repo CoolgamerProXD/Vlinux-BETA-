@@ -1500,6 +1500,33 @@ mod tests {
         );
     }
 
+    /// REAL WINDOWS test: a file held open without delete sharing blocks the delete; the failure is
+    /// reported for that item (nothing is claimed as removed) and a retry after the handle is
+    /// closed succeeds — the situation a still-open terminal or editor creates.
+    #[cfg(windows)]
+    #[test]
+    fn real_windows_open_handle_blocks_delete_is_reported_and_retry_succeeds() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        l.file("home/me/held/inside.txt", "x");
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(l.join("home/me/held/inside.txt"))
+            .unwrap();
+        let s = spaces(&l, &w);
+        let (_, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/held")], true, run));
+        assert_eq!(rep.items_done, 0);
+        assert!(!rep.failed.is_empty());
+        assert!(l.join("home/me/held/inside.txt").exists());
+        drop(held);
+        let (r, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/held")], true, run));
+        r.unwrap();
+        assert!(rep.failed.is_empty(), "{:?}", rep.failed);
+        assert!(!l.join("home/me/held").exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn links_are_recognised_from_both_the_entry_itself_and_its_parents_listing() {

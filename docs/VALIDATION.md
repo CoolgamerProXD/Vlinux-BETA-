@@ -16,7 +16,7 @@ Source: workflow runs for commits `c41b2a6`, `6dfba9e`, `b0fd483` and `841c8eb` 
 
 | Check | Result |
 |---|---|
-| `npx tauri build` produces an NSIS installer | yes — `VLINUX_0.1.0_x64-setup.exe`, 2.0 MiB (2,082,454 bytes) |
+| `npx tauri build` produces an NSIS installer | yes — `VLINUX_0.1.0_x64-setup.exe` at M6 (named `VLINUX_0.6.3_x64-setup.exe` since M6.3), 2.0 MiB |
 | Silent per-user install (`/S`, no admin) | exit code 0; `vlinux.exe` and `uninstall.exe` installed under `%LOCALAPPDATA%` |
 | Start Menu entry | created (the step fails the job if it is missing) |
 | Desktop shortcut | created by the silent installer: `Desktop (user) = VLINUX.lnk` and `Start Menu (user) = VLINUX.lnk` (annotation *Installer result*); installed to `%LOCALAPPDATA%\VLINUX` containing `vlinux.exe` and `uninstall.exe` |
@@ -177,3 +177,38 @@ The M6.1 run on the user's Arch (WSL 3.0.3.0) reported 29 passed / 7 failed / 1 
 **Tests added (simulated / real-PTY, none is real WSL):** a ConPTY-like fake shell that prints nothing until its cursor query is answered, with split markers and repaint sequences (all five checks pass, no timeout); a slow shell start; a resize that never arrives (fails naming `24 80`); stripped colour; a silent terminal (one failure, rest skipped, bounded time); recorder query handling incl. split sequences; the exact marker commands on a real Linux PTY (`/bin/sh -i`, real `stty`); link deletion (file, folder and dangling links keep their targets; a locked folder forces the in-distribution fallback; both failing reports both reasons; paths come only from inside the root); a clean-up that cannot finish (fails, names the folder, is retry-safe, then passes) and one that closes a still-open terminal first.
 
 **Retest on the PC:** Distributions → Diagnostics → tick both boxes → Run → Copy report. If any line still fails, its message now says why. If the cleanup line fails, run the `rm -rf` line it prints in the Arch terminal (it only names the diagnostic folder).
+
+## 13. M6.3 — root-cause investigation on a REAL Arch (disposable CI VM)
+
+M6.2 was reported to fail the same way as M6.1. Instead of guessing again, a **WSL lab** (`.github/workflows/wsl-lab.yml`, `scripts/wsl-lab/`) installs the official Arch image (`wsl --install archlinux --no-launch`, ~27 s) on a **disposable `windows-latest` runner** and runs the app's own diagnostics code against it. This is a **real WSL 3.0.3.0, kernel 6.18.54.1-1, real Arch, real ConPTY, real `\\wsl.localhost` share — but a CI VM (Windows Server 2025, build 26100), not the Dell**. Nothing in the lab touches the user's `archlinux`.
+
+### Evidence (all from the lab; counts and times only, no output text)
+
+| Question | Result |
+|---|---|
+| Does M6.1's behaviour (terminal queries unanswered) reproduce the reported failure on a real console? | **Yes, exactly.** `terminal.io` failed after the full wait with *4 bytes received* — the pseudo-console's cursor query `ESC[6n` at 18 ms — *0 bytes answered*, nothing else ever arrived. |
+| Does answering the query fix it? | **Yes.** Same distro, queries answered: all five terminal checks + close pass; `terminal.io` in 309 ms (warm) — first output 14 ms, 6 reply bytes written. |
+| Is there a slow first start? | Yes: on a cold distro the first `terminal.io` took 6.2 s (output kept arriving for 6 s: 2 238 bytes vs 886 warm). **An 8 s step budget would be close to failing even with the answer; M6.2's 20 s start-up allowance covers it.** Plain `wsl.exe --exec` takes ~120 ms warm, ~2.3 s the very first call. |
+| How does Windows see WSL links over the share? | Directory links, file links and dangling links all appear as `ReparsePoint` **without** the Directory attribute; `fsutil reparsepoint query` fails. |
+| Can Windows delete them? | **No, not reliably.** `Remove-Item`/`File.Delete`: "Could not find a part of the path" (dir and file links); `Directory.Delete`/`rmdir`: "The directory name is invalid"; `cmd del` and any delete of a *dangling* link **report success and leave the link in place**. |
+| Does `unlink` inside the distribution work? | Yes; the share drops the entry at once and the target is untouched. |
+| Do M6.2's checks pass on a real Arch? | 34 passed / 1 failed (`terminal.identity`: the lab's first run used root because user creation failed) / 1 skipped / 1 not tested. With a normal default user (`lab`) the terminal checks pass too, and with M6.3 `fs.symlink_no_follow` and `fs.cleanup` pass on the real share. |
+
+### Root causes
+
+| Group | Cause | Status |
+|---|---|---|
+| A. five terminal timeouts | The recorder in M6.1 never answered ConPTY's `ESC[6n`; ConPTY then sends nothing else. **Reproduced on a real console (above).** | Fixed in M6.2 (answers queries), **confirmed on real Arch**. M6.3 adds an evidence line to each terminal message so any future failure shows *when* output arrived, whether queries were answered/acked, whether the marker was in the raw output or only after removing escapes. |
+| B. link delete | Windows delete of a WSL link is unreliable (fails with misleading errors, or silently does nothing). M6.2 tried Windows first and used `unlink` only as a fallback after a *failure* — it would still trust a "success" that changed nothing. | **M6.3:** inside the distribution's share, `unlink` runs **first**; every removal is **verified by looking again** (up to 1 s); Windows is only a last resort and is not believed either. Any reparse point on the share counts as a link (never followed, never descended). Failures are structured: what was tried, the distribution's answer, Windows' answer with its OS error code, whether the link remains, whether the target is still reachable. Target never touched. |
+| C. leftover diagnostic folder | Consequence of B. | Same fix; clean-up verified on the real share. |
+| D. "I ran M6.2 and it was identical" | The report text the user pasted (every terminal check *"after 8 seconds"*, no skips) is **M6.1's** wording; M6.2 would have skipped four checks and waited 20 s. Every installer was named `VLINUX_0.1.0_x64-setup.exe`, so an old download is easy to run by mistake. **This is an inference; it cannot be proven from here.** | M6.3 bumps the version to **0.6.3** (installer `VLINUX_0.6.3_x64-setup.exe`) and stamps **every diagnostics report and the Diagnostics panel with `<version> (<commit>)`**. |
+
+### Tests (labelled)
+
+* **Real WSL (lab, CI VM):** `real_diagnostics_in_the_wsl_lab`, `real_terminal_experiments_in_the_wsl_lab` (unanswered vs answered).
+* **Modelled on lab observations:** unlink-first with Windows never asked; a Windows delete that "succeeds" without removing is not believed; a distribution `unlink` that "succeeds" without removing is not believed; the Windows error code is preserved; the report text contains both answers and "the link is still there: yes"; the target survives each time. A fake console that holds output until answered fails with the evidence line and passes with answers; evidence never contains typed or printed text.
+* **Real Windows (CI):** a directory junction and a folder symlink are removed without touching their targets; a file held open without delete-sharing blocks a delete, is reported, and a retry after closing succeeds.
+
+### Still not verified
+
+On **your** PC: that the new installer's diagnostics pass (they should, given the lab, but the lab is a different machine), your login shell/dotfiles, and the Windows Explorer file-association check. Run **Distributions → Diagnostics** with both boxes ticked, and check the first line of the report says `Build: VLINUX 0.6.3 (…)`.

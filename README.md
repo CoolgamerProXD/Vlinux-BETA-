@@ -6,7 +6,7 @@ A Windows application that gives you the experience of a Linux desktop without m
 
 ## Quick start (Windows 11 or 10 1809+, x64)
 
-**Install** — download `VLINUX_0.1.0_x64-setup.exe` from the newest **pre-release** on the repository's *Releases* page (one is published by CI for every pushed commit, tagged `installer-<commit>`; the same file is also in the workflow artifact `vlinux-windows`). Run it: it installs for the current user only (no administrator rights) into `%LOCALAPPDATA%\VLINUX` and adds a **Start Menu** entry (and, in the interactive installer, a Desktop shortcut). The installer is **not code-signed**, so Windows SmartScreen will say "unknown publisher": choose *More info → Run anyway*. Uninstalling removes the program only; it never touches WSL distributions or your files.
+**Install** — download `VLINUX_0.6.3_x64-setup.exe` from the newest **pre-release** on the repository's *Releases* page (one is published by CI for every pushed commit, tagged `installer-<commit>`; the same file is also in the workflow artifact `vlinux-windows`). Run it: it installs for the current user only (no administrator rights) into `%LOCALAPPDATA%\VLINUX` and adds a **Start Menu** entry (and, in the interactive installer, a Desktop shortcut). The installer is **not code-signed**, so Windows SmartScreen will say "unknown publisher": choose *More info → Run anyway*. Uninstalling removes the program only; it never touches WSL distributions or your files.
 
 **Launch** — Start Menu → *VLINUX* (or the Desktop shortcut). It opens full screen on the desktop. `Ctrl+Alt+Q` goes back to Windows at any time, `F11` toggles full screen.
 
@@ -75,6 +75,9 @@ cd src-tauri && cargo test -p vlinux-runtime   # runtime crate (no Tauri needed;
 cd src-tauri && cargo test --workspace         # + the Tauri app crate (needs the Tauri build prerequisites)
 ```
 `.github/workflows/ci.yml` has a fast Ubuntu job for the runtime crate, and a `windows-latest` job that runs everything, builds the installer and smoke-launches the real app. The browser e2e uses *simulated* WSL data (`?wsl=missing|empty|ready|reboot|multi`, clearly labelled in the UI); real detection only exists in the desktop app.
+
+## Verification status (M6.3)
+M6.3 reproduced your failures on a **real Arch under real WSL 3.0.3.0 on a disposable CI VM** (not your PC): the M6.1 behaviour fails exactly as you saw, the fixed behaviour passes, and Windows really cannot be trusted to delete WSL links (some deletes *report success and do nothing*). Links are now removed with `unlink` inside the distribution first and every removal is verified. Your report text matched **M6.1's** wording, so you may have run an older installer: this build is **0.6.3** (`VLINUX_0.6.3_x64-setup.exe`) and every diagnostics report starts with a `Build:` line. Details: [docs/VALIDATION.md §13](docs/VALIDATION.md#13-m63--root-cause-investigation-on-a-real-arch-disposable-ci-vm).
 
 ## Verification status (M6.2)
 Your first real-Arch diagnostic found seven failures in three groups (terminal checks timing out; deleting a link; leftover diagnostic folder). Causes and fixes are in [docs/VALIDATION.md](docs/VALIDATION.md#12-m62--fixes-for-the-first-real-arch-diagnostic). The causes are **inferred from the code and the failure pattern**, and the fixes are tested against simulated, temp-dir and real-Linux-PTY environments only — **they are not yet confirmed on your Arch**; re-run Diagnostics there.
