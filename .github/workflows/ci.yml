@@ -83,8 +83,17 @@ jobs:
           code=${PIPESTATUS[0]}
           sum=$(grep -E '^test result|^error|^warning: unused|Running |Doc-tests' ../runtime-test.log | head -40 | sed ':a;N;$!ba;s/\n/%0A/g')
           if [ "$code" -ne 0 ]; then
-            det=$(grep -E -A7 '^error|^---- |panicked at|FAILED|failed:' ../runtime-test.log | head -80 | cut -c1-300 | sed ':a;N;$!ba;s/\n/%0A/g')
-            echo "::error title=runtime tests FAILED::${sum}%0A${det}"
+            echo "::error title=runtime tests FAILED::${sum}"
+            # Failure details as several small annotations, control characters removed (a raw
+            # escape character in a test's output can make the runner drop a long annotation).
+            grep -E -A7 '^error|^---- |panicked at|FAILED|failed:' ../runtime-test.log | head -90 | tr -cd '\11\12\40-\176' | cut -c1-300 > ../runtime-fail.txt || true
+            split -l 9 ../runtime-fail.txt ../runtime-fail-part-
+            n=0
+            for f in ../runtime-fail-part-*; do
+              n=$((n+1))
+              [ "$n" -gt 9 ] && break
+              echo "::error title=runtime tests FAILED (detail $n)::$(sed ':a;N;$!ba;s/\n/%0A/g' "$f")"
+            done
             exit 1
           fi
           echo "::notice title=runtime tests::${sum}"
