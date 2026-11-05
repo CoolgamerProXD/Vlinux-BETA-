@@ -39,3 +39,11 @@ jobs:
         shell: pwsh
         run: ./scripts/wsl-lab/symlink-experiment.ps1
         continue-on-error: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Real VLINUX diagnostics against the real Arch (same code path as the app)
+        shell: pwsh
+        run: ./scripts/wsl-lab/real-diag.ps1
+        continue-on-error: true

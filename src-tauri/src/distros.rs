@@ -750,9 +750,57 @@ fn diag_token(seq: u64) -> String {
 
 impl DistroMgmt {
     fn run_diag(&self, options: &Options, storage: &StorageConfig, cancel: &CancelToken) -> Report {
-        let report = self.rt.detect(true);
         let seq = self.counter.fetch_add(1, Ordering::SeqCst);
         let run_id = format!("diag-{seq}");
+        let extra_scrub: Vec<String> = options
+            .distro
+            .as_deref()
+            .and_then(|n| self.inspections.get(n))
+            .and_then(|i| i.default_user)
+            .into_iter()
+            .collect();
+        let app = self.app.clone();
+        let mut index = 0usize;
+        run_diag_core(
+            &self.rt,
+            &self.runner,
+            &self.dir,
+            extra_scrub,
+            seq,
+            options,
+            storage,
+            cancel,
+            &mut |c: &CheckResult| {
+                index += 1;
+                let _ = app.emit(
+                    DIAG_EVENT,
+                    DiagProgress {
+                        run_id: run_id.clone(),
+                        index,
+                        result: c.clone(),
+                    },
+                );
+            },
+        )
+    }
+}
+
+/// The diagnostics run itself, free of any window: the app calls it with an event-emitting
+/// progress callback, and the WSL lab (a disposable CI runner with a real Arch) calls it directly.
+#[allow(clippy::too_many_arguments)]
+fn run_diag_core(
+    rt: &Arc<RuntimeState>,
+    runner: &Arc<dyn CommandRunner>,
+    dir: &Path,
+    extra_scrub: Vec<String>,
+    seq: u64,
+    options: &Options,
+    storage: &StorageConfig,
+    cancel: &CancelToken,
+    progress: &mut dyn FnMut(&CheckResult),
+) -> Report {
+    {
+        let report = rt.detect(true);
 
         let running = options
             .distro
@@ -776,16 +824,16 @@ impl DistroMgmt {
             _ => None,
         };
         let ops = options.distro.as_deref().and_then(|n| {
-            WslDistroOps::new(self.runner.clone(), self.rt.programs.wsl.clone(), n).ok()
+            WslDistroOps::new(runner.clone(), rt.programs.wsl.clone(), n).ok()
         });
         let sink = Arc::new(DiagSink::new());
         let mgr = TerminalManager::new(Arc::new(NativePty), sink.clone());
         let detect = || {
-            self.rt.invalidate();
-            self.rt.detect(true)
+            rt.invalidate();
+            rt.detect(true)
         };
         let exists = |p: &str| Path::new(p).is_dir();
-        let store = MappingStore::new(&self.dir);
+        let store = MappingStore::new(&dir);
         let resolver = SystemKnownFolders;
         let drives = SystemDrives;
         let sysroot = if cfg!(windows) {
@@ -804,19 +852,12 @@ impl DistroMgmt {
             .iter()
             .filter_map(|k| std::env::var(k).ok())
             .collect();
-        if let Some(u) = options
-            .distro
-            .as_deref()
-            .and_then(|n| self.inspections.get(n))
-            .and_then(|i| i.default_user)
-        {
-            scrub.push(u);
-        }
+        scrub.extend(extra_scrub);
         let env = DiagEnv {
             mode: Mode::Real,
             report: &report,
-            runner: &self.runner,
-            programs: &self.rt.programs,
+            runner,
+            programs: &rt.programs,
             terminal: Some((&mgr, &*sink)),
             linux_root: root.as_deref(),
             ops: ops.as_ref().map(|o| o as &dyn DistroOps),
@@ -835,20 +876,7 @@ impl DistroMgmt {
             startup_timeout: DIAG_STARTUP,
             scrub,
         };
-        let mut index = 0usize;
-        let app = self.app.clone();
-        let rid = run_id.clone();
-        let result = diag::run(&env, options, cancel, &mut |c: &CheckResult| {
-            index += 1;
-            let _ = app.emit(
-                DIAG_EVENT,
-                DiagProgress {
-                    run_id: rid.clone(),
-                    index,
-                    result: c.clone(),
-                },
-            );
-        });
+        let result = diag::run(&env, options, cancel, progress);
         mgr.close_all();
         result
     }
@@ -904,4 +932,56 @@ pub async fn diag_cancel(dm: Dm<'_>) -> Result<bool, AppError> {
         }
     })
     .await
+}
+
+/// The WSL lab: runs the REAL diagnostics, through the same code path as the app, against a real
+/// distribution. It does nothing unless `VLINUX_LAB_DISTRO` is set, which only the lab workflow
+/// (a disposable GitHub-hosted VM with a throw-away Arch) does. Never run it against a distribution
+/// you care about: the diagnostics create and remove one folder under /tmp and type into a terminal.
+#[cfg(test)]
+mod lab {
+    use super::*;
+
+    #[test]
+    fn real_diagnostics_in_the_wsl_lab() {
+        let Ok(distro) = std::env::var("VLINUX_LAB_DISTRO") else {
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("vlinux-lab-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rt = Arc::new(RuntimeState::new(&dir));
+        let runner: Arc<dyn CommandRunner> = Arc::new(SystemRunner);
+        let options = Options {
+            distro: Some(distro),
+            allow_start: true,
+            allow_write: true,
+            categories: None,
+        };
+        let report = run_diag_core(
+            &rt,
+            &runner,
+            &dir,
+            Vec::new(),
+            1,
+            &options,
+            &StorageConfig::default(),
+            &CancelToken::new(),
+            &mut |c: &CheckResult| println!("LAB-CHECK {} {:?} {} ms", c.id, c.outcome, c.ms),
+        );
+        for c in &report.results {
+            println!(
+                "LAB-RESULT {} | {:?} | {} ms | {} | {}",
+                c.id,
+                c.outcome,
+                c.ms,
+                c.message.replace('\n', " "),
+                c.guidance.clone().unwrap_or_default().replace('\n', " ")
+            );
+        }
+        println!("LAB-SUMMARY {:?} leftover={:?}", report.summary, report.diag_dir);
+        if let Ok(out) = std::env::var("VLINUX_LAB_OUT") {
+            let _ = std::fs::write(out, serde_json::to_string_pretty(&report).unwrap_or_default());
+        }
+        // The lab reports instead of asserting: its purpose is evidence, not a verdict.
+    }
 }
