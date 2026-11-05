@@ -834,9 +834,10 @@ fn run_diag_core(
             }
             _ => None,
         };
-        let ops = options.distro.as_deref().and_then(|n| {
-            WslDistroOps::new(runner.clone(), rt.programs.wsl.clone(), n).ok()
-        });
+        let ops = options
+            .distro
+            .as_deref()
+            .and_then(|n| WslDistroOps::new(runner.clone(), rt.programs.wsl.clone(), n).ok());
         let sink = Arc::new(DiagSink::new());
         sink.set_silent(!answer_queries);
         let mgr = TerminalManager::new(Arc::new(NativePty), sink.clone());
@@ -995,7 +996,10 @@ mod lab {
                 c.guidance.clone().unwrap_or_default().replace('\n', " ")
             );
         }
-        println!("LAB-SUMMARY {tag} {:?} leftover={:?}", report.summary, report.diag_dir);
+        println!(
+            "LAB-SUMMARY {tag} {:?} leftover={:?}",
+            report.summary, report.diag_dir
+        );
         report
     }
 
@@ -1006,7 +1010,10 @@ mod lab {
         };
         let report = lab_run(&distro, "full", true, None);
         if let Ok(out) = std::env::var("VLINUX_LAB_OUT") {
-            let _ = std::fs::write(out, serde_json::to_string_pretty(&report).unwrap_or_default());
+            let _ = std::fs::write(
+                out,
+                serde_json::to_string_pretty(&report).unwrap_or_default(),
+            );
         }
         // The lab reports instead of asserting: its purpose is evidence, not a verdict.
     }

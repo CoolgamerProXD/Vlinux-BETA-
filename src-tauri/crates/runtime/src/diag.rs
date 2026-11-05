@@ -1212,7 +1212,10 @@ impl<'a, 'p> Run<'a, 'p> {
             sink.note_input(&id, written.is_ok());
             if let Err(e) = written {
                 return Err(fail(
-                    format!("Could not send input to the terminal: {e}. {}", sink.evidence(&id)),
+                    format!(
+                        "Could not send input to the terminal: {e}. {}",
+                        sink.evidence(&id)
+                    ),
                     hint,
                 ));
             }
@@ -3748,7 +3751,9 @@ mod tests {
         }
         // The evidence never contains what was typed or printed.
         assert!(!io.message.contains("VLX%sEND") && !io.message.contains("printf"));
-        assert!(r.text.starts_with("VLINUX compatibility report\nBuild: VLINUX test-build"));
+        assert!(r
+            .text
+            .starts_with("VLINUX compatibility report\nBuild: VLINUX test-build"));
     }
 
     #[test]
@@ -3758,7 +3763,11 @@ mod tests {
         let io = get(&r, "terminal.io");
         assert_eq!(io.outcome, Outcome::Passed, "{}", io.message);
         assert!(io.message.contains("terminal queries 1"), "{}", io.message);
-        assert!(!io.message.contains("answers written 0 bytes"), "{}", io.message);
+        assert!(
+            !io.message.contains("answers written 0 bytes"),
+            "{}",
+            io.message
+        );
         assert!(io.message.contains("acknowledged"), "{}", io.message);
     }
 
@@ -3768,7 +3777,10 @@ mod tests {
         sink.begin("a", Instant::now());
         sink.output("a", b"secret\r\n\x1b[31mred\x1b[m\x1b[2;1H\x1b]0;title\x07");
         let e = sink.evidence("a");
-        assert!(e.contains("H") && e.contains("mx2") && e.contains("1 other"), "{e}");
+        assert!(
+            e.contains("H") && e.contains("mx2") && e.contains("1 other"),
+            "{e}"
+        );
         assert!(!e.contains("secret") && !e.contains("title"), "{e}");
         assert!(e.contains("first output"), "{e}");
     }

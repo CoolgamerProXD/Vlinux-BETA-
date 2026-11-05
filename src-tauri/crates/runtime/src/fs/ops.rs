@@ -1274,7 +1274,10 @@ mod tests {
             // Everything an engineer needs: what was tried, both answers, what remains.
             assert!(m.contains("From Windows: failed:"), "{m}");
             assert!(m.contains("The link is still there: yes"), "{m}");
-            assert!(m.contains("under /home") || m.contains("in a home folder"), "{m}");
+            assert!(
+                m.contains("under /home") || m.contains("in a home folder"),
+                "{m}"
+            );
             assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_ok());
             assert_eq!(
                 fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
@@ -1298,7 +1301,11 @@ mod tests {
         use std::os::unix::fs::symlink;
         l.file("home/me/target-dir/inside.txt", "inside");
         l.dir("home/me/links");
-        symlink(l.join("home/me/target-dir"), l.join("home/me/links/dir-link")).unwrap();
+        symlink(
+            l.join("home/me/target-dir"),
+            l.join("home/me/links/dir-link"),
+        )
+        .unwrap();
     }
 
     #[cfg(unix)]
@@ -1321,13 +1328,27 @@ mod tests {
             remove_link(p)
         };
         let (r, rep, _) = run_with(|run| {
-            delete_with_host(&s, &[lin("/home/me/links/dir-link")], true, run, Some(&rm), &host)
+            delete_with_host(
+                &s,
+                &[lin("/home/me/links/dir-link")],
+                true,
+                run,
+                Some(&rm),
+                &host,
+            )
         });
         r.unwrap();
         assert!(rep.failed.is_empty(), "{:?}", rep.failed);
         assert_eq!(rep.items_done, 1);
-        assert_eq!(*rm.calls.borrow(), vec!["/home/me/links/dir-link".to_string()]);
-        assert_eq!(host_calls.get(), 0, "Windows must not be asked when the distribution succeeded");
+        assert_eq!(
+            *rm.calls.borrow(),
+            vec!["/home/me/links/dir-link".to_string()]
+        );
+        assert_eq!(
+            host_calls.get(),
+            0,
+            "Windows must not be asked when the distribution succeeded"
+        );
         assert_eq!(
             fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
             "inside"
@@ -1351,7 +1372,14 @@ mod tests {
         // The lab: `cmd del` and [IO.File]::Delete on a dangling link said "ok", the link stayed.
         let liar = |_: &Path| Ok(());
         let (r, rep, _) = run_with(|run| {
-            delete_with_host(&s, &[lin("/home/me/links/dir-link")], true, run, Some(&rm), &liar)
+            delete_with_host(
+                &s,
+                &[lin("/home/me/links/dir-link")],
+                true,
+                run,
+                Some(&rm),
+                &liar,
+            )
         });
         r.unwrap();
         assert_eq!(rep.items_done, 0);
@@ -1377,7 +1405,14 @@ mod tests {
         // The lab: "Could not find a part of the path" (ERROR_PATH_NOT_FOUND = 3).
         let refuse = |_: &Path| Err(io::Error::from_raw_os_error(3));
         let (_, rep, _) = run_with(|run| {
-            delete_with_host(&s, &[lin("/home/me/links/dir-link")], true, run, None, &refuse)
+            delete_with_host(
+                &s,
+                &[lin("/home/me/links/dir-link")],
+                true,
+                run,
+                None,
+                &refuse,
+            )
         });
         assert_eq!(rep.failed.len(), 1);
         let m = &rep.failed[0].message;
@@ -1401,11 +1436,20 @@ mod tests {
         };
         let nothing = |_: &Path| Err(io::Error::other("refused"));
         let (_, rep, _) = run_with(|run| {
-            delete_with_host(&s, &[lin("/home/me/links/dir-link")], true, run, Some(&rm), &nothing)
+            delete_with_host(
+                &s,
+                &[lin("/home/me/links/dir-link")],
+                true,
+                run,
+                Some(&rm),
+                &nothing,
+            )
         });
         assert_eq!(rep.failed.len(), 1);
         assert!(rep.failed[0].message.contains("unlink ran without error"));
-        assert!(rep.failed[0].message.contains("The link is still there: yes"));
+        assert!(rep.failed[0]
+            .message
+            .contains("The link is still there: yes"));
     }
 
     /// REAL WINDOWS test: a directory junction is a reparse-point folder. Deleting it removes the
