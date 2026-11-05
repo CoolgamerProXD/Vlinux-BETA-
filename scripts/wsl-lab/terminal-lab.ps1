@@ -33,3 +33,4 @@ foreach ($l in $lines) {
 }
 if ($chunk) { Say "Terminal lab ($n)" $chunk }
 if (-not $lines) { Say "Terminal lab" ("no LAB lines; tail of output:`n" + $out.Substring([Math]::Max(0, $out.Length - 3000))) }
+# (lab re-run at the build that includes the evidence trace)

@@ -271,12 +271,12 @@ impl LinkRemover for DistroLinkRemover<'_> {
 /// Removes one link from the Windows side. Injectable so tests can model what Windows really does
 /// with links on the WSL share (the lab saw it fail with "path not found", "directory name is
 /// invalid", or report success without removing anything).
-type HostRemove = dyn Fn(&Path) -> io::Result<()>;
+type HostRemove<'a> = dyn Fn(&Path) -> io::Result<()> + 'a;
 
 struct DelCtx<'a> {
     root: Option<&'a Path>,
     remover: Option<&'a dyn LinkRemover>,
-    host_remove: &'a HostRemove,
+    host_remove: &'a HostRemove<'a>,
 }
 
 impl DelCtx<'_> {
@@ -506,7 +506,7 @@ fn delete_with_host(
     confirmed: bool,
     run: &mut Runner<'_>,
     remover: Option<&dyn LinkRemover>,
-    host_remove: &HostRemove,
+    host_remove: &HostRemove<'_>,
 ) -> FsResult<()> {
     let ctx = DelCtx {
         root: spaces.linux_root.as_deref(),
