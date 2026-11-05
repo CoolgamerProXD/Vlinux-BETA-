@@ -77,6 +77,8 @@ jobs:
       - name: Test vlinux-runtime (fake wsl.exe output, no distribution needed)
         working-directory: src-tauri
         shell: bash
+        env:
+          CARGO_TERM_COLOR: never # colour codes would hide error lines from the annotations below
         run: |
           set +e
           cargo test -p vlinux-runtime --locked 2>&1 | tee ../runtime-test.log

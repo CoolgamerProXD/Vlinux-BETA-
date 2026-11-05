@@ -324,10 +324,8 @@ fn vanishes_soon(p: &Path) -> bool {
 }
 
 fn describe_io(e: &io::Error) -> String {
-    match e.raw_os_error() {
-        Some(code) => format!("{e} (os error {code})"),
-        None => e.to_string(),
-    }
+    // The standard text already ends in "(os error N)" when the system gave a code.
+    e.to_string()
 }
 
 /// A rough, privacy-safe place name for a Linux path: only its first folder.
@@ -1323,7 +1321,7 @@ mod tests {
             really_remove: true,
         };
         let host_calls = std::cell::Cell::new(0);
-        let host = |p: &Path| {
+        let host = |p: &Path| -> io::Result<()> {
             host_calls.set(host_calls.get() + 1);
             remove_link(p)
         };
@@ -1370,7 +1368,7 @@ mod tests {
             really_remove: false,
         };
         // The lab: `cmd del` and [IO.File]::Delete on a dangling link said "ok", the link stayed.
-        let liar = |_: &Path| Ok(());
+        let liar = |_: &Path| -> io::Result<()> { Ok(()) };
         let (r, rep, _) = run_with(|run| {
             delete_with_host(
                 &s,
@@ -1403,7 +1401,7 @@ mod tests {
         plain_link_world(&l);
         let s = spaces(&l, &w);
         // The lab: "Could not find a part of the path" (ERROR_PATH_NOT_FOUND = 3).
-        let refuse = |_: &Path| Err(io::Error::from_raw_os_error(3));
+        let refuse = |_: &Path| -> io::Result<()> { Err(io::Error::from_raw_os_error(3)) };
         let (_, rep, _) = run_with(|run| {
             delete_with_host(
                 &s,
@@ -1434,7 +1432,7 @@ mod tests {
             succeed: true,
             really_remove: false,
         };
-        let nothing = |_: &Path| Err(io::Error::other("refused"));
+        let nothing = |_: &Path| -> io::Result<()> { Err(io::Error::other("refused")) };
         let (_, rep, _) = run_with(|run| {
             delete_with_host(
                 &s,
