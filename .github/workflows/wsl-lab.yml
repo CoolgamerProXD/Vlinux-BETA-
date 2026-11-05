@@ -24,3 +24,18 @@ jobs:
         shell: pwsh
         run: ./scripts/wsl-lab/probe.ps1
         continue-on-error: true
+
+  arch:
+    name: WSL lab - real Arch (WSL 3.0.3.0) on a disposable runner
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and configure archlinux (disposable VM)
+        shell: pwsh
+        run: ./scripts/wsl-lab/arch-setup.ps1
+        continue-on-error: true
+      - name: Symlink experiment on the real share
+        shell: pwsh
+        run: ./scripts/wsl-lab/symlink-experiment.ps1
+        continue-on-error: true
