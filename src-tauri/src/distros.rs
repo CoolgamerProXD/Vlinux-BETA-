@@ -51,6 +51,15 @@ use crate::runtime::{blocking, ensure_wsl_ready, require_regular_distro, Runtime
 pub const DISTRO_OP_EVENT: &str = "vlinux://distro-op";
 pub const DIAG_EVENT: &str = "vlinux://diag-progress";
 
+/// `<version> (<commit>)`: which build this is (the commit comes from build.rs).
+pub fn build_label() -> String {
+    format!(
+        "{} ({})",
+        env!("CARGO_PKG_VERSION"),
+        env!("VLINUX_BUILD_SHA")
+    )
+}
+
 const DIAG_BUDGET: Duration = Duration::from_secs(120);
 const DIAG_STEP: Duration = Duration::from_secs(8);
 /// The first terminal answer may wait for the shell to start (profile scripts, systemd).
@@ -770,6 +779,7 @@ impl DistroMgmt {
             options,
             storage,
             cancel,
+            true,
             &mut |c: &CheckResult| {
                 index += 1;
                 let _ = app.emit(
@@ -797,6 +807,7 @@ fn run_diag_core(
     options: &Options,
     storage: &StorageConfig,
     cancel: &CancelToken,
+    answer_queries: bool,
     progress: &mut dyn FnMut(&CheckResult),
 ) -> Report {
     {
@@ -823,11 +834,11 @@ fn run_diag_core(
             }
             _ => None,
         };
-        let ops = options
-            .distro
-            .as_deref()
-            .and_then(|n| WslDistroOps::new(runner.clone(), rt.programs.wsl.clone(), n).ok());
+        let ops = options.distro.as_deref().and_then(|n| {
+            WslDistroOps::new(runner.clone(), rt.programs.wsl.clone(), n).ok()
+        });
         let sink = Arc::new(DiagSink::new());
+        sink.set_silent(!answer_queries);
         let mgr = TerminalManager::new(Arc::new(NativePty), sink.clone());
         let detect = || {
             rt.invalidate();
@@ -871,6 +882,7 @@ fn run_diag_core(
             explorer,
             windows_probe_dir: probe,
             now: unix_now(),
+            build: build_label(),
             token: diag_token(seq),
             budget: DIAG_BUDGET,
             step_timeout: DIAG_STEP,
@@ -943,20 +955,22 @@ pub async fn diag_cancel(dm: Dm<'_>) -> Result<bool, AppError> {
 mod lab {
     use super::*;
 
-    #[test]
-    fn real_diagnostics_in_the_wsl_lab() {
-        let Ok(distro) = std::env::var("VLINUX_LAB_DISTRO") else {
-            return;
-        };
-        let dir = std::env::temp_dir().join(format!("vlinux-lab-{}", std::process::id()));
+    /// Runs the real diagnostics against the lab distribution (never a user's PC).
+    fn lab_run(
+        distro: &str,
+        tag: &str,
+        answer_queries: bool,
+        categories: Option<Vec<diag::Category>>,
+    ) -> Report {
+        let dir = std::env::temp_dir().join(format!("vlinux-lab-{}-{tag}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let rt = Arc::new(RuntimeState::new(&dir));
         let runner: Arc<dyn CommandRunner> = Arc::new(SystemRunner);
         let options = Options {
-            distro: Some(distro),
+            distro: Some(distro.to_string()),
             allow_start: true,
             allow_write: true,
-            categories: None,
+            categories,
         };
         let report = run_diag_core(
             &rt,
@@ -967,11 +981,13 @@ mod lab {
             &options,
             &StorageConfig::default(),
             &CancelToken::new(),
-            &mut |c: &CheckResult| println!("LAB-CHECK {} {:?} {} ms", c.id, c.outcome, c.ms),
+            answer_queries,
+            &mut |c: &CheckResult| println!("LAB-CHECK {tag} {} {:?} {} ms", c.id, c.outcome, c.ms),
         );
+        println!("LAB-BUILD {tag} {}", report.build);
         for c in &report.results {
             println!(
-                "LAB-RESULT {} | {:?} | {} ms | {} | {}",
+                "LAB-RESULT {tag} {} | {:?} | {} ms | {} | {}",
                 c.id,
                 c.outcome,
                 c.ms,
@@ -979,16 +995,31 @@ mod lab {
                 c.guidance.clone().unwrap_or_default().replace('\n', " ")
             );
         }
-        println!(
-            "LAB-SUMMARY {:?} leftover={:?}",
-            report.summary, report.diag_dir
-        );
+        println!("LAB-SUMMARY {tag} {:?} leftover={:?}", report.summary, report.diag_dir);
+        report
+    }
+
+    #[test]
+    fn real_diagnostics_in_the_wsl_lab() {
+        let Ok(distro) = std::env::var("VLINUX_LAB_DISTRO") else {
+            return;
+        };
+        let report = lab_run(&distro, "full", true, None);
         if let Ok(out) = std::env::var("VLINUX_LAB_OUT") {
-            let _ = std::fs::write(
-                out,
-                serde_json::to_string_pretty(&report).unwrap_or_default(),
-            );
+            let _ = std::fs::write(out, serde_json::to_string_pretty(&report).unwrap_or_default());
         }
         // The lab reports instead of asserting: its purpose is evidence, not a verdict.
+    }
+
+    /// Reproduces the M6.1 failure on a real console (terminal queries left unanswered) and shows
+    /// the fixed behaviour beside it, each with the evidence trace.
+    #[test]
+    fn real_terminal_experiments_in_the_wsl_lab() {
+        let Ok(distro) = std::env::var("VLINUX_LAB_DISTRO") else {
+            return;
+        };
+        let terminal = || Some(vec![diag::Category::Terminal]);
+        lab_run(&distro, "unanswered", false, terminal());
+        lab_run(&distro, "answered", true, terminal());
     }
 }

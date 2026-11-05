@@ -91,6 +91,7 @@
       {#if distros.diagReport && !distros.diagRunning}
         {@const r = distros.diagReport}
         <div class="dm-notice" class:sim={r.mode === 'simulated'} class:info={r.mode !== 'simulated'} data-testid="diag-headline">{reportHeadline(r)}{r.cancelled ? ' · cancelled: the rest was not run' : ''}</div>
+        {#if r.build}<p class="dm-muted dm-small" data-testid="diag-build">Produced by VLINUX {r.build}</p>{/if}
       {:else}
         <p class="dm-muted" aria-live="polite">Running… {shownResults.length} check{shownResults.length === 1 ? '' : 's'} done.</p>
       {/if}

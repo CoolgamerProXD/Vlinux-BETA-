@@ -151,6 +151,9 @@ pub struct Summary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Report {
+    /// Which VLINUX build produced this report (version and commit), so a report can never be
+    /// mistaken for one from another build.
+    pub build: String,
     pub generated_at: u64,
     pub mode: Mode,
     pub distro: Option<String>,
@@ -218,6 +221,60 @@ fn failure_text(rep: &crate::fs::OpReport) -> String {
 pub struct DiagSink {
     inner: Mutex<SinkInner>,
     cv: Condvar,
+    /// `false` makes the recorder behave like the M6.1 one (it never answers terminal queries).
+    /// Only the WSL lab turns it off, to reproduce that failure on a real console.
+    silent: std::sync::atomic::AtomicBool,
+}
+
+/// What happened in one diagnostics terminal session, as counts and times only — never the
+/// content of the output or of the commands (no history, environment or prompt text).
+#[derive(Default, Clone, Debug)]
+struct Trace {
+    opened: Option<Instant>,
+    first_output: Option<Instant>,
+    last_output: Option<Instant>,
+    first_query: Option<Instant>,
+    bytes: usize,
+    printable: usize,
+    newlines: usize,
+    queries: u32,
+    answer_bytes: usize,
+    answer_errors: u32,
+    acked: usize,
+    inputs: u32,
+    input_errors: u32,
+    first_input: Option<Instant>,
+    /// How many escape sequences of each kind (final byte), e.g. `m` colours, `H` cursor moves.
+    csi: std::collections::BTreeMap<char, u32>,
+    esc_other: u32,
+}
+
+impl Trace {
+    fn scan(&mut self, data: &[u8]) {
+        let mut i = 0;
+        while i < data.len() {
+            let b = data[i];
+            if b == 0x1b {
+                if data.get(i + 1) == Some(&b'[') {
+                    let mut j = i + 2;
+                    while j < data.len() && !(0x40..=0x7e).contains(&data[j]) {
+                        j += 1;
+                    }
+                    if let Some(f) = data.get(j) {
+                        *self.csi.entry(*f as char).or_default() += 1;
+                    }
+                    i = j + 1;
+                    continue;
+                }
+                self.esc_other += 1;
+            } else if b == b'\n' {
+                self.newlines += 1;
+            } else if (0x20..0x7f).contains(&b) || b >= 0xc2 {
+                self.printable += 1;
+            }
+            i += 1;
+        }
+    }
 }
 
 #[derive(Default)]
@@ -232,6 +289,7 @@ struct SinkInner {
     unacked: HashMap<String, usize>,
     /// Total bytes seen and queries answered, for failure messages.
     seen: HashMap<String, (usize, u32)>,
+    traces: HashMap<String, Trace>,
 }
 
 const SINK_CAP: usize = 256 * 1024;
@@ -292,6 +350,16 @@ impl TerminalSink for DiagSink {
             let st = g.seen.entry(id.to_string()).or_default();
             st.0 += data.len();
             st.1 += (dsr + da1) as u32;
+            let now = Instant::now();
+            let tr = g.traces.entry(id.to_string()).or_default();
+            tr.first_output.get_or_insert(now);
+            tr.last_output = Some(now);
+            tr.bytes += data.len();
+            tr.queries += (dsr + da1) as u32;
+            if dsr + da1 > 0 {
+                tr.first_query.get_or_insert(now);
+            }
+            tr.scan(data);
         }
         self.cv.notify_all();
     }
@@ -443,13 +511,100 @@ impl DiagSink {
 
     /// Answers waiting to be typed into the session, and the output bytes to acknowledge.
     fn take_pending(&self, id: &str) -> (Vec<u8>, usize) {
+        let silent = self.silent.load(std::sync::atomic::Ordering::SeqCst);
         match self.inner.lock() {
-            Ok(mut g) => (
-                g.replies.remove(id).unwrap_or_default(),
-                g.unacked.remove(id).unwrap_or(0),
-            ),
+            Ok(mut g) => {
+                let mut replies = g.replies.remove(id).unwrap_or_default();
+                if silent {
+                    replies.clear();
+                }
+                let acked = g.unacked.remove(id).unwrap_or(0);
+                g.traces.entry(id.to_string()).or_default().acked += acked;
+                (replies, acked)
+            }
             Err(_) => (Vec::new(), 0),
         }
+    }
+
+    /// Lab only: stop answering terminal queries (the M6.1 behaviour).
+    pub fn set_silent(&self, silent: bool) {
+        self.silent
+            .store(silent, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn note_answer(&self, id: &str, bytes: usize, ok: bool) {
+        if let Ok(mut g) = self.inner.lock() {
+            let t = g.traces.entry(id.to_string()).or_default();
+            if ok {
+                t.answer_bytes += bytes;
+            } else {
+                t.answer_errors += 1;
+            }
+        }
+    }
+
+    /// The session was requested at `at` (taken just before it was opened).
+    pub fn begin(&self, id: &str, at: Instant) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.traces.entry(id.to_string()).or_default().opened = Some(at);
+        }
+    }
+
+    fn note_input(&self, id: &str, ok: bool) {
+        if let Ok(mut g) = self.inner.lock() {
+            let t = g.traces.entry(id.to_string()).or_default();
+            t.first_input.get_or_insert_with(Instant::now);
+            if ok {
+                t.inputs += 1;
+            } else {
+                t.input_errors += 1;
+            }
+        }
+    }
+
+    /// One line of evidence about a session: when things happened (milliseconds after
+    /// `opened`), how much arrived, whether the terminal's queries were answered and
+    /// acknowledged, and what kind of escape sequences came through. Counts only.
+    pub fn evidence(&self, id: &str) -> String {
+        let t = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|g| g.traces.get(id).cloned())
+            .unwrap_or_default();
+        let opened = t.opened;
+        let ms = |i: Option<Instant>| match (i, opened) {
+            (Some(i), Some(o)) => format!("{} ms", i.saturating_duration_since(o).as_millis()),
+            (Some(_), None) => "at an unknown time".to_string(),
+            (None, _) => "never".to_string(),
+        };
+        let kinds = if t.csi.is_empty() {
+            "none".to_string()
+        } else {
+            t.csi
+                .iter()
+                .map(|(k, n)| format!("{k}x{n}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        format!(
+            "Evidence (counts only): first output {}; last output {}; {} bytes ({} printable, {} lines); terminal queries {} (first {}), answers written {} bytes ({} write errors); acknowledged {} bytes; input typed {} time(s) (first {}, {} errors); escape sequences [{}] plus {} other.",
+            ms(t.first_output),
+            ms(t.last_output),
+            t.bytes,
+            t.printable,
+            t.newlines,
+            t.queries,
+            ms(t.first_query),
+            t.answer_bytes,
+            t.answer_errors,
+            t.acked,
+            t.inputs,
+            ms(t.first_input),
+            t.input_errors,
+            kinds,
+            t.esc_other
+        )
     }
 
     /// Bytes of output received and terminal queries answered so far.
@@ -473,7 +628,7 @@ impl DiagSink {
 fn pump(mgr: &TerminalManager, sink: &DiagSink, id: &str) {
     let (replies, bytes) = sink.take_pending(id);
     if !replies.is_empty() {
-        let _ = mgr.write(id, &replies);
+        sink.note_answer(id, replies.len(), mgr.write(id, &replies).is_ok());
     }
     if bytes > 0 {
         mgr.ack(id, bytes);
@@ -539,6 +694,8 @@ pub struct DiagEnv<'a> {
     /// A Windows folder that always exists, in forward-slash form (`C:/Windows`), for `wslpath`.
     pub windows_probe_dir: Option<String>,
     pub now: u64,
+    /// `<version> (<commit>)` of this build; printed at the top of every report.
+    pub build: String,
     /// Names the temporary folder; `vlx-` + 8..24 lower-case alphanumerics.
     pub token: String,
     pub budget: Duration,
@@ -1020,8 +1177,12 @@ impl<'a, 'p> Run<'a, 'p> {
                 }
                 let Some((mgr, _)) = s.env.terminal else { return not_tested("No terminal backend was provided for this run.") };
                 let Some(t) = &target else { return not_tested("No distribution was selected.") };
+                let requested = Instant::now();
                 match mgr.open_target(t, s.env.programs, PtySize::DEFAULT) {
                     Ok(info) => {
+                        if let Some((_, sink)) = s.env.terminal {
+                            sink.begin(&info.id, requested);
+                        }
                         s.session = Some(info.id);
                         pass("A session opened.").modified()
                     }
@@ -1037,6 +1198,7 @@ impl<'a, 'p> Run<'a, 'p> {
             send: &str,
             total: Duration,
             resend: Option<Duration>,
+            marker: &str,
             pred: &dyn Fn(&str) -> bool,
             hint: &str,
         ) -> Result<String, Res> {
@@ -1046,24 +1208,40 @@ impl<'a, 'p> Run<'a, 'p> {
             let Some((mgr, sink)) = s.env.terminal else {
                 return Err(not_tested("No terminal backend."));
             };
-            if let Err(e) = mgr.write(&id, send.as_bytes()) {
-                return Err(fail(format!("Could not send input: {e}"), hint));
+            let written = mgr.write(&id, send.as_bytes());
+            sink.note_input(&id, written.is_ok());
+            if let Err(e) = written {
+                return Err(fail(
+                    format!("Could not send input to the terminal: {e}. {}", sink.evidence(&id)),
+                    hint,
+                ));
             }
             if await_terminal(mgr, sink, &id, total, resend.map(|d| (send, d)), pred) {
                 return Ok(sink.text(&id));
             }
-            let (bytes, answered) = sink.stats(&id);
+            let raw = sink.text(&id).contains(marker);
+            let clean = sink.clean_text(&id).contains(marker);
             let ended = sink.ended(&id).is_some();
+            let (bytes, _) = sink.stats(&id);
             Err(fail(
                 format!(
-                    "The expected output did not appear within {} ms ({} bytes of output received, {} terminal queries answered{}).",
+                    "The expected output did not appear within {} ms ({} bytes of output received; marker in the raw output: {}; after removing escape sequences: {}{}). {}",
                     total.as_millis(),
                     bytes,
-                    answered,
-                    if ended { ", the session had ended" } else { "" }
+                    yes_no(raw),
+                    yes_no(clean),
+                    if ended { "; the session had ended" } else { "" },
+                    sink.evidence(&id)
                 ),
                 hint,
             ))
+        }
+
+        fn evidence_of(s: &Run<'_, '_>) -> String {
+            match (s.env.terminal, s.session.as_ref()) {
+                (Some((_, sink)), Some(id)) => sink.evidence(id),
+                _ => String::new(),
+            }
         }
 
         fn io_first(s: &Run<'_, '_>) -> Option<Res> {
@@ -1092,10 +1270,11 @@ impl<'a, 'p> Run<'a, 'p> {
                     CMD_IO,
                     s.env.startup_timeout,
                     Some(Duration::from_secs(3)),
+                    "VLX42END",
                     &|t| t.contains("VLX42END"),
                     "The shell may be slow to start or has an unusual start-up; open the Terminal app to compare.",
                 ) {
-                    Ok(_) => pass("Input reached the shell and output came back.").modified(),
+                    Ok(_) => pass(format!("Input reached the shell and output came back. {}", evidence_of(s))).modified(),
                     Err(v) => v,
                 }
             },
@@ -1111,6 +1290,7 @@ impl<'a, 'p> Run<'a, 'p> {
                     CMD_IDENTITY,
                     s.env.step_timeout,
                     None,
+                    "VLXID:",
                     &|t| parse_identity(t).is_some(),
                     "The shell may be slow; try again.",
                 ) {
@@ -1146,6 +1326,7 @@ impl<'a, 'p> Run<'a, 'p> {
                     CMD_ANSI,
                     s.env.step_timeout,
                     None,
+                    "VLXRED7",
                     &|t| t.contains("VLXRED7"),
                     "Something between the shell and the terminal is rewriting escape sequences.",
                 ) {
@@ -1171,6 +1352,7 @@ impl<'a, 'p> Run<'a, 'p> {
                     CMD_UNICODE,
                     s.env.step_timeout,
                     None,
+                    "\u{2713}VLXU7",
                     &|t| t.contains("\u{2713}VLXU7"),
                     "Check the distribution's locale (UTF-8) and the terminal encoding.",
                 ) {
@@ -1196,6 +1378,7 @@ impl<'a, 'p> Run<'a, 'p> {
                 ask,
                 s.env.step_timeout,
                 Some(Duration::from_millis(700)),
+                "VLXSZ:41 123:END",
                 &|t| t.contains("VLXSZ:41 123:END"),
                 "The pseudo-terminal did not pass the new size on.",
             ) {
@@ -1204,7 +1387,7 @@ impl<'a, 'p> Run<'a, 'p> {
                     let seen = last_reported_size(&sink.clean_text(&id));
                     match seen {
                         Some(sz) => fail(
-                            format!("The shell reported \"{sz}\" (rows columns) instead of \"41 123\"."),
+                            format!("The shell reported \"{sz}\" (rows columns) instead of \"41 123\". {}", sink.evidence(&id)),
                             "The pseudo-terminal did not pass the new size on.",
                         ),
                         None => v,
@@ -1571,7 +1754,7 @@ impl<'a, 'p> Run<'a, 'p> {
                 let inside = s.names_in("target");
                 if !names.contains(&"link-to-target".to_string()) && inside.contains(&"inside.txt".to_string()) {
                     if via_distro > 0 {
-                        pass("The link is gone and the folder it pointed to still has its file. Windows could not delete the link through the file share, so it was removed with 'unlink' inside the distribution (the Files app does the same).").modified()
+                        pass("The link is gone (checked by listing the folder again) and the folder it pointed to still has its file. The link was removed with 'unlink' inside the distribution, because deleting links from Windows over the file share is unreliable (the Files app does the same).").modified()
                     } else {
                         pass("The link is gone and the folder it pointed to still has its file.").modified()
                     }
@@ -1878,7 +2061,7 @@ impl<'a, 'p> Run<'a, 'p> {
             if problems.is_empty() && gone(&dir) {
                 let mut m = format!("Removed {dir} and everything the run created in it.");
                 if via_distro > 0 {
-                    m.push_str(" A link in it was removed with 'unlink' inside the distribution because Windows could not delete it through the file share.");
+                    m.push_str(" A link in it was removed with 'unlink' inside the distribution because deleting links from Windows over the file share is unreliable.");
                 }
                 pass(m).modified()
             } else if problems.is_empty() {
@@ -2243,6 +2426,7 @@ pub fn run(
     let cancelled = cancel.is_cancelled();
     let summary = summarise(&results);
     let mut report = Report {
+        build: env.build.clone(),
         generated_at: env.now,
         mode: env.mode,
         distro: opts.distro.clone(),
@@ -2306,6 +2490,7 @@ fn yes_no(b: bool) -> &'static str {
 pub fn render_text(report: &Report, scrub: &[String]) -> String {
     let mut t = String::new();
     t.push_str("VLINUX compatibility report\n");
+    t.push_str(&format!("Build: VLINUX {}\n", report.build));
     match report.mode {
         Mode::Real => t.push_str("Run type: REAL — checks ran against the WSL on this PC.\n"),
         Mode::Simulated => t.push_str("Run type: SIMULATED — no real WSL was contacted. These results say NOTHING about this PC.\n"),
@@ -2597,6 +2782,7 @@ mod tests {
             explorer: None,
             windows_probe_dir: Some("C:/Windows".into()),
             now: 1_700_000_123,
+            build: "test-build (0000000)".into(),
             token: TOKEN.into(),
             budget: Duration::from_secs(60),
             step_timeout: w.step,
@@ -3537,6 +3723,54 @@ mod tests {
         }
         assert!(t0.elapsed() < Duration::from_secs(3));
         assert_eq!(w.mgr.live_count(), 0);
+    }
+
+    #[test]
+    fn m61_behaviour_is_reproduced_when_queries_go_unanswered_and_the_report_shows_the_evidence() {
+        // MODELLED (fake console), not real: a console that holds all output until it is answered.
+        let mut w = world(Running);
+        w.step = Duration::from_millis(300);
+        w.sink.set_silent(true);
+        let stop = Arc::new(AtomicBool::new(false));
+        let h = conpty_shell(w.backend.clone(), stop.clone(), Conpty::default());
+        let r = go(&w, Mode::Simulated, terminal_only(), None);
+        stop.store(true, Ordering::SeqCst);
+        let _ = h.join();
+        let io = get(&r, "terminal.io");
+        assert_eq!(io.outcome, Outcome::Failed);
+        for needle in [
+            "Evidence (counts only)",
+            "terminal queries 1",
+            "answers written 0 bytes",
+            "marker in the raw output: no",
+        ] {
+            assert!(io.message.contains(needle), "{needle}: {}", io.message);
+        }
+        // The evidence never contains what was typed or printed.
+        assert!(!io.message.contains("VLX%sEND") && !io.message.contains("printf"));
+        assert!(r.text.starts_with("VLINUX compatibility report\nBuild: VLINUX test-build"));
+    }
+
+    #[test]
+    fn a_passing_console_reports_when_it_first_answered_and_that_its_queries_were_answered() {
+        let w = world(Running);
+        let r = run_conpty(&w, Conpty::default());
+        let io = get(&r, "terminal.io");
+        assert_eq!(io.outcome, Outcome::Passed, "{}", io.message);
+        assert!(io.message.contains("terminal queries 1"), "{}", io.message);
+        assert!(!io.message.contains("answers written 0 bytes"), "{}", io.message);
+        assert!(io.message.contains("acknowledged"), "{}", io.message);
+    }
+
+    #[test]
+    fn evidence_counts_escape_sequences_without_keeping_any_text() {
+        let sink = DiagSink::new();
+        sink.begin("a", Instant::now());
+        sink.output("a", b"secret\r\n\x1b[31mred\x1b[m\x1b[2;1H\x1b]0;title\x07");
+        let e = sink.evidence("a");
+        assert!(e.contains("H") && e.contains("mx2") && e.contains("1 other"), "{e}");
+        assert!(!e.contains("secret") && !e.contains("title"), "{e}");
+        assert!(e.contains("first output"), "{e}");
     }
 
     #[test]

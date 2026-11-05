@@ -213,6 +213,8 @@ export interface DiagOptions {
 }
 
 export interface DiagReport {
+  /** `<version> (<commit>)` of the build that produced the report (absent in the browser preview). */
+  build?: string;
   generated_at: number;
   mode: 'real' | 'simulated';
   distro: string | null;

@@ -47,3 +47,7 @@ jobs:
         shell: pwsh
         run: ./scripts/wsl-lab/real-diag.ps1
         continue-on-error: true
+      - name: Terminal evidence on the real Arch (queries unanswered vs answered)
+        shell: pwsh
+        run: ./scripts/wsl-lab/terminal-lab.ps1
+        continue-on-error: true

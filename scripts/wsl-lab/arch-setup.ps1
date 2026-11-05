@@ -16,6 +16,7 @@ id -u lab >/dev/null 2>&1 || useradd -m -s /bin/bash lab
 printf '[boot]\nsystemd=true\n\n[user]\ndefault=lab\n' > /etc/wsl.conf
 cat /etc/wsl.conf
 '@
+$setup = $setup -replace "`r", ""   # the here-string has CRLF line endings on Windows
 $r = @()
 $r += "configure: " + (Capture { wsl.exe -d archlinux -u root --exec /bin/bash -c $setup })
 $r += "terminate: " + (Capture { wsl.exe --terminate archlinux })

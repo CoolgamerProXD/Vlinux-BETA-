@@ -253,9 +253,8 @@ fn remove_link(p: &Path) -> io::Result<()> {
 }
 
 /// Removes a symbolic link from INSIDE the distribution (`unlink`, which cannot remove a directory
-/// and never follows a link). Used only as a fallback when Windows could not remove a link that
-/// the file share presents (Windows delete semantics for links on `\\wsl.localhost` are not the
-/// same as Linux's).
+/// and never follows a link). Used FIRST for links on the distribution's file share, because Windows
+/// delete semantics for links on `\\wsl.localhost` are unreliable (measured on a real Arch).
 pub trait LinkRemover {
     fn remove_link(&self, linux_path: &str) -> Result<(), String>;
 }
@@ -269,9 +268,15 @@ impl LinkRemover for DistroLinkRemover<'_> {
     }
 }
 
+/// Removes one link from the Windows side. Injectable so tests can model what Windows really does
+/// with links on the WSL share (the lab saw it fail with "path not found", "directory name is
+/// invalid", or report success without removing anything).
+type HostRemove = dyn Fn(&Path) -> io::Result<()>;
+
 struct DelCtx<'a> {
     root: Option<&'a Path>,
     remover: Option<&'a dyn LinkRemover>,
+    host_remove: &'a HostRemove,
 }
 
 impl DelCtx<'_> {
@@ -294,56 +299,111 @@ impl DelCtx<'_> {
             Some(out)
         }
     }
+
+    fn in_linux_space(&self, host: &Path) -> bool {
+        self.linux_path(host).is_some()
+    }
 }
 
 fn vanished(p: &Path) -> bool {
     matches!(fs::symlink_metadata(p), Err(e) if e.kind() == io::ErrorKind::NotFound)
 }
 
-/// Remove ONE symbolic link, never its target. `path` was just classified as a link by
-/// `symlink_metadata` (which does not follow it). Windows first; if that fails and the link is
-/// still there, ask the distribution to `unlink` it. The result is verified, never assumed.
-fn remove_symlink_entry(path: &Path, ctx: &DelCtx<'_>) -> io::Result<()> {
-    let first = match remove_link(path) {
-        Ok(()) => return Ok(()),
-        Err(e) => e,
-    };
-    if vanished(path) {
-        return Ok(());
+/// The directory listing is what the file manager shows, and the share may need a moment to
+/// reflect a change made inside the distribution: look again briefly before giving up.
+fn vanishes_soon(p: &Path) -> bool {
+    for i in 0..10 {
+        if vanished(p) {
+            return true;
+        }
+        if i < 9 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
-    let (Some(remover), Some(linux)) = (ctx.remover, ctx.linux_path(path)) else {
-        return Err(first);
-    };
-    match remover.remove_link(&linux) {
-        Ok(()) if vanished(path) => Ok(()),
-        Ok(()) => Err(io::Error::other(format!(
-            "Windows could not remove the link ({first}) and it was still present after unlink inside the distribution"
-        ))),
-        Err(msg) => Err(io::Error::other(format!(
-            "Windows could not remove the link ({first}); removing it inside the distribution also failed ({msg})"
-        ))),
+    false
+}
+
+fn describe_io(e: &io::Error) -> String {
+    match e.raw_os_error() {
+        Some(code) => format!("{e} (os error {code})"),
+        None => e.to_string(),
     }
 }
 
+/// A rough, privacy-safe place name for a Linux path: only its first folder.
+fn path_category(linux: Option<&str>) -> &'static str {
+    match linux.and_then(|p| p.split('/').nth(1)) {
+        Some("tmp") => "under /tmp",
+        Some("home") => "in a home folder",
+        Some("mnt") => "under /mnt",
+        Some("root") => "under /root",
+        Some(_) => "elsewhere in the distribution",
+        None => "in a Windows folder",
+    }
+}
+
+/// Remove ONE link (or other pointer-like entry), never what it points to. `path` was classified as
+/// a link without following it. Findings from the real Arch share (see docs/VALIDATION.md): Windows
+/// can fail to delete a WSL link ("path not found", "directory name is invalid") or even report
+/// success while leaving it in place; `unlink` inside the distribution works. So on the share
+/// the distribution removes the link first, Windows is only a last resort, and the result is
+/// ALWAYS verified by looking again — never assumed from a return code. Every failure says what was
+/// tried, what each side answered and what is still there.
+fn remove_symlink_entry(path: &Path, ctx: &DelCtx<'_>) -> io::Result<()> {
+    let linux = ctx.linux_path(path);
+    let mut distro_note = "not used".to_string();
+    if let (Some(remover), Some(l)) = (ctx.remover, linux.as_deref()) {
+        distro_note = match remover.remove_link(l) {
+            Ok(()) => "unlink ran without error".to_string(),
+            Err(msg) => format!("unlink failed: {msg}"),
+        };
+        if vanishes_soon(path) {
+            return Ok(());
+        }
+    }
+    let windows_note = match (ctx.host_remove)(path) {
+        Ok(()) => "reported success".to_string(),
+        Err(e) => format!("failed: {}", describe_io(&e)),
+    };
+    if vanishes_soon(path) {
+        return Ok(());
+    }
+    // Nothing worked. Say exactly what is still there (without following anything).
+    let target_ok = match fs::metadata(path) {
+        Ok(_) => "yes",
+        Err(e) if e.kind() == io::ErrorKind::NotFound => "no or not reachable",
+        Err(_) => "unknown",
+    };
+    Err(io::Error::other(format!(
+        "could not remove a link {} (operation: remove one link only, never its target). In the distribution: {distro_note}. From Windows: {windows_note}. The link is still there: yes. What it points to is still reachable: {target_ok}. Nothing else was changed.",
+        path_category(linux.as_deref())
+    )))
+}
+
 #[cfg(windows)]
-fn reparse_dir(m: &fs::Metadata) -> bool {
+fn reparse_flags(m: &fs::Metadata) -> (bool, bool) {
     use std::os::windows::fs::MetadataExt;
     const DIRECTORY: u32 = 0x10;
     const REPARSE_POINT: u32 = 0x400;
     let a = m.file_attributes();
-    a & REPARSE_POINT != 0 && a & DIRECTORY != 0
+    (a & REPARSE_POINT != 0, a & DIRECTORY != 0)
 }
 #[cfg(not(windows))]
-fn reparse_dir(_m: &fs::Metadata) -> bool {
-    false
+fn reparse_flags(_m: &fs::Metadata) -> (bool, bool) {
+    (false, false)
 }
 
-/// Whether an entry is a link — or any other "folder that is really a pointer" (a Windows
-/// reparse-point directory such as a junction or a WSL link to a folder, whatever its reparse tag).
-/// Such an entry is removed as one item and NEVER descended into: the real WSL share can present a
-/// link to a folder in a way that `is_dir()` alone would follow.
-fn linkish(m: &fs::Metadata) -> bool {
-    m.file_type().is_symlink() || reparse_dir(m)
+/// Whether an entry is a link — or any other "entry that is really a pointer" — and so is removed
+/// as ONE item and NEVER descended into or followed.
+///
+/// * `is_symlink()` (a name-surrogate reparse tag).
+/// * Any reparse-point folder, whatever its tag (a junction, a mount point).
+/// * Inside the distribution's share, ANY reparse point: the lab showed WSL links appear to Windows
+///   as plain "ReparsePoint" entries (not even flagged as folders), and nothing but a link, socket
+///   or pipe is a reparse point there.
+fn linkish(m: &fs::Metadata, linux_space: bool) -> bool {
+    let (reparse, dir) = reparse_flags(m);
+    m.file_type().is_symlink() || (reparse && (dir || linux_space))
 }
 
 /// The metadata of `path` as its PARENT's directory enumeration reports it (the same source the
@@ -370,9 +430,21 @@ fn remove_any(
     if run.cancelled() {
         return Err(Stop::Cancelled);
     }
-    let m = fs::symlink_metadata(path)?;
+    let linux_space = ctx.in_linux_space(path);
+    let listed_as_link = seen.as_ref().is_some_and(|x| linkish(x, linux_space));
+    // Some link kinds on the share cannot even be opened for their own metadata from Windows; if
+    // the directory listing already says it is a link, that is enough to treat it as one.
+    let m = match fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(_) if listed_as_link => {
+            remove_symlink_entry(path, ctx)?;
+            run.file_done();
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    };
     let ft = m.file_type();
-    if linkish(&m) || seen.as_ref().is_some_and(linkish) {
+    if linkish(&m, linux_space) || listed_as_link {
         remove_symlink_entry(path, ctx)?;
         run.file_done();
         return Ok(());
@@ -426,9 +498,22 @@ pub fn delete_with(
     run: &mut Runner<'_>,
     remover: Option<&dyn LinkRemover>,
 ) -> FsResult<()> {
+    delete_with_host(spaces, targets, confirmed, run, remover, &remove_link)
+}
+
+/// [`delete_with`] with the Windows-side link removal injected (tests model the real share).
+fn delete_with_host(
+    spaces: &Spaces,
+    targets: &[Location],
+    confirmed: bool,
+    run: &mut Runner<'_>,
+    remover: Option<&dyn LinkRemover>,
+    host_remove: &HostRemove,
+) -> FsResult<()> {
     let ctx = DelCtx {
         root: spaces.linux_root.as_deref(),
         remover,
+        host_remove,
     };
     if !confirmed {
         return Err(FsError::new(
@@ -522,7 +607,7 @@ fn copy_tree(src: &Path, dst: &Path, run: &mut Runner<'_>, depth: u32) -> Result
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if linkish(&m) {
+    if linkish(&m, false) {
         run.skip(&name, "a link (links are not copied)");
         return Err(Stop::Partial);
     }
@@ -566,6 +651,7 @@ fn move_by_copy(src: &Path, dst: &Path, run: &mut Runner<'_>) -> Result<(), Stop
     let ctx = DelCtx {
         root: None,
         remover: None,
+        host_remove: &remove_link,
     };
     let removed = remove_any(src, run, 0, &ctx, enumerated_meta(src));
     run.counting = was;
@@ -1086,7 +1172,7 @@ mod tests {
     struct FakeUnlink<'a> {
         calls: std::cell::RefCell<Vec<String>>,
         root: PathBuf,
-        lock: &'a Locked,
+        lock: Option<&'a Locked>,
         succeed: bool,
         really_remove: bool,
     }
@@ -1098,7 +1184,9 @@ mod tests {
                 return Err("Permission denied".into());
             }
             if self.really_remove {
-                self.lock.unlock();
+                if let Some(l) = self.lock {
+                    l.unlock();
+                }
                 let mut p = self.root.clone();
                 for c in linux_path.split('/').filter(|c| !c.is_empty()) {
                     p.push(c);
@@ -1134,7 +1222,7 @@ mod tests {
         let rm = FakeUnlink {
             calls: Default::default(),
             root: l.path().to_path_buf(),
-            lock: &lock,
+            lock: Some(&lock),
             succeed: true,
             really_remove: true,
         };
@@ -1165,13 +1253,13 @@ mod tests {
         };
         let s = spaces(&l, &w);
         for (succeed, expect) in [
-            (false, "also failed (Permission denied)"),
-            (true, "still present"),
+            (false, "unlink failed: Permission denied"),
+            (true, "unlink ran without error"),
         ] {
             let rm = FakeUnlink {
                 calls: Default::default(),
                 root: l.path().to_path_buf(),
-                lock: &lock,
+                lock: Some(&lock),
                 succeed,
                 really_remove: false,
             };
@@ -1181,11 +1269,12 @@ mod tests {
             r.unwrap();
             assert_eq!(rep.items_done, 0);
             assert_eq!(rep.failed.len(), 1, "{:?}", rep.failed);
-            assert!(
-                rep.failed[0].message.contains(expect),
-                "{}",
-                rep.failed[0].message
-            );
+            let m = &rep.failed[0].message;
+            assert!(m.contains(expect), "{m}");
+            // Everything an engineer needs: what was tried, both answers, what remains.
+            assert!(m.contains("From Windows: failed:"), "{m}");
+            assert!(m.contains("The link is still there: yes"), "{m}");
+            assert!(m.contains("under /home") || m.contains("in a home folder"), "{m}");
             assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_ok());
             assert_eq!(
                 fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
@@ -1196,6 +1285,177 @@ mod tests {
         let (_, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/links/dir-link")], true, run));
         assert_eq!(rep.failed.len(), 1);
         assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_ok());
+    }
+
+    // ---- M6.3: what the REAL share does (measured on a real Arch, WSL 3.0.3.0), modelled -------
+    //
+    // MODELLED tests: the lab observed that Windows deleting a link on \\wsl.localhost fails with
+    // "path not found"/"directory name is invalid", or reports success while leaving the link, and
+    // that `unlink` inside the distribution works. These tests inject those behaviours.
+
+    #[cfg(unix)]
+    fn plain_link_world(l: &TempDir) {
+        use std::os::unix::fs::symlink;
+        l.file("home/me/target-dir/inside.txt", "inside");
+        l.dir("home/me/links");
+        symlink(l.join("home/me/target-dir"), l.join("home/me/links/dir-link")).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn on_the_share_the_distribution_removes_the_link_first_and_windows_is_not_asked() {
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        plain_link_world(&l);
+        let s = spaces(&l, &w);
+        let rm = FakeUnlink {
+            calls: Default::default(),
+            root: l.path().to_path_buf(),
+            lock: None,
+            succeed: true,
+            really_remove: true,
+        };
+        let host_calls = std::cell::Cell::new(0);
+        let host = |p: &Path| {
+            host_calls.set(host_calls.get() + 1);
+            remove_link(p)
+        };
+        let (r, rep, _) = run_with(|run| {
+            delete_with_host(&s, &[lin("/home/me/links/dir-link")], true, run, Some(&rm), &host)
+        });
+        r.unwrap();
+        assert!(rep.failed.is_empty(), "{:?}", rep.failed);
+        assert_eq!(rep.items_done, 1);
+        assert_eq!(*rm.calls.borrow(), vec!["/home/me/links/dir-link".to_string()]);
+        assert_eq!(host_calls.get(), 0, "Windows must not be asked when the distribution succeeded");
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
+            "inside"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_windows_delete_that_reports_success_without_removing_anything_is_not_believed() {
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        plain_link_world(&l);
+        let s = spaces(&l, &w);
+        let rm = FakeUnlink {
+            calls: Default::default(),
+            root: l.path().to_path_buf(),
+            lock: None,
+            succeed: false,
+            really_remove: false,
+        };
+        // The lab: `cmd del` and [IO.File]::Delete on a dangling link said "ok", the link stayed.
+        let liar = |_: &Path| Ok(());
+        let (r, rep, _) = run_with(|run| {
+            delete_with_host(&s, &[lin("/home/me/links/dir-link")], true, run, Some(&rm), &liar)
+        });
+        r.unwrap();
+        assert_eq!(rep.items_done, 0);
+        assert_eq!(rep.failed.len(), 1);
+        let m = &rep.failed[0].message;
+        assert!(m.contains("From Windows: reported success"), "{m}");
+        assert!(m.contains("unlink failed: Permission denied"), "{m}");
+        assert!(m.contains("The link is still there: yes"), "{m}");
+        assert!(fs::symlink_metadata(l.join("home/me/links/dir-link")).is_ok());
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
+            "inside"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_windows_error_code_and_message_are_kept_not_replaced() {
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        plain_link_world(&l);
+        let s = spaces(&l, &w);
+        // The lab: "Could not find a part of the path" (ERROR_PATH_NOT_FOUND = 3).
+        let refuse = |_: &Path| Err(io::Error::from_raw_os_error(3));
+        let (_, rep, _) = run_with(|run| {
+            delete_with_host(&s, &[lin("/home/me/links/dir-link")], true, run, None, &refuse)
+        });
+        assert_eq!(rep.failed.len(), 1);
+        let m = &rep.failed[0].message;
+        assert!(m.contains("os error 3"), "{m}");
+        assert!(m.contains("In the distribution: not used"), "{m}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_distribution_reporting_success_while_the_link_remains_is_not_believed_either() {
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        plain_link_world(&l);
+        let s = spaces(&l, &w);
+        let rm = FakeUnlink {
+            calls: Default::default(),
+            root: l.path().to_path_buf(),
+            lock: None,
+            succeed: true,
+            really_remove: false,
+        };
+        let nothing = |_: &Path| Err(io::Error::other("refused"));
+        let (_, rep, _) = run_with(|run| {
+            delete_with_host(&s, &[lin("/home/me/links/dir-link")], true, run, Some(&rm), &nothing)
+        });
+        assert_eq!(rep.failed.len(), 1);
+        assert!(rep.failed[0].message.contains("unlink ran without error"));
+        assert!(rep.failed[0].message.contains("The link is still there: yes"));
+    }
+
+    /// REAL WINDOWS test: a directory junction is a reparse-point folder. Deleting it removes the
+    /// junction only; the folder it points to keeps its files.
+    #[cfg(windows)]
+    #[test]
+    fn real_windows_junction_is_removed_without_touching_its_target() {
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        l.file("home/me/target-dir/inside.txt", "inside");
+        let link = l.join("home/me/junction");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(l.join("home/me/target-dir"))
+            .output();
+        if !matches!(made, Ok(ref o) if o.status.success()) {
+            return; // cannot create a junction here
+        }
+        let s = spaces(&l, &w);
+        let (r, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/junction")], true, run));
+        r.unwrap();
+        assert!(rep.failed.is_empty(), "{:?}", rep.failed);
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
+            "inside"
+        );
+    }
+
+    /// REAL WINDOWS test: a folder symlink (when this machine may create one).
+    #[cfg(windows)]
+    #[test]
+    fn real_windows_folder_symlink_is_removed_without_touching_its_target() {
+        let l = TempDir::new("l");
+        let w = TempDir::new("w");
+        l.file("home/me/target-dir/inside.txt", "inside");
+        let link = l.join("home/me/dlink");
+        if std::os::windows::fs::symlink_dir(l.join("home/me/target-dir"), &link).is_err() {
+            return; // no permission to create symbolic links here
+        }
+        let s = spaces(&l, &w);
+        let (r, rep, _) = run_with(|run| delete(&s, &[lin("/home/me/dlink")], true, run));
+        r.unwrap();
+        assert!(rep.failed.is_empty(), "{:?}", rep.failed);
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert_eq!(
+            fs::read_to_string(l.join("home/me/target-dir/inside.txt")).unwrap(),
+            "inside"
+        );
     }
 
     #[cfg(unix)]
@@ -1215,8 +1475,8 @@ mod tests {
         ] {
             let own = fs::symlink_metadata(l.join(name)).unwrap();
             let listed = enumerated_meta(&l.join(name)).expect(name);
-            assert_eq!(linkish(&own), is_link, "{name} (own)");
-            assert_eq!(linkish(&listed), is_link, "{name} (listing)");
+            assert_eq!(linkish(&own, false), is_link, "{name} (own)");
+            assert_eq!(linkish(&listed, false), is_link, "{name} (listing)");
         }
         assert!(enumerated_meta(&l.join("missing")).is_none());
     }
@@ -1226,6 +1486,7 @@ mod tests {
         let ctx = DelCtx {
             root: Some(Path::new("/r/root")),
             remover: None,
+            host_remove: &remove_link,
         };
         assert_eq!(
             ctx.linux_path(Path::new("/r/root/tmp/x/link")).as_deref(),
@@ -1236,6 +1497,7 @@ mod tests {
         let none = DelCtx {
             root: None,
             remover: None,
+            host_remove: &remove_link,
         };
         assert_eq!(none.linux_path(Path::new("/r/root/a")), None);
     }
