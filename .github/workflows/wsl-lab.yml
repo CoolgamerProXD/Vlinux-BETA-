@@ -1,0 +1,26 @@
+name: WSL lab
+
+# A disposable GitHub-hosted Windows VM used to look at how the REAL wsl.exe / ConPTY / file share
+# behave. It runs only when this file or scripts/wsl-lab change. Nothing here touches a user's PC.
+on:
+  push:
+    branches: ['**']
+    paths:
+      - '.github/workflows/wsl-lab.yml'
+      - 'scripts/wsl-lab/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: WSL lab - what does this runner have?
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe
+        shell: pwsh
+        run: ./scripts/wsl-lab/probe.ps1
+        continue-on-error: true
