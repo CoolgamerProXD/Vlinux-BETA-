@@ -2,6 +2,9 @@
   import type { Snippet } from 'svelte';
   import { wm, type WinState } from '../lib/wm.svelte';
   import { appById } from '../lib/apps';
+  import { config } from '../lib/config.svelte';
+  import { ctx } from '../lib/ctx.svelte';
+  import { windowMenu } from '../lib/menus';
   import Icon from './Icon.svelte';
 
   let { win, children }: { win: WinState; children: Snippet } = $props();
@@ -35,9 +38,11 @@
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_element_to_interactive_role -->
 <section class="win glass" class:focused class:maximized={win.maximized} class:hidden
          style="--x:{win.x}px; --y:{win.y}px; --w:{win.w}px; --h:{win.h}px; z-index:{win.z}"
-         onpointerdown={() => wm.focus(win.id)} role="dialog" aria-label={win.title} aria-hidden={hidden}>
+         onpointerdown={() => wm.focus(win.id)} role="dialog" aria-label={win.title} aria-hidden={hidden}
+         onkeydown={(e) => (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && e.target === e.currentTarget && ctx.openFrom(e, windowMenu(win, config.value.shell.workspace_count), win.title)}>
   <header onpointerdown={(e) => start('move', e)} onpointermove={moveEv} onpointerup={end} onpointercancel={end}
-          ondblclick={() => wm.toggleMaximize(win.id)}>
+          ondblclick={() => wm.toggleMaximize(win.id)}
+          oncontextmenu={(e) => ctx.openFrom(e, windowMenu(win, config.value.shell.workspace_count), win.title)}>
     <span class="ico">{#if app}<Icon name={app.icon} size={15} />{/if}</span>
     <span class="name">{win.title}</span>
     <div class="ctl" onpointerdown={(e) => e.stopPropagation()} ondblclick={(e) => e.stopPropagation()}>
@@ -58,7 +63,7 @@
     position: absolute; left: 0; top: 0; width: var(--w); height: var(--h);
     transform: translate3d(var(--x), var(--y), 0);
     border-radius: 16px; display: flex; flex-direction: column; overflow: hidden;
-    background: rgb(14 14 24 / calc(var(--glass-a) + 0.3));
+    background: rgb(var(--win-rgb) / calc(var(--glass-a) + 0.3));
     animation: win-in 260ms var(--ease) both;
     transition: border-color var(--dur), box-shadow var(--dur);
   }

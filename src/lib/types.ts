@@ -2,11 +2,18 @@
 
 export const WALLPAPERS = ['nebula', 'dusk', 'peaks', 'grid'] as const;
 export const ACCENTS = ['violet', 'cyan', 'rose', 'amber', 'mint'] as const;
-export const DOCK_POSITIONS = ['bottom', 'left'] as const;
+export const DOCK_POSITIONS = ['bottom', 'left', 'right'] as const;
+export const THEMES = ['midnight', 'graphite', 'oled'] as const;
+export const CURSORS = ['block', 'bar', 'underline'] as const;
+/** What may open by itself at start-up. Never the terminal or Files: both start the distribution. */
+export const STARTUP_APPS = ['none', 'distros', 'settings'] as const;
 
 export type Wallpaper = (typeof WALLPAPERS)[number];
 export type Accent = (typeof ACCENTS)[number];
 export type DockPosition = (typeof DOCK_POSITIONS)[number];
+export type Theme = (typeof THEMES)[number];
+export type CursorStyle = (typeof CURSORS)[number];
+export type StartupApp = (typeof STARTUP_APPS)[number];
 
 export const FOLDER_IDS = ['downloads', 'documents', 'pictures', 'videos', 'music', 'desktop'] as const;
 export type FolderId = (typeof FOLDER_IDS)[number];
@@ -35,11 +42,29 @@ export interface Config {
     accent: Accent;
     glass: number;
     animations: boolean;
+    theme: Theme;
+    /** Backdrop blur behind panels (the biggest GPU cost on integrated graphics). */
+    blur: boolean;
   };
   dock: {
     position: DockPosition;
     icon_size: number;
+    labels: boolean;
+    magnify: boolean;
   };
+  topbar: {
+    show_workspaces: boolean;
+    show_title: boolean;
+    show_windows: boolean;
+    show_battery: boolean;
+  };
+  terminal: {
+    font_size: number;
+    cursor: CursorStyle;
+    cursor_blink: boolean;
+    scrollback: number;
+  };
+  startup: { open_app: StartupApp };
   /** Which distribution the user chose to use. Never set automatically. */
   runtime: { selected_distro: string | null };
   /** Saved shared-folder preferences (applied from M4 on). */
@@ -62,10 +87,13 @@ export interface SystemInfo {
 }
 
 export const defaultConfig = (): Config => ({
-  schema_version: 2,
+  schema_version: 3,
   shell: { start_fullscreen: true, clock_24h: true, show_seconds: false, show_date: true, workspace_count: 5 },
-  appearance: { wallpaper: 'nebula', accent: 'violet', glass: 60, animations: true },
-  dock: { position: 'bottom', icon_size: 48 },
+  appearance: { wallpaper: 'nebula', accent: 'violet', glass: 60, animations: true, theme: 'midnight', blur: true },
+  dock: { position: 'bottom', icon_size: 48, labels: false, magnify: true },
+  topbar: { show_workspaces: true, show_title: true, show_windows: true, show_battery: true },
+  terminal: { font_size: 13, cursor: 'block', cursor_blink: true, scrollback: 5000 },
+  startup: { open_app: 'none' },
   runtime: { selected_distro: null },
   storage: defaultStorage(),
 });
@@ -98,6 +126,9 @@ export function sanitizeConfig(input: unknown): Config {
   const s = (o.shell ?? {}) as Record<string, unknown>;
   const a = (o.appearance ?? {}) as Record<string, unknown>;
   const k = (o.dock ?? {}) as Record<string, unknown>;
+  const tb = (o.topbar ?? {}) as Record<string, unknown>;
+  const tm = (o.terminal ?? {}) as Record<string, unknown>;
+  const su = (o.startup ?? {}) as Record<string, unknown>;
   const r = (o.runtime ?? {}) as Record<string, unknown>;
   const st = (o.storage ?? {}) as Record<string, any>;
   const ds = defaultStorage();
@@ -111,7 +142,7 @@ export function sanitizeConfig(input: unknown): Config {
     };
   }
   return {
-    schema_version: 2,
+    schema_version: 3,
     shell: {
       start_fullscreen: bool(s.start_fullscreen, d.shell.start_fullscreen),
       clock_24h: bool(s.clock_24h, d.shell.clock_24h),
@@ -124,11 +155,28 @@ export function sanitizeConfig(input: unknown): Config {
       accent: pick(ACCENTS, a.accent, d.appearance.accent),
       glass: clamp(Number(a.glass ?? d.appearance.glass), 0, 100),
       animations: bool(a.animations, d.appearance.animations),
+      theme: pick(THEMES, a.theme, d.appearance.theme),
+      blur: bool(a.blur, d.appearance.blur),
     },
     dock: {
       position: pick(DOCK_POSITIONS, k.position, d.dock.position),
       icon_size: clamp(Number(k.icon_size ?? d.dock.icon_size), 32, 72),
+      labels: bool(k.labels, d.dock.labels),
+      magnify: bool(k.magnify, d.dock.magnify),
     },
+    topbar: {
+      show_workspaces: bool(tb.show_workspaces, d.topbar.show_workspaces),
+      show_title: bool(tb.show_title, d.topbar.show_title),
+      show_windows: bool(tb.show_windows, d.topbar.show_windows),
+      show_battery: bool(tb.show_battery, d.topbar.show_battery),
+    },
+    terminal: {
+      font_size: clamp(Number(tm.font_size ?? d.terminal.font_size), 10, 24),
+      cursor: pick(CURSORS, tm.cursor, d.terminal.cursor),
+      cursor_blink: bool(tm.cursor_blink, d.terminal.cursor_blink),
+      scrollback: clamp(Number(tm.scrollback ?? d.terminal.scrollback), 500, 50000),
+    },
+    startup: { open_app: pick(STARTUP_APPS, su.open_app, d.startup.open_app) },
     runtime: { selected_distro: typeof r.selected_distro === 'string' && DISTRO_NAME.test(r.selected_distro) ? r.selected_distro : null },
     storage,
   };

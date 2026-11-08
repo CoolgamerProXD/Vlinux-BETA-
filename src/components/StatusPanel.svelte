@@ -43,7 +43,7 @@
   .panel {
     position: absolute; top: calc(var(--bar-h) + var(--gap) * 2); right: var(--gap);
     width: min(340px, calc(100vw - 2 * var(--gap))); border-radius: 18px; padding: 16px;
-    background: rgb(16 16 28 / calc(var(--glass-a) + 0.25)); animation: drop-in 220ms var(--ease) both;
+    background: rgb(var(--panel-rgb) / calc(var(--glass-a) + 0.25)); animation: drop-in 220ms var(--ease) both;
   }
   h2 { margin: 0 0 12px; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); }
   dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; font-size: 0.86rem; }

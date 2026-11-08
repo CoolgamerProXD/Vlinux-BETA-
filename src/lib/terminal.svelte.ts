@@ -1,6 +1,7 @@
 import type { FitAddon } from '@xterm/addon-fit';
 import type { Terminal as XTerm } from '@xterm/xterm';
 import * as ipc from './ipc';
+import { config } from './config.svelte';
 import {
   AckBatcher,
   DEFAULT_COLS,
@@ -41,11 +42,12 @@ function cssVar(name: string, fallback: string): string {
 export function terminalTheme() {
   const accent = cssVar('--accent', '#a98bff');
   const rgb = cssVar('--accent-rgb', '169 139 255').replace(/\s+/g, ',');
+  const bg = cssVar('--term-bg', '#0b0b14');
   return {
-    background: '#0b0b14',
+    background: bg,
     foreground: '#e6e6f2',
     cursor: accent,
-    cursorAccent: '#0b0b14',
+    cursorAccent: bg,
     selectionBackground: `rgba(${rgb},0.38)`,
     black: '#1c1c2e',
     red: '#ff6b81',
@@ -104,10 +106,11 @@ class TerminalStore {
         rows: this.lastRows,
         cols: this.lastCols,
         fontFamily: cssVar('--font-mono', 'monospace'),
-        fontSize: 13,
+        fontSize: config.value.terminal.font_size,
         lineHeight: 1.18,
-        cursorBlink: true,
-        scrollback: 5000,
+        cursorBlink: config.value.terminal.cursor_blink,
+        cursorStyle: config.value.terminal.cursor,
+        scrollback: config.value.terminal.scrollback,
         allowProposedApi: true, // required by the Unicode 11 addon
         theme: terminalTheme(),
       });
@@ -208,6 +211,24 @@ class TerminalStore {
 
   focus() {
     this.active?.term.focus();
+  }
+
+  /** Apply Settings → Terminal to every open tab. A font change refits, which resizes the PTY. */
+  applySettings(t: { font_size: number; cursor: 'block' | 'bar' | 'underline'; cursor_blink: boolean; scrollback: number }) {
+    for (const s of this.sessions) {
+      const resize = s.term.options.fontSize !== t.font_size;
+      s.term.options.fontSize = t.font_size;
+      s.term.options.cursorStyle = t.cursor;
+      s.term.options.cursorBlink = t.cursor_blink;
+      s.term.options.scrollback = t.scrollback;
+      if (resize) {
+        try {
+          s.fit.fit();
+        } catch {
+          /* hidden tab: it refits when shown */
+        }
+      }
+    }
   }
 
   /** Re-apply the VLINUX theme (the accent colour may have changed). */

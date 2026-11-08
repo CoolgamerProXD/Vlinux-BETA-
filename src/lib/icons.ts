@@ -3,7 +3,7 @@ export type IconName =
   | 'terminal' | 'folder' | 'layers' | 'activity' | 'sliders' | 'power' | 'search' | 'grid'
   | 'wifi' | 'wifi-off' | 'battery' | 'expand' | 'shrink' | 'close' | 'minus' | 'square'
   | 'windows' | 'check' | 'palette' | 'monitor' | 'keyboard' | 'info' | 'cpu' | 'alert' | 'rotate' | 'plus' | 'chevron-down'
-  | 'file' | 'link' | 'arrow-left' | 'arrow-right' | 'arrow-up' | 'eye' | 'eye-off' | 'trash' | 'edit' | 'copy' | 'scissors' | 'clipboard' | 'external' | 'home' | 'drive';
+  | 'file' | 'link' | 'arrow-left' | 'arrow-right' | 'arrow-up' | 'eye' | 'eye-off' | 'trash' | 'edit' | 'copy' | 'scissors' | 'clipboard' | 'external' | 'home' | 'drive' | 'bell';
 
 export const ICONS: Record<IconName, string> = {
   plus: 'M12 5v14M5 12h14',
@@ -47,5 +47,6 @@ export const ICONS: Record<IconName, string> = {
   clipboard: 'M8.5 5.5h-2v15h11v-15h-2M9 3.5h6v4H9z',
   external: 'M13 4.5h6.5V11M19.5 4.5L11 13M17.5 14v5.5h-13v-13H10',
   home: 'M4 11l8-6.5 8 6.5M6 9.8v9.7h12V9.8M10 19.5v-5h4v5',
+  bell: 'M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0',
   drive: 'M4 14.5h16v4.5H4zM4 14.5l2.5-8h11l2.5 8M16.5 17h.01',
 };

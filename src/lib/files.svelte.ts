@@ -6,6 +6,8 @@ import {
   type Crumb, type Entry, type FsError, type JobEvent, type ListingHead, type Location, type OpReport, type Places, type SortKey, type TransferMode,
 } from './fs-types';
 
+const toast = (text: string, kind: 'info' | 'error' = 'info', ms?: number) => ui.toast(text, kind, ms, 'files');
+
 export interface JobView {
   id: string;
   kind: JobEvent['kind'];
@@ -272,14 +274,14 @@ class FilesStore {
     const l = this.locOf(entry.name);
     if (!l) return;
     if (!entry.open.allowed) {
-      ui.toast(entry.open.reason ?? 'This type of file is not opened from VLINUX.', 'error', 7000);
+      toast(entry.open.reason ?? 'This type of file is not opened from VLINUX.', 'error', 7000);
       return;
     }
     try {
       await ipc.fsOpen(this.distro, l);
-      ui.toast(`Opened “${entry.name}” in Windows`);
+      toast(`Opened “${entry.name}” in Windows`);
     } catch (e) {
-      ui.toast(asFsError(e).message, 'error', 7000);
+      toast(asFsError(e).message, 'error', 7000);
     }
   }
 
@@ -289,7 +291,7 @@ class FilesStore {
     try {
       await ipc.fsReveal(this.distro, l);
     } catch (e) {
-      ui.toast(asFsError(e).message, 'error', 7000);
+      toast(asFsError(e).message, 'error', 7000);
     }
   }
 
@@ -336,7 +338,7 @@ class FilesStore {
     const sources = this.selectedLocations();
     if (!sources.length) return;
     this.clipboard = { mode: cut ? 'move' : 'copy', sources, names: [...this.selected] };
-    ui.toast(`${cut ? 'Cut' : 'Copied'} ${sources.length === 1 ? `“${this.selected[0]}”` : `${sources.length} items`} — open a folder and paste`);
+    toast(`${cut ? 'Cut' : 'Copied'} ${sources.length === 1 ? `“${this.selected[0]}”` : `${sources.length} items`} — open a folder and paste`);
   }
 
   async paste(into: Location | null = this.location) {
@@ -354,7 +356,7 @@ class FilesStore {
       this.track(j.job_id, mode);
       return true;
     } catch (e) {
-      ui.toast(asFsError(e).message, 'error', 7000);
+      toast(asFsError(e).message, 'error', 7000);
       return false;
     }
   }
@@ -383,9 +385,9 @@ class FilesStore {
     const [ing, ed] = VERB[e.kind];
     const r = e.report;
     const problems = (r?.failed.length ?? 0) + (r?.skipped.length ?? 0);
-    if (e.state === 'cancelled') ui.toast(`${ing} was cancelled${r ? ` after ${r.items_done} item${r.items_done === 1 ? '' : 's'}` : ''}. Nothing already ${ed.toLowerCase()} was undone.`);
-    else if (e.state === 'failed') ui.toast(e.error?.message ?? `${ing} failed.`, 'error', 8000);
-    else ui.toast(`${ed} ${r?.items_done ?? 0} item${r?.items_done === 1 ? '' : 's'}${problems ? ` — ${problems} need attention` : ''}`, problems ? 'error' : 'info');
+    if (e.state === 'cancelled') toast(`${ing} was cancelled${r ? ` after ${r.items_done} item${r.items_done === 1 ? '' : 's'}` : ''}. Nothing already ${ed.toLowerCase()} was undone.`);
+    else if (e.state === 'failed') toast(e.error?.message ?? `${ing} failed.`, 'error', 8000);
+    else toast(`${ed} ${r?.items_done ?? 0} item${r?.items_done === 1 ? '' : 's'}${problems ? ` — ${problems} need attention` : ''}`, problems ? 'error' : 'info');
     if (e.state === 'failed' || problems > 0) this.finished = { title: `${ing} finished with problems`, report: r, error: e.error };
     void this.refresh();
   }

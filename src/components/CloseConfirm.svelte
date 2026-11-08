@@ -28,7 +28,7 @@
 
 <style>
   .backdrop { position: absolute; inset: 0; z-index: 95; display: grid; place-items: center; padding: 12px; background: rgb(4 4 10 / 0.55); backdrop-filter: blur(8px); animation: fade-in 160ms ease both; }
-  .panel { width: min(480px, 100%); border-radius: 22px; padding: 22px; background: rgb(16 16 28 / calc(var(--glass-a) + 0.25)); animation: pop-in 240ms var(--ease) both; }
+  .panel { width: min(480px, 100%); border-radius: 22px; padding: 22px; background: rgb(var(--panel-rgb) / calc(var(--glass-a) + 0.25)); animation: pop-in 240ms var(--ease) both; }
   h2 { margin: 0 0 10px; font-size: 1.05rem; }
   p { margin: 0 0 18px; color: var(--muted); line-height: 1.55; }
   .actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }

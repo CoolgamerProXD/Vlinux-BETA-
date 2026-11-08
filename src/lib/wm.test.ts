@@ -117,3 +117,135 @@ describe('WindowManager', () => {
     expect([wm.windows[0]!.x, wm.windows[0]!.y]).toEqual([x, y]);
   });
 });
+
+describe('WindowManager — M7 window management', () => {
+  let wm: WindowManager;
+  beforeEach(() => {
+    wm = new WindowManager();
+    wm.setBounds(1200, 700);
+  });
+
+  it('snaps to the left/right half and restores the earlier geometry', () => {
+    const id = wm.open(app('a'));
+    const before = { ...wm.windows[0]! };
+    wm.snap(id, 'left');
+    expect(wm.windows[0]).toMatchObject({ x: 0, y: 0, w: 600, h: 700, snapped: 'left' });
+    wm.snap(id, 'right');
+    expect(wm.windows[0]).toMatchObject({ x: 600, w: 600, snapped: 'right' });
+    wm.snap(id, 'restore');
+    expect(wm.windows[0]).toMatchObject({ x: before.x, y: before.y, w: before.w, h: before.h, snapped: null });
+  });
+
+  it('dragging or resizing a snapped window releases the snap and brings back its size', () => {
+    const id = wm.open(app('a'));
+    const w0 = wm.windows[0]!.w;
+    wm.snap(id, 'left');
+    wm.move(id, 200, 100);
+    expect(wm.windows[0]).toMatchObject({ snapped: null, w: w0 });
+    wm.snap(id, 'right');
+    wm.resize(id, 500, 400);
+    expect(wm.windows[0]!.snapped).toBeNull();
+  });
+
+  it('keeps snapped windows tiled when the desktop is resized', () => {
+    const id = wm.open(app('a'));
+    wm.snap(id, 'right');
+    wm.setBounds(1000, 600);
+    expect(wm.windows[0]).toMatchObject({ x: 500, w: 500, h: 600 });
+  });
+
+  it('never makes a snapped window smaller than the minimum', () => {
+    wm.setBounds(500, 400);
+    const id = wm.open(app('a'));
+    wm.snap(id, 'left');
+    expect(wm.windows[0]!.w).toBeGreaterThanOrEqual(MIN_W);
+    expect(wm.windows[0]!.h).toBeGreaterThanOrEqual(MIN_H);
+  });
+
+  it('maximise/restore round-trips and snapped windows restore from toggleMaximize', () => {
+    const id = wm.open(app('a'));
+    wm.snap(id, 'maximize');
+    expect(wm.windows[0]!.maximized).toBe(true);
+    wm.snap(id, 'restore');
+    expect(wm.windows[0]!.maximized).toBe(false);
+    wm.snap(id, 'left');
+    wm.toggleMaximize(id);
+    expect(wm.windows[0]!.snapped).toBeNull();
+  });
+
+  it('lower: undoes a snap, otherwise minimises', () => {
+    const id = wm.open(app('a'));
+    wm.snap(id, 'left');
+    wm.lower(id);
+    expect(wm.windows[0]).toMatchObject({ snapped: null, minimized: false });
+    wm.lower(id);
+    expect(wm.windows[0]!.minimized).toBe(true);
+  });
+
+  it('moves a window to another workspace without following it', () => {
+    const a = wm.open(app('a'));
+    const b = wm.open(app('b'));
+    wm.moveToWorkspace(b, 2, 5);
+    expect(wm.workspace).toBe(0);
+    expect(wm.windows.find((w) => w.id === b)!.workspace).toBe(2);
+    expect(wm.focusedId).toBe(a);
+    expect(wm.occupied(2)).toBe(true);
+    wm.moveToWorkspace(a, 7, 5); // out of range: ignored
+    expect(wm.windows.find((w) => w.id === a)!.workspace).toBe(0);
+  });
+
+  it('cycles windows most-recently-used first and commits on release', () => {
+    const a = wm.open(app('a'));
+    const b = wm.open(app('b'));
+    const c = wm.open(app('c'));
+    expect(wm.focusedId).toBe(c);
+    wm.cycleStep(); // opens, picks the previous window
+    expect(wm.switcher?.order).toEqual([c, b, a]);
+    expect(wm.switcher?.index).toBe(1);
+    wm.cycleStep();
+    expect(wm.switcher?.index).toBe(2);
+    wm.cycleCommit();
+    expect(wm.switcher).toBeNull();
+    expect(wm.focusedId).toBe(a);
+    // The most recent two alternate.
+    wm.cycleStep();
+    wm.cycleCommit();
+    expect(wm.focusedId).toBe(c);
+  });
+
+  it('cycling backwards wraps, cancel changes nothing, one window cannot cycle', () => {
+    const a = wm.open(app('a'));
+    wm.cycleStep();
+    expect(wm.switcher).toBeNull();
+    const b = wm.open(app('b'));
+    wm.cycleStep(-1);
+    expect(wm.switcher?.index).toBe(1);
+    wm.cycleCancel();
+    expect(wm.focusedId).toBe(b);
+    expect(a).not.toBe(b);
+  });
+
+  it('cycling only covers the current workspace and restores minimised windows', () => {
+    const a = wm.open(app('a'));
+    const b = wm.open(app('b'));
+    wm.moveToWorkspace(b, 1, 5);
+    wm.open(app('c'));
+    wm.minimize(a);
+    wm.cycleStep();
+    expect(wm.switcher?.order).not.toContain(b);
+    expect(wm.switcher?.order).toContain(a);
+    wm.cycleCommit();
+    expect(wm.windows.find((w) => w.id === a)!.minimized).toBe(false);
+    expect(wm.focusedId).toBe(a);
+  });
+
+  it('reveal switches workspace and restores', () => {
+    const a = wm.open(app('a'));
+    wm.moveToWorkspace(a, 3, 5);
+    wm.minimize(a);
+    wm.reveal(a);
+    expect(wm.workspace).toBe(3);
+    expect(wm.windows[0]!.minimized).toBe(false);
+    expect(wm.focusedId).toBe(a);
+  });
+});

@@ -585,7 +585,7 @@
   .mini:hover:not(:disabled) { background: rgb(255 255 255 / 0.15); }
   .mini:disabled { opacity: 0.4; }
   .catch { position: fixed; inset: 0; z-index: 5; }
-  .dmenu { position: absolute; z-index: 6; top: 26px; left: -4px; width: 260px; padding: 6px; border-radius: 12px; background: rgb(16 16 28 / 0.98); box-shadow: 0 18px 50px rgb(0 0 0 / 0.5); display: grid; gap: 2px; }
+  .dmenu { position: absolute; z-index: 6; top: 26px; left: -4px; width: 260px; padding: 6px; border-radius: 12px; background: rgb(var(--panel-rgb) / 0.98); box-shadow: 0 18px 50px rgb(0 0 0 / 0.5); display: grid; gap: 2px; }
   .dmenu .mi { display: grid; gap: 1px; padding: 7px 9px; }
   .dmenu .mi span { color: var(--muted); font-size: 0.72rem; }
   .mnote { padding: 6px 8px 2px; color: var(--faint); font-size: 0.7rem; line-height: 1.4; }
@@ -632,7 +632,7 @@
   .btn.primary { background: var(--accent); color: #0a0a12; border-color: transparent; font-weight: 600; }
   .btn.danger { background: #ff6b7d; color: #1a0508; border-color: transparent; font-weight: 600; }
   .bad { color: #ffb3bd; }
-  .finished { position: absolute; right: 12px; bottom: 10px; width: min(380px, calc(100% - 24px)); padding: 10px 12px; border-radius: 12px; background: rgb(16 16 28 / 0.97); border: 1px solid rgb(255 107 125 / 0.45); box-shadow: var(--shadow); }
+  .finished { position: absolute; right: 12px; bottom: 10px; width: min(380px, calc(100% - 24px)); padding: 10px 12px; border-radius: 12px; background: rgb(var(--panel-rgb) / 0.97); border: 1px solid rgb(255 107 125 / 0.45); box-shadow: var(--shadow); }
   .finished .fh { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .finished ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 0.76rem; line-height: 1.5; user-select: text; }
   .finished small { color: var(--faint); }
@@ -647,7 +647,7 @@
   .status .muted { color: var(--faint); overflow: hidden; text-overflow: ellipsis; }
   .status .grow { flex: 1; }
 
-  .ctx { position: absolute; z-index: 20; min-width: 210px; padding: 6px; border-radius: 12px; background: rgb(16 16 28 / 0.98); box-shadow: 0 18px 50px rgb(0 0 0 / 0.55); display: grid; gap: 1px; }
+  .ctx { position: absolute; z-index: 20; min-width: 210px; padding: 6px; border-radius: 12px; background: rgb(var(--panel-rgb) / 0.98); box-shadow: 0 18px 50px rgb(0 0 0 / 0.55); display: grid; gap: 1px; }
   .mi { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px; text-align: left; background: transparent; border: 0; font: inherit; }
   .mi:hover:not(:disabled) { background: rgb(255 255 255 / 0.1); }
   .mi:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -656,7 +656,7 @@
   .ctx .sep { height: 1px; margin: 4px 6px; background: var(--line); }
 
   .backdrop { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: rgb(4 4 10 / 0.55); padding: 16px; }
-  .panel { width: min(430px, 100%); padding: 20px; border-radius: 16px; background: rgb(20 20 34 / 0.98); border: 1px solid var(--line-strong); box-shadow: var(--shadow); display: grid; gap: 12px; }
+  .panel { width: min(430px, 100%); padding: 20px; border-radius: 16px; background: rgb(var(--panel2-rgb) / 0.98); border: 1px solid var(--line-strong); box-shadow: var(--shadow); display: grid; gap: 12px; }
   .panel h2 { margin: 0; font-size: 1.02rem; overflow-wrap: anywhere; }
   .panel p { margin: 0; color: var(--muted); line-height: 1.5; font-size: 0.84rem; }
   .panel ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 0.82rem; max-height: 120px; overflow: auto; }

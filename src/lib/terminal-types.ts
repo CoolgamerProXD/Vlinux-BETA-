@@ -1,3 +1,4 @@
+import { desktopAction } from './shortcuts';
 // Types mirrored from the Rust terminal module (`vlinux_runtime::terminal`).
 
 export type SessionState =
@@ -135,13 +136,7 @@ export class AckBatcher {
  * not also typed into the shell.
  */
 export function isShellShortcut(e: Pick<KeyboardEvent, 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey' | 'code'>): boolean {
-  if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyQ') return true;
-  if (e.code === 'F11') return true;
-  if (!e.altKey || e.ctrlKey || e.metaKey) return false;
-  if (e.code === 'F1') return true;
-  if (e.shiftKey && e.code === 'KeyQ') return true;
-  if (!e.shiftKey && e.code === 'KeyW') return true;
-  return !e.shiftKey && /^Digit[1-9]$/.test(e.code);
+  return desktopAction(e) !== null;
 }
 
 /** Terminal-window shortcuts: Ctrl+Shift+T new tab, Ctrl+Shift+W close tab, Ctrl+Shift+C/V copy/paste. */

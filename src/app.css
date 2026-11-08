@@ -12,15 +12,19 @@
   --ink: #08080f;
   --text: #ecebf7;
   --muted: #9b9bb8;
-  --faint: #6c6c88;
+  --faint: #82829e;
+  --panel-rgb: 16 16 28;
+  --panel2-rgb: 20 20 34;
+  --win-rgb: 14 14 24;
+  --wall-dim: 0;
   --line: rgb(255 255 255 / 0.08);
   --line-strong: rgb(255 255 255 / 0.16);
 
   /* driven by Settings → glass */
   --glass-a: 0.56;
   --glass-blur: 20px;
-  --panel: rgb(16 16 28 / var(--glass-a));
-  --panel-solid: rgb(20 20 34 / 0.96);
+  --panel: rgb(var(--panel-rgb) / var(--glass-a));
+  --panel-solid: rgb(var(--panel2-rgb) / 0.96);
 
   --radius: 16px;
   --radius-sm: 10px;
@@ -81,6 +85,13 @@ input { font: inherit; color: inherit; }
 
 .mono { font-family: var(--font-mono); }
 
+/* Backdrop blur off (Settings → Appearance): the single biggest GPU saving on integrated graphics. */
+.no-blur *, .no-blur *::before, .no-blur *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.no-blur { --shadow: 0 8px 22px rgb(0 0 0 / 0.5); }
+
 /* Animations can be disabled in Settings, or by the OS preference. */
 .no-anim *, .no-anim *::before, .no-anim *::after {
   animation-duration: 0.001ms !important;
@@ -97,3 +108,6 @@ input { font: inherit; color: inherit; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: none; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes drop-in { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+/* The window is hidden or minimised: nothing should animate. */
+.paused *, .paused *::before, .paused *::after { animation-play-state: paused !important; }

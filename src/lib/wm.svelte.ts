@@ -10,7 +10,13 @@ export interface WinState extends Rect {
   z: number;
   maximized: boolean;
   minimized: boolean;
+  /** Set while the window is tiled to a half of the desktop; dragging or resizing clears it. */
+  snapped: 'left' | 'right' | null;
+  /** Where the window was before it was snapped, so it can be restored. */
+  restore: Rect | null;
 }
+
+export type SnapTarget = 'left' | 'right' | 'maximize' | 'restore';
 
 export const MIN_W = 380;
 export const MIN_H = 260;
@@ -51,7 +57,10 @@ export class WindowManager {
 
   setBounds(w: number, h: number) {
     this.bounds = { w, h };
-    for (const win of this.windows) this.clamp(win);
+    for (const win of this.windows) {
+      if (win.snapped) this.applySnap(win);
+      else this.clamp(win);
+    }
   }
 
   /** Open an app window, or focus it if it is already open (all apps are single-instance). */
@@ -78,6 +87,8 @@ export class WindowManager {
       z: ++this.zTop,
       maximized: false,
       minimized: false,
+      snapped: null,
+      restore: null,
     };
     this.windows.push(win);
     this.clamp(win);
@@ -141,12 +152,117 @@ export class WindowManager {
 
   toggleMaximize(id: number) {
     const w = this.get(id);
-    if (w) w.maximized = !w.maximized;
+    if (!w) return;
+    if (w.snapped) this.snap(id, 'restore');
+    else w.maximized = !w.maximized;
+  }
+
+  /**
+   * Keyboard tiling: left/right half of the desktop, maximise, or restore the earlier size.
+   * Only shell windows are tiled; this is not a compositor.
+   */
+  snap(id: number, target: SnapTarget) {
+    const w = this.get(id);
+    if (!w) return;
+    w.minimized = false;
+    if (target === 'maximize') {
+      w.maximized = true;
+      return;
+    }
+    if (target === 'restore') {
+      if (w.snapped && w.restore) Object.assign(w, w.restore);
+      w.snapped = null;
+      w.restore = null;
+      w.maximized = false;
+      this.clamp(w);
+      return;
+    }
+    if (!w.snapped && !w.maximized) w.restore = { x: w.x, y: w.y, w: w.w, h: w.h };
+    w.maximized = false;
+    w.snapped = target;
+    this.applySnap(w);
+    this.focus(id);
+  }
+
+  private applySnap(w: WinState) {
+    if (!w.snapped) return;
+    const half = Math.max(MIN_W, Math.floor(this.bounds.w / 2));
+    w.w = Math.min(half, Math.max(MIN_W, this.bounds.w));
+    w.h = Math.max(MIN_H, this.bounds.h);
+    w.x = w.snapped === 'left' ? 0 : Math.max(0, this.bounds.w - w.w);
+    w.y = 0;
+  }
+
+  /** Alt+Shift+Down: undo a snap or maximise; a plain window is minimised. */
+  lower(id: number) {
+    const w = this.get(id);
+    if (!w) return;
+    if (w.snapped || w.maximized) this.snap(id, 'restore');
+    else this.minimize(id);
+  }
+
+  /** Send a window to another workspace without following it (the current view stays put). */
+  moveToWorkspace(id: number, n: number, count: number) {
+    const w = this.get(id);
+    if (!w || n < 0 || n >= count || w.workspace === n) return;
+    w.workspace = n;
+    if (this.focusedId === id && n !== this.workspace) this.refocus();
+  }
+
+  // ---- window switcher (Alt+`) ----------------------------------------------------------------
+  /** While open: the windows of the current workspace, most recently used first, and the pick. */
+  switcher = $state<{ order: number[]; index: number } | null>(null);
+
+  /** Step through the windows of this workspace. The first step opens the switcher. */
+  cycleStep(dir: 1 | -1 = 1) {
+    if (!this.switcher) {
+      const order = this.windows
+        .filter((w) => w.workspace === this.workspace)
+        .sort((a, b) => b.z - a.z)
+        .map((w) => w.id);
+      if (order.length < 2) return;
+      this.switcher = { order, index: dir === 1 ? 1 : order.length - 1 };
+      return;
+    }
+    const n = this.switcher.order.length;
+    this.switcher.index = (this.switcher.index + dir + n) % n;
+  }
+
+  cycleCommit() {
+    const s = this.switcher;
+    this.switcher = null;
+    const id = s?.order[s.index];
+    if (id !== undefined && this.get(id)) this.focus(id);
+  }
+
+  cycleCancel() {
+    this.switcher = null;
+  }
+
+  /** Bring a window forward from anywhere: switches workspace, restores, focuses. */
+  reveal(id: number) {
+    const w = this.get(id);
+    if (!w) return;
+    this.workspace = w.workspace;
+    this.focus(id);
+  }
+
+  /** Top-bar / list order: stable by opening order, not by focus. */
+  get ordered(): WinState[] {
+    return [...this.windows].sort((a, b) => a.id - b.id);
   }
 
   move(id: number, x: number, y: number) {
     const w = this.get(id);
     if (!w || w.maximized) return;
+    if (w.snapped) {
+      w.snapped = null;
+      if (w.restore) {
+        w.w = w.restore.w;
+        w.h = w.restore.h;
+      }
+      w.restore = null;
+    }
     w.x = x;
     w.y = y;
     this.clamp(w);
@@ -155,6 +271,8 @@ export class WindowManager {
   resize(id: number, width: number, height: number) {
     const w = this.get(id);
     if (!w || w.maximized) return;
+    w.snapped = null;
+    w.restore = null;
     w.w = Math.max(MIN_W, Math.min(width, this.bounds.w - w.x));
     w.h = Math.max(MIN_H, Math.min(height, this.bounds.h - w.y));
   }

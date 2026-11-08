@@ -131,8 +131,15 @@
   // Accent colour changes restyle open terminals.
   $effect(() => {
     void config.value.appearance.accent;
+    void config.value.appearance.theme;
     // The theme sets the CSS variables in its own effect; read them one frame later.
     untrack(() => void requestAnimationFrame(() => terminals.restyle()));
+  });
+
+  // Settings → Terminal applies to open tabs straight away.
+  $effect(() => {
+    const t = $state.snapshot(config.value.terminal);
+    untrack(() => terminals.applySettings(t));
   });
 
   // ---- labels ------------------------------------------------------------------------------
@@ -306,13 +313,13 @@
 </div>
 
 <style>
-  .term { height: 100%; min-height: 0; display: flex; flex-direction: column; background: #0b0b14; }
+  .term { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--term-bg, #0b0b14); }
   .bar { display: flex; align-items: stretch; gap: 8px; padding: 6px 8px 0; background: rgb(255 255 255 / 0.035); border-bottom: 1px solid var(--line); min-height: 38px; }
   .tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none; position: relative; }
   .tabs::-webkit-scrollbar { display: none; }
   .tab { display: flex; align-items: center; border-radius: 9px 9px 0 0; background: transparent; border: 1px solid transparent; border-bottom: 0; max-width: 220px; flex: 0 1 auto; min-width: 0; }
   .tab:hover { background: rgb(255 255 255 / 0.05); }
-  .tab.on { background: #0b0b14; border-color: var(--line); box-shadow: inset 0 2px 0 var(--accent); }
+  .tab.on { background: var(--term-bg, #0b0b14); border-color: var(--line); box-shadow: inset 0 2px 0 var(--accent); }
   .tab-main { display: flex; align-items: center; gap: 8px; padding: 7px 4px 7px 12px; min-width: 0; color: var(--muted); font-size: 0.82rem; }
   .tab.on .tab-main { color: var(--text); }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -331,7 +338,7 @@
   .distro-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgb(var(--accent-rgb) / 0.14); border: 1px solid rgb(var(--accent-rgb) / 0.35); font-size: 0.76rem; max-width: 260px; white-space: nowrap; overflow: hidden; }
   .distro-badge .muted { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
   .menu-catch { position: fixed; inset: 0; z-index: 5; }
-  .menu { position: absolute; z-index: 6; top: 30px; left: 0; min-width: 280px; max-width: 340px; padding: 8px; border-radius: 14px; background: rgb(16 16 28 / 0.97); display: grid; gap: 2px; box-shadow: 0 18px 50px rgb(0 0 0 / 0.5); }
+  .menu { position: absolute; z-index: 6; top: 30px; left: 0; min-width: 280px; max-width: 340px; padding: 8px; border-radius: 14px; background: rgb(var(--panel-rgb) / 0.97); display: grid; gap: 2px; box-shadow: 0 18px 50px rgb(0 0 0 / 0.5); }
   .menu-title { padding: 4px 8px 6px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--faint); }
   .menu-item { display: grid; gap: 1px; text-align: left; padding: 8px 10px; border-radius: 9px; }
   .menu-item:hover:not(:disabled) { background: rgb(255 255 255 / 0.09); }
@@ -339,13 +346,13 @@
   .menu-item span { color: var(--muted); font-size: 0.76rem; }
   .menu-note { padding: 6px 8px 2px; color: var(--faint); font-size: 0.72rem; line-height: 1.4; }
 
-  .stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #0b0b14; }
+  .stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--term-bg, #0b0b14); }
   .pane { position: absolute; inset: 0; display: none; }
   .pane.active { display: block; }
   .pane :global(.xterm) { height: 100%; padding: 8px 6px 4px 12px; }
   .pane :global(.xterm-viewport) { background-color: transparent !important; scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 0.2) transparent; }
 
-  .ended { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: rgb(16 16 28 / 0.94); border: 1px solid var(--line-strong); font-size: 0.84rem; backdrop-filter: blur(8px); }
+  .ended { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: rgb(var(--panel-rgb) / 0.94); border: 1px solid var(--line-strong); font-size: 0.84rem; backdrop-filter: blur(8px); }
   .ended span { flex: 1; min-width: 180px; color: var(--muted); }
   .ended strong { color: var(--text); }
 

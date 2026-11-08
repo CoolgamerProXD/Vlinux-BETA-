@@ -34,7 +34,7 @@ describe('sanitizeConfig', () => {
       runtime: { selected_distro: 'archlinux' },
       storage: { projects: 'shared', music: { mode: 'private' }, downloads: { mode: 'sideways', windows_path: '  D:\\Dl  ' }, pictures: { windows_path: 'x\0y' } },
     });
-    expect(c.schema_version).toBe(2);
+    expect(c.schema_version).toBe(3);
     expect(c.runtime.selected_distro).toBe('archlinux');
     expect(c.storage.projects).toBe('shared');
     expect(c.storage.music.mode).toBe('private');
@@ -52,5 +52,29 @@ describe('sanitizeConfig', () => {
     const c = sanitizeConfig({ schema_version: 1, appearance: { accent: 'rose' } });
     expect(c.appearance.accent).toBe('rose');
     expect(c.storage).toEqual(defaultConfig().storage);
+  });
+  it('validates the M7 settings (schema 3) with the same rules as Rust', () => {
+    const c = sanitizeConfig({
+      appearance: { theme: 'neon', blur: 'yes' },
+      dock: { position: 'right', labels: true, magnify: 5 },
+      topbar: { show_title: false, show_windows: 'no' },
+      terminal: { font_size: 99, cursor: 'bar', scrollback: 3 },
+      startup: { open_app: 'terminal' },
+    });
+    expect(c.appearance.theme).toBe('midnight');
+    expect(c.appearance.blur).toBe(true);
+    expect(c.dock).toMatchObject({ position: 'right', labels: true, magnify: true });
+    expect(c.topbar).toEqual({ show_workspaces: true, show_title: false, show_windows: true, show_battery: true });
+    expect(c.terminal).toEqual({ font_size: 24, cursor: 'bar', cursor_blink: true, scrollback: 500 });
+    // Neither the terminal nor Files can open at start-up: both start the distribution.
+    expect(c.startup.open_app).toBe('none');
+    expect(sanitizeConfig({ startup: { open_app: 'files' } }).startup.open_app).toBe('none');
+    expect(sanitizeConfig({ startup: { open_app: 'settings' } }).startup.open_app).toBe('settings');
+  });
+  it('loads a version-2 config and fills the new settings with defaults', () => {
+    const c = sanitizeConfig({ schema_version: 2, dock: { position: 'left', icon_size: 40 }, runtime: { selected_distro: 'archlinux' } });
+    expect(c.dock).toEqual({ position: 'left', icon_size: 40, labels: false, magnify: true });
+    expect(c.terminal).toEqual(defaultConfig().terminal);
+    expect(c.runtime.selected_distro).toBe('archlinux');
   });
 });

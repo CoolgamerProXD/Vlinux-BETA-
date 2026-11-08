@@ -10,17 +10,20 @@
   import type { StorageOverview, Verdict } from '../lib/runtime-types';
   import { defaultStorage, FOLDER_IDS, type FolderId } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
-  import { ACCENTS, DOCK_POSITIONS, WALLPAPERS, type Accent, type Wallpaper } from '../lib/types';
+  import { notify } from '../lib/notify.svelte';
+  import { ACCENTS, CURSORS, DOCK_POSITIONS, STARTUP_APPS, THEMES, WALLPAPERS, type Accent, type Wallpaper } from '../lib/types';
+  import { SHORTCUTS, SHORTCUT_GROUPS } from '../lib/shortcuts';
   import { ACCENT_COLORS } from '../lib/theme';
   import Icon from '../components/Icon.svelte';
   import WslConfigPanel from '../components/WslConfigPanel.svelte';
   import { distros } from '../lib/distros.svelte';
   import type { IconName } from '../lib/icons';
 
-  type Section = 'appearance' | 'desktop' | 'startup' | 'folders' | 'wsl' | 'shortcuts' | 'storage';
+  type Section = 'appearance' | 'desktop' | 'terminal' | 'startup' | 'folders' | 'wsl' | 'shortcuts' | 'storage';
   const sections: { id: Section; label: string; icon: IconName }[] = [
     { id: 'appearance', label: 'Appearance', icon: 'palette' },
     { id: 'desktop', label: 'Desktop & dock', icon: 'grid' },
+    { id: 'terminal', label: 'Terminal', icon: 'terminal' },
     { id: 'startup', label: 'Startup & display', icon: 'monitor' },
     { id: 'folders', label: 'Linux folders', icon: 'folder' },
     { id: 'wsl', label: 'WSL configuration', icon: 'layers' },
@@ -39,17 +42,23 @@
     grid: 'radial-gradient(circle at 50% 40%, #1c1c34, #05050a)',
   };
 
-  const shortcuts: [string, string][] = [
-    ['Alt + F1', 'Open / close the application launcher'],
-    ['Alt + 1 … 9', 'Switch workspace'],
-    ['Alt + W', 'Close the focused window'],
-    ['F11', 'Toggle full screen'],
-    ['Alt + Shift + Q', 'Open the power / exit menu'],
-    ['Ctrl + Alt + Q', 'Return to Windows immediately'],
-    ['Esc', 'Close the open menu'],
-    ['Ctrl + Shift + T / W', 'Terminal: new tab / close tab'],
-    ['Ctrl + Shift + C / V', 'Terminal: copy selection / paste (Ctrl + C is the shell\'s interrupt)'],
-  ];
+  const THEME_LABEL = { midnight: 'Midnight', graphite: 'Graphite', oled: 'OLED black' } as const;
+  const THEME_HINT = { midnight: 'Deep blue-violet panels (default)', graphite: 'Neutral dark grey', oled: 'True black panels, wallpaper dimmed' } as const;
+  const DOCK_LABEL = { bottom: 'Bottom', left: 'Left', right: 'Right' } as const;
+  const CURSOR_LABEL = { block: 'Block', bar: 'Bar', underline: 'Underline' } as const;
+  const STARTUP_LABEL = { none: 'Nothing', distros: 'Distributions', settings: 'Settings' } as const;
+  const SCROLLBACKS = [1000, 5000, 10000, 20000, 50000];
+
+  /** One click to the lightest look: no blur, no animation, mostly solid panels. */
+  function lightLook() {
+    config.update((x) => {
+      x.appearance.blur = false;
+      x.appearance.animations = false;
+      x.appearance.glass = Math.min(x.appearance.glass, 20);
+      x.dock.magnify = false;
+    });
+    notify.success('Light look applied: blur, animations and dock magnify are off.', 'settings');
+  }
 
   // ---- WSL configuration: cached discovery only; reading a distribution's file never starts it ----
   let wslChosen = $state<string | null>(null);
@@ -171,6 +180,14 @@
         {/each}
       </div>
 
+      <h3>Theme</h3>
+      <div class="seg" role="radiogroup" aria-label="Theme">
+        {#each THEMES as t}
+          <button role="radio" aria-checked={c.appearance.theme === t} class:sel={c.appearance.theme === t} title={THEME_HINT[t]}
+                  onclick={() => config.update((x) => (x.appearance.theme = t))}>{THEME_LABEL[t]}</button>
+        {/each}
+      </div>
+
       <h3>Accent colour</h3>
       <div class="swatches" role="radiogroup" aria-label="Accent colour">
         {#each ACCENTS as a}
@@ -186,16 +203,29 @@
              oninput={(e) => config.update((x) => (x.appearance.glass = +e.currentTarget.value))} />
 
       <label class="row">
+        <span><strong>Backdrop blur</strong><small>Frosted-glass blur behind panels. Turning it off is the biggest GPU saving on laptops with integrated graphics; panels become mostly solid.</small></span>
+        <input type="checkbox" role="switch" checked={c.appearance.blur} onchange={(e) => config.update((x) => (x.appearance.blur = e.currentTarget.checked))} />
+      </label>
+      <label class="row">
         <span><strong>Animations</strong><small>Subtle motion for windows, menus and the dock. Also follows your Windows “reduce motion” setting.</small></span>
         <input type="checkbox" role="switch" checked={c.appearance.animations} onchange={(e) => config.update((x) => (x.appearance.animations = e.currentTarget.checked))} />
       </label>
+      <div class="row">
+        <span><strong>Light look</strong><small>Turns off blur, animations and dock magnify and makes panels more solid. For slower graphics hardware or to save battery.</small></span>
+        <button class="btn" data-act="light-look" onclick={lightLook}>Apply</button>
+      </div>
     {:else if current === 'desktop'}
       <h3>Dock position</h3>
       <div class="seg" role="radiogroup" aria-label="Dock position">
         {#each DOCK_POSITIONS as p}
-          <button role="radio" aria-checked={c.dock.position === p} class:sel={c.dock.position === p} onclick={() => config.update((x) => (x.dock.position = p))}>{p === 'bottom' ? 'Bottom' : 'Left'}</button>
+          <button role="radio" aria-checked={c.dock.position === p} class:sel={c.dock.position === p} onclick={() => config.update((x) => (x.dock.position = p))}>{DOCK_LABEL[p]}</button>
         {/each}
       </div>
+
+      <label class="row"><span><strong>Show app names</strong><small>Names under (or beside) the dock icons instead of only on hover.</small></span>
+        <input type="checkbox" role="switch" checked={c.dock.labels} onchange={(e) => config.update((x) => (x.dock.labels = e.currentTarget.checked))} /></label>
+      <label class="row"><span><strong>Magnify on hover</strong><small>The icon under the pointer grows slightly.</small></span>
+        <input type="checkbox" role="switch" checked={c.dock.magnify} onchange={(e) => config.update((x) => (x.dock.magnify = e.currentTarget.checked))} /></label>
 
       <h3>Dock icon size <span class="val mono">{c.dock.icon_size}px</span></h3>
       <input type="range" min="32" max="72" step="2" value={c.dock.icon_size} aria-label="Dock icon size"
@@ -205,6 +235,16 @@
       <input type="range" min="2" max="9" step="1" value={c.shell.workspace_count} aria-label="Number of workspaces"
              oninput={(e) => config.update((x) => (x.shell.workspace_count = +e.currentTarget.value))} />
 
+      <h3>Top bar</h3>
+      <label class="row"><span><strong>Workspace buttons</strong></span>
+        <input type="checkbox" role="switch" checked={c.topbar.show_workspaces} onchange={(e) => config.update((x) => (x.topbar.show_workspaces = e.currentTarget.checked))} /></label>
+      <label class="row"><span><strong>Window list</strong><small>One button per window on this workspace.</small></span>
+        <input type="checkbox" role="switch" checked={c.topbar.show_windows} onchange={(e) => config.update((x) => (x.topbar.show_windows = e.currentTarget.checked))} /></label>
+      <label class="row"><span><strong>Focused window title</strong></span>
+        <input type="checkbox" role="switch" checked={c.topbar.show_title} onchange={(e) => config.update((x) => (x.topbar.show_title = e.currentTarget.checked))} /></label>
+      <label class="row"><span><strong>Battery percentage</strong><small>Shown only when Windows reports a battery.</small></span>
+        <input type="checkbox" role="switch" checked={c.topbar.show_battery} onchange={(e) => config.update((x) => (x.topbar.show_battery = e.currentTarget.checked))} /></label>
+
       <h3>Clock</h3>
       <label class="row"><span><strong>24-hour clock</strong></span>
         <input type="checkbox" role="switch" checked={c.shell.clock_24h} onchange={(e) => config.update((x) => (x.shell.clock_24h = e.currentTarget.checked))} /></label>
@@ -212,7 +252,35 @@
         <input type="checkbox" role="switch" checked={c.shell.show_seconds} onchange={(e) => config.update((x) => (x.shell.show_seconds = e.currentTarget.checked))} /></label>
       <label class="row"><span><strong>Show date</strong></span>
         <input type="checkbox" role="switch" checked={c.shell.show_date} onchange={(e) => config.update((x) => (x.shell.show_date = e.currentTarget.checked))} /></label>
+    {:else if current === 'terminal'}
+      <h3>Font size <span class="val mono">{c.terminal.font_size}px</span></h3>
+      <input type="range" min="10" max="24" step="1" value={c.terminal.font_size} aria-label="Terminal font size"
+             oninput={(e) => config.update((x) => (x.terminal.font_size = +e.currentTarget.value))} />
+      <h3>Cursor</h3>
+      <div class="seg" role="radiogroup" aria-label="Cursor style">
+        {#each CURSORS as k}
+          <button role="radio" aria-checked={c.terminal.cursor === k} class:sel={c.terminal.cursor === k} onclick={() => config.update((x) => (x.terminal.cursor = k))}>{CURSOR_LABEL[k]}</button>
+        {/each}
+      </div>
+      <label class="row"><span><strong>Blinking cursor</strong></span>
+        <input type="checkbox" role="switch" checked={c.terminal.cursor_blink} onchange={(e) => config.update((x) => (x.terminal.cursor_blink = e.currentTarget.checked))} /></label>
+      <h3>Scrollback</h3>
+      <div class="row">
+        <span><strong>Lines kept per tab</strong><small>More lines use more memory in every open terminal tab.</small></span>
+        <select aria-label="Scrollback lines" value={c.terminal.scrollback} onchange={(e) => config.update((x) => (x.terminal.scrollback = +e.currentTarget.value))}>
+          {#each SCROLLBACKS as n}<option value={n}>{n.toLocaleString()}</option>{/each}
+          {#if !SCROLLBACKS.includes(c.terminal.scrollback)}<option value={c.terminal.scrollback}>{c.terminal.scrollback.toLocaleString()}</option>{/if}
+        </select>
+      </div>
+      <p class="muted small">Changes apply to terminal tabs that are already open.</p>
     {:else if current === 'startup'}
+      <h3>Open at start-up</h3>
+      <div class="seg" role="radiogroup" aria-label="Open at start-up">
+        {#each STARTUP_APPS as a}
+          <button role="radio" aria-checked={c.startup.open_app === a} class:sel={c.startup.open_app === a} onclick={() => config.update((x) => (x.startup.open_app = a))}>{STARTUP_LABEL[a]}</button>
+        {/each}
+      </div>
+      <p class="muted small">Terminal and Files are not offered here: opening them starts your Linux distribution, and VLINUX only does that when you ask.</p>
       <h3>Display</h3>
       <div class="row">
         <span><strong>Full screen now</strong><small>Currently {host.fullscreen ? 'full screen' : 'windowed'}. F11 also toggles this.</small></span>
@@ -372,11 +440,16 @@
       {/if}
     {:else if current === 'shortcuts'}
       <h3>Keyboard shortcuts</h3>
-      <dl class="keys">
-        {#each shortcuts as [k, d]}
-          <dt><kbd class="mono">{k}</kbd></dt><dd>{d}</dd>
-        {/each}
-      </dl>
+      <button class="btn" onclick={() => ui.open('shortcuts')}><Icon name="keyboard" size={15} /> Show as overlay (Alt+Shift+F1)</button>
+      {#each SHORTCUT_GROUPS as g (g)}
+        <h3>{g}</h3>
+        <dl class="keys">
+          {#each SHORTCUTS.filter((x) => x.group === g) as sc (sc.keys)}
+            <dt><kbd class="mono">{sc.keys}</kbd></dt><dd>{sc.label}</dd>
+          {/each}
+        </dl>
+      {/each}
+      <p class="muted small">Alt + Tab is reserved by Windows, so VLINUX uses Alt + ` to switch windows.</p>
     {:else}
       <h3>Where settings are stored</h3>
       <p class="muted">Your VLINUX settings are a small TOML file kept separate from every Linux distribution. Uninstalling VLINUX never touches your distributions or their files.</p>
@@ -450,6 +523,7 @@
   .text { flex: 1 1 220px; min-width: 0; padding: 7px 10px; border-radius: 10px; background: rgb(0 0 0 / 0.3); border: 1px solid var(--line); color: var(--text); }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .small { font-size: 0.76rem; }
+  select { padding: 6px 10px; border-radius: 9px; background: rgb(0 0 0 / 0.3); border: 1px solid var(--line-strong); color: var(--text); }
   .keys { display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; margin: 0; align-items: center; }
   .keys dd { margin: 0; color: var(--muted); }
   kbd { padding: 3px 8px; border-radius: 7px; background: rgb(255 255 255 / 0.1); border: 1px solid var(--line); font-size: 0.78rem; white-space: nowrap; }

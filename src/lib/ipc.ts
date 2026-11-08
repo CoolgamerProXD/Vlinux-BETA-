@@ -396,3 +396,34 @@ export async function onDiagProgress(cb: (e: DiagProgress) => void): Promise<() 
   }
   return (await distrosPreview()).onDiag(cb);
 }
+
+// ---- Linux applications (M7) -----------------------------------------------------------------
+// Discovery only reads Desktop Entries of a *running* distribution (it never starts one). Launching
+// sends a desktop-file id only; the backend re-reads the entry and builds the argument list itself.
+
+import type { AppsReport, LaunchRecord } from './linux-apps-types';
+
+const appsPreview = () => import('./linux-apps-preview');
+
+export async function appsDiscover(distro: string): Promise<AppsReport> {
+  if (isTauri()) return call<AppsReport>('apps_discover', { distro });
+  return (await appsPreview()).discover(distro);
+}
+
+export async function appsIcons(distro: string, ids: string[]): Promise<Record<string, string>> {
+  if (isTauri()) return call<Record<string, string>>('apps_icons', { distro, ids });
+  return (await appsPreview()).icons(distro, ids);
+}
+
+export async function appsLaunch(distro: string, id: string): Promise<LaunchRecord> {
+  if (isTauri()) return call<LaunchRecord>('apps_launch', { distro, id });
+  return (await appsPreview()).launch(distro, id);
+}
+
+export async function onAppLaunch(cb: (r: LaunchRecord) => void): Promise<() => void> {
+  if (isTauri()) {
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<LaunchRecord>('vlinux://app-launch', (e) => cb(e.payload));
+  }
+  return (await appsPreview()).onLaunch(cb);
+}

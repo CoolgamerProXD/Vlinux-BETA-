@@ -1,6 +1,8 @@
 <script lang="ts">
   import { APPS, type AppDef } from '../lib/apps';
   import { config } from '../lib/config.svelte';
+  import { ctx } from '../lib/ctx.svelte';
+  import { dockMenu } from '../lib/menus';
   import { ui } from '../lib/ui.svelte';
   import { wm } from '../lib/wm.svelte';
   import AppTile from './AppTile.svelte';
@@ -8,7 +10,10 @@
 
   const items = APPS.filter((a) => a.dock);
   const size = $derived(config.value.dock.icon_size);
-  const vertical = $derived(config.value.dock.position === 'left');
+  const pos = $derived(config.value.dock.position);
+  const vertical = $derived(pos !== 'bottom');
+  const labels = $derived(config.value.dock.labels);
+  const magnify = $derived(config.value.dock.magnify);
 
   const label = (a: AppDef) => (a.status === 'planned' ? `${a.name} — arrives in milestone ${a.milestone}` : a.name);
 
@@ -18,20 +23,24 @@
   }
 </script>
 
-<aside class="dock glass" class:vertical aria-label="Dock">
-  <button class="item launcher" aria-label="Applications" onclick={() => ui.toggle('launcher')}>
+<aside class="dock glass" class:vertical class:right={pos === 'right'} class:labels class:magnify aria-label="Dock">
+  <button class="item launcher" aria-label="Applications" aria-expanded={ui.overlay === 'launcher'} onclick={() => ui.toggle('launcher')}>
     <span class="launch-tile" style="width:{size}px;height:{size}px;border-radius:{Math.round(size * 0.3)}px">
       <Icon name="grid" size={Math.round(size * 0.5)} />
     </span>
-    <span class="tip">Applications</span>
+    {#if labels}<span class="lbl">Apps</span>{/if}
+    <span class="tip">Applications (Alt+F1)</span>
   </button>
   <span class="sep"></span>
   {#each items as a (a.id)}
     {@const win = wm.byApp(a.id)}
     <button class="item" class:running={!!win} class:focused={win && wm.focusedId === win.id}
-            aria-label={label(a)} aria-disabled={a.status === 'planned'} onclick={() => click(a)}>
+            aria-label={win ? `${label(a)} (running)` : label(a)} aria-disabled={a.status === 'planned'} onclick={() => click(a)}
+            oncontextmenu={(e) => a.status !== 'planned' && ctx.openFrom(e, dockMenu(a), a.name)}
+            onkeydown={(e) => a.status !== 'planned' && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && ctx.openFrom(e, dockMenu(a), a.name)}>
       <AppTile app={a} {size} />
       {#if a.status === 'planned'}<span class="soon mono">{a.milestone}</span>{/if}
+      {#if labels}<span class="lbl">{a.name}</span>{/if}
       <span class="dot"></span>
       <span class="tip">{label(a)}</span>
     </button>
@@ -53,9 +62,16 @@
 
   .item { position: relative; display: grid; place-items: center; padding-bottom: 8px; transition: transform var(--dur) var(--ease); }
   .vertical .item { padding-bottom: 0; padding-right: 8px; }
-  .item:not([aria-disabled='true']):hover { transform: translateY(-5px) scale(1.08); }
-  .vertical .item:not([aria-disabled='true']):hover { transform: translateX(5px) scale(1.08); }
+  .vertical.right .item { padding-right: 0; padding-left: 8px; }
+  .item:not([aria-disabled='true']):hover { background: rgb(255 255 255 / 0.06); border-radius: 14px; }
+  .magnify .item:not([aria-disabled='true']):hover { transform: translateY(-5px) scale(1.08); background: none; }
+  .magnify.vertical .item:not([aria-disabled='true']):hover { transform: translateX(5px) scale(1.08); }
+  .magnify.vertical.right .item:not([aria-disabled='true']):hover { transform: translateX(-5px) scale(1.08); }
   .item:not([aria-disabled='true']):active { transform: scale(0.95); }
+  .lbl { font-size: 0.7rem; color: var(--muted); max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
+  .item:hover .lbl, .focused .lbl { color: var(--text); }
+  .labels .tip { display: none; }
+  .labels .item { padding-bottom: 10px; }
 
   .launch-tile {
     display: grid; place-items: center; color: #0a0a12;
@@ -69,6 +85,7 @@
     box-shadow: 0 0 8px var(--accent);
   }
   .vertical .dot { bottom: 50%; left: auto; right: 0; transform: translateY(50%) scale(0); }
+  .right .dot { right: auto; left: 0; }
   .running .dot { transform: translateX(-50%) scale(1); }
   .vertical .running .dot { transform: translateY(50%) scale(1); }
   .focused .dot { width: 14px; border-radius: 3px; }
@@ -86,8 +103,10 @@
     transition: opacity var(--dur), transform var(--dur) var(--ease); z-index: 5;
   }
   .vertical .tip { bottom: auto; left: calc(100% + 10px); top: 50%; transform: translateY(-50%) translateX(-4px); }
+  .right .tip { left: auto; right: calc(100% + 10px); transform: translateY(-50%) translateX(4px); }
   .item:hover .tip, .item:focus-visible .tip { opacity: 1; transform: translateX(-50%); }
   .vertical .item:hover .tip, .vertical .item:focus-visible .tip { transform: translateY(-50%); }
+  .right .item:hover .tip, .right .item:focus-visible .tip { transform: translateY(-50%); }
 
   @media (max-width: 640px) {
     .dock { gap: 6px; padding: 6px 8px; }

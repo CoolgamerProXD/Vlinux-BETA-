@@ -3,6 +3,8 @@ import { config } from './config.svelte';
 import { ui } from './ui.svelte';
 import type { CheckResult, DiagCategory, DiagReport, DistroCard, DistroOpEvent, InspectOutcome, Overview } from './distros-types';
 
+const toast = (text: string, kind: 'info' | 'error' = 'info', ms?: number) => ui.toast(text, kind, ms, 'distro');
+
 export type DistroTab = 'overview' | 'packages' | 'config' | 'diagnostics';
 
 /**
@@ -127,7 +129,7 @@ class DistrosStore {
   private fail(name: string, e: unknown) {
     const m = String(e);
     this.notes = { ...this.notes, [name]: m };
-    ui.toast(m, 'error', 7000);
+    toast(m, 'error', 7000);
   }
 
   async setPreferred(name: string | null) {
@@ -135,7 +137,7 @@ class DistrosStore {
       this.overview = await ipc.distroSetPreferred(name);
       // The preference lives in VLINUX's own config: reload it so Settings and the Terminal agree.
       await config.load();
-      ui.toast(name ? `“${name}” is now your preferred distribution. The Windows default was not changed.` : 'Preferred distribution cleared.');
+      toast(name ? `“${name}” is now your preferred distribution. The Windows default was not changed.` : 'Preferred distribution cleared.');
     } catch (e) {
       this.fail(name ?? '', e);
     }

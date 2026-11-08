@@ -72,7 +72,7 @@
   .layer { position: absolute; inset: 0; width: 100%; height: 100%; animation: fade-in 700ms var(--ease); }
   .vignette {
     position: absolute; inset: 0;
-    background: radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / 0.45) 100%);
+    background: linear-gradient(rgb(0 0 0 / var(--wall-dim)), rgb(0 0 0 / var(--wall-dim))), radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / 0.45) 100%);
     pointer-events: none;
   }
 </style>

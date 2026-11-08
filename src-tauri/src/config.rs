@@ -75,14 +75,15 @@ pub enum CursorStyle {
     Underline,
 }
 
-/// What opens by itself when VLINUX starts. Never the terminal: no Linux process starts at launch.
+/// What opens by itself when VLINUX starts. Never the terminal or Files: both start the Linux
+/// distribution (Files runs `wsl.exe -d <name> --cd ~ --exec pwd`), and VLINUX never starts a
+/// distribution without an explicit action.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StartupApp {
     #[default]
     None,
     Distros,
-    Files,
     Settings,
 }
 
@@ -784,7 +785,7 @@ mod tests {
         cfg.terminal.cursor = CursorStyle::Bar;
         cfg.terminal.font_size = 18;
         cfg.terminal.scrollback = 20_000;
-        cfg.startup.open_app = StartupApp::Files;
+        cfg.startup.open_app = StartupApp::Settings;
         save(&path, &cfg).unwrap();
         let l = load(&path);
         assert!(l.warning.is_none());
@@ -795,8 +796,9 @@ mod tests {
         let wild = wild.sanitized();
         assert_eq!(wild.terminal.font_size, 24);
         assert_eq!(wild.terminal.scrollback, 500);
-        // The terminal can never be a start-up app (no Linux process starts at launch).
+        // Neither the terminal nor Files can be a start-up app: both start the distribution.
         assert!(toml::from_str::<Config>("[startup]\nopen_app = \"terminal\"\n").is_err());
+        assert!(toml::from_str::<Config>("[startup]\nopen_app = \"files\"\n").is_err());
         let _ = fs::remove_dir_all(dir);
     }
 }

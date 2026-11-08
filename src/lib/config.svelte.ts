@@ -1,4 +1,5 @@
 import * as ipc from './ipc';
+import { notify } from './notify.svelte';
 import { defaultConfig, sanitizeConfig, type Config } from './types';
 
 /** Reactive, persisted user configuration. Edits apply immediately and are saved debounced. */
@@ -48,6 +49,8 @@ class ConfigStore {
       this.warning = null;
     } catch (e) {
       this.saveError = String(e);
+      // Told once per failure streak: the page keeps showing the error until a save works.
+      notify.error('Your settings could not be saved.', 'settings', String(e));
     }
   }
 }

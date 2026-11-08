@@ -1,13 +1,36 @@
 <script lang="ts">
   import { clock } from '../lib/clock.svelte';
   import { config } from '../lib/config.svelte';
+  import { appById } from '../lib/apps';
+  import { ctx, type MenuItem } from '../lib/ctx.svelte';
+  import { distros } from '../lib/distros.svelte';
+  import { shownState } from '../lib/distros-view';
   import { host } from '../lib/host.svelte';
+  import { notify } from '../lib/notify.svelte';
   import { ui } from '../lib/ui.svelte';
-  import { wm } from '../lib/wm.svelte';
+  import { wm, type WinState } from '../lib/wm.svelte';
+  import { windowMenu } from '../lib/menus';
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
 
   const shell = $derived(config.value.shell);
+  const bar = $derived(config.value.topbar);
+  const distroName = $derived(config.value.runtime.selected_distro);
+  // The state dot only shows what the Distribution Manager already knows; the bar never asks WSL.
+  const distroCard = $derived(distroName ? distros.cards.find((c) => c.name === distroName) ?? null : null);
+  const distroTone = $derived(distroCard ? shownState(distroCard, distros.pending[distroCard.name]).tone : 'idle');
+  const distroLabel = $derived(
+    distroCard ? shownState(distroCard, distros.pending[distroCard.name]).label : distroName ? 'state unknown until checked' : 'none selected',
+  );
+  const here = $derived(wm.ordered.filter((w) => w.workspace === wm.workspace));
+
+  function winClick(w: WinState) {
+    if (wm.focusedId === w.id && !w.minimized) wm.minimize(w.id);
+    else wm.reveal(w.id);
+  }
+  function winMenu(e: MouseEvent | KeyboardEvent, w: WinState) {
+    ctx.openFrom(e, windowMenu(w, shell.workspace_count), w.title);
+  }
   const time = $derived(
     clock.now.toLocaleTimeString(undefined, {
       hour: '2-digit',
@@ -36,6 +59,7 @@
       <Logo size={22} />
     </button>
 
+    {#if bar.show_workspaces}
     <nav class="ws" aria-label="Workspaces">
       {#each { length: shell.workspace_count } as _, i}
         <button class="pill" class:active={wm.workspace === i} class:occupied={wm.occupied(i)}
@@ -47,8 +71,26 @@
         </button>
       {/each}
     </nav>
+    {/if}
 
-    {#if focused}
+    {#if bar.show_windows && here.length}
+      <ul class="wins" aria-label="Windows on this workspace">
+        {#each here as w (w.id)}
+          {@const app = appById(w.appId)}
+          <li>
+            <button class="win" class:active={wm.focusedId === w.id && !w.minimized} class:min={w.minimized}
+                    aria-label={`${w.title}${w.minimized ? ' (minimised)' : ''}`} aria-pressed={wm.focusedId === w.id && !w.minimized}
+                    title={`${w.title}${w.minimized ? ' — minimised' : ''}`}
+                    onclick={() => winClick(w)} oncontextmenu={(e) => winMenu(e, w)}
+                    onkeydown={(e) => (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && winMenu(e, w)}>
+              {#if app}<Icon name={app.icon} size={15} />{/if}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#if bar.show_title && focused}
       <span class="title" title={focused.title}>{focused.title}</span>
     {/if}
   </div>
@@ -59,13 +101,23 @@
   </div>
 
   <div class="right">
+    <button class="chip distro" aria-label={`Linux distribution: ${distroName ?? 'none selected'}, ${distroLabel}`} title="Linux distribution"
+            aria-expanded={ui.overlay === 'distro'} onclick={() => ui.toggle('distro')}>
+      <span class="sdot {distroTone}" aria-hidden="true"></span>
+      <span class="dname">{distroName ?? 'No distro'}</span>
+    </button>
     <button class="chip" aria-label="System status" title="System status" aria-expanded={ui.overlay === 'status'}
             onclick={() => ui.toggle('status')}>
       <Icon name={host.online ? 'wifi' : 'wifi-off'} size={16} />
-      {#if batteryPct !== null}
+      {#if batteryPct !== null && bar.show_battery}
         <span class="batt mono" class:charging={host.battery?.charging} title={host.battery?.charging ? 'Charging' : 'On battery'}>{batteryPct}%</span>
       {/if}
       <Icon name="activity" size={16} />
+    </button>
+    <button class="chip icon bell" aria-label={notify.unread ? `Notifications, ${notify.unread} unread` : 'Notifications'} title="Notifications (Alt+Shift+N)"
+            aria-expanded={ui.overlay === 'notifications'} onclick={() => ui.toggle('notifications')}>
+      <Icon name="bell" size={16} />
+      {#if notify.unread}<span class="badge mono" class:err={notify.unreadErrors > 0}>{notify.unread > 9 ? '9+' : notify.unread}</span>{/if}
     </button>
     <button class="chip icon" aria-label={host.fullscreen ? 'Leave full screen' : 'Enter full screen'}
             title={host.fullscreen ? 'Leave full screen (F11)' : 'Enter full screen (F11)'} onclick={toggleFullscreen}>
@@ -114,6 +166,23 @@
     box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.55);
   }
 
+  .wins { list-style: none; margin: 0; padding: 0 2px; display: flex; gap: 2px; min-width: 0; }
+  .win { width: 28px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); position: relative; transition: background var(--dur), color var(--dur); }
+  .win:hover { background: rgb(255 255 255 / 0.1); color: var(--text); }
+  .win.min { opacity: 0.55; }
+  .win.active { color: var(--text); background: rgb(var(--accent-rgb) / 0.2); }
+  .win.active::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 1px; height: 2px; border-radius: 2px; background: var(--accent); }
+
+  .distro { max-width: 170px; }
+  .dname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
+  .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .sdot.good { background: #5ff0b0; box-shadow: 0 0 7px #5ff0b0; }
+  .sdot.busy, .sdot.warn { background: #ffc46b; }
+  .sdot.bad { background: #ff7a8a; }
+  .bell { position: relative; }
+  .badge { position: absolute; top: -2px; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 0.62rem; display: grid; place-items: center; background: var(--accent); color: #0a0a12; font-weight: 700; }
+  .badge.err { background: #ff7a8a; }
+
   .title { color: var(--muted); padding-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22ch; }
 
   .center { display: flex; align-items: baseline; gap: 10px; }
@@ -131,7 +200,7 @@
   .batt.charging { color: var(--accent); }
 
   @media (max-width: 900px) {
-    .title, .date { display: none; }
+    .title, .date, .dname { display: none; }
   }
   @media (max-width: 640px) {
     .batt { display: none; }

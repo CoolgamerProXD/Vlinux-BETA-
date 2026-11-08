@@ -74,7 +74,7 @@
 
 <style>
   .backdrop { position: absolute; inset: 0; z-index: 90; display: grid; place-items: center; padding: 12px; background: rgb(4 4 10 / 0.62); backdrop-filter: blur(10px); animation: fade-in 180ms ease both; }
-  .panel { width: min(760px, 100%); max-height: 100%; overflow: auto; border-radius: 24px; padding: 22px; background: rgb(16 16 28 / calc(var(--glass-a) + 0.25)); animation: pop-in 260ms var(--ease) both; }
+  .panel { width: min(760px, 100%); max-height: 100%; overflow: auto; border-radius: 24px; padding: 22px; background: rgb(var(--panel-rgb) / calc(var(--glass-a) + 0.25)); animation: pop-in 260ms var(--ease) both; }
   h2 { margin: 0 0 14px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); font-weight: 600; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
   .tile { display: grid; align-content: start; gap: 8px; text-align: left; padding: 18px; border-radius: 18px; background: rgb(255 255 255 / 0.05); border: 1px solid var(--line); transition: all var(--dur) var(--ease); color: var(--text); }

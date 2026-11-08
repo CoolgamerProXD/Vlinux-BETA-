@@ -5,10 +5,21 @@
   import { host } from './lib/host.svelte';
   import { exitToWindows } from './lib/ipc';
   import { applyTheme } from './lib/theme';
+  import { ctx } from './lib/ctx.svelte';
+  import { linuxApps } from './lib/linux-apps.svelte';
+  import { desktopMenu } from './lib/menus';
+  import { notify } from './lib/notify.svelte';
+  import { appById } from './lib/apps';
+  import { desktopAction } from './lib/shortcuts';
   import { ui } from './lib/ui.svelte';
   import { wm } from './lib/wm.svelte';
   import AppHost from './components/AppHost.svelte';
   import CloseConfirm from './components/CloseConfirm.svelte';
+  import ContextMenu from './components/ContextMenu.svelte';
+  import DistroPopover from './components/DistroPopover.svelte';
+  import NotificationCenter from './components/NotificationCenter.svelte';
+  import ShortcutOverlay from './components/ShortcutOverlay.svelte';
+  import WindowSwitcher from './components/WindowSwitcher.svelte';
   import Dock from './components/Dock.svelte';
   import Launcher from './components/Launcher.svelte';
   import PowerMenu from './components/PowerMenu.svelte';
@@ -50,9 +61,24 @@
       }
       ready = true;
       performance.mark('vlinux-ready');
+      if (config.warning) notify.push({ kind: 'warning', source: 'settings', text: config.warning, ms: 12000 });
+      void linuxApps.attach();
+      // Start-up app: only apps that never start a Linux distribution are offered in Settings.
+      const first = config.value.startup.open_app;
+      const app = first === 'none' ? undefined : appById(first);
+      if (app && wm.windows.length === 0) wm.open(app);
     })();
+    // Nothing needs to tick while the window is hidden or minimised.
+    const vis = () => {
+      document.documentElement.classList.toggle('paused', document.hidden);
+      if (document.hidden) clock.stop();
+      else clock.start(config.value.shell.show_seconds);
+    };
+    document.addEventListener('visibilitychange', vis);
     return () => {
+      document.removeEventListener('visibilitychange', vis);
       host.dispose();
+      linuxApps.detach();
       clock.stop();
     };
   });
@@ -87,46 +113,84 @@
   }
 
   function onkey(e: KeyboardEvent) {
-    // Ctrl+Alt+Q: always-available, immediate way back to Windows (nothing is lost).
-    if (e.ctrlKey && e.altKey && !e.shiftKey && e.code === 'KeyQ') {
-      e.preventDefault();
-      void guarded(exitToWindows);
+    if (e.code === 'Escape') {
+      if (wm.switcher) {
+        e.preventDefault();
+        wm.cycleCancel();
+        return;
+      }
+      if (ctx.menu) {
+        ctx.close();
+        return;
+      }
+      if (ui.overlay) ui.close();
       return;
     }
-    if (e.code === 'F11') {
-      e.preventDefault();
-      void guarded(() => host.toggleFullscreen());
-      return;
+    const act = desktopAction(e);
+    if (!act) return;
+    e.preventDefault();
+    const count = config.value.shell.workspace_count;
+    switch (act.type) {
+      case 'return-to-windows':
+        void guarded(exitToWindows);
+        break;
+      case 'fullscreen':
+        void guarded(() => host.toggleFullscreen());
+        break;
+      case 'launcher':
+        ui.toggle('launcher');
+        break;
+      case 'shortcuts':
+        ui.toggle('shortcuts');
+        break;
+      case 'notifications':
+        ui.toggle('notifications');
+        break;
+      case 'power':
+        ui.toggle('power');
+        break;
+      case 'close-window':
+        wm.closeFocused();
+        break;
+      case 'workspace':
+        wm.switchWorkspace(act.n, count);
+        break;
+      case 'move-to-workspace':
+        if (wm.focusedId !== null) wm.moveToWorkspace(wm.focusedId, act.n, count);
+        break;
+      case 'snap':
+        if (wm.focusedId !== null) wm.snap(wm.focusedId, act.target);
+        break;
+      case 'lower':
+        if (wm.focusedId !== null) wm.lower(wm.focusedId);
+        break;
+      case 'cycle':
+        if (!ui.overlay) wm.cycleStep(act.dir);
+        break;
     }
-    if (e.code === 'Escape' && ui.overlay) {
-      ui.close();
-      return;
-    }
-    if (!e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.code === 'F1') {
-      e.preventDefault();
-      ui.toggle('launcher');
-    } else if (e.shiftKey && e.code === 'KeyQ') {
-      e.preventDefault();
-      ui.toggle('power');
-    } else if (!e.shiftKey && e.code === 'KeyW') {
-      e.preventDefault();
-      wm.closeFocused();
-    } else if (!e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
-      e.preventDefault();
-      wm.switchWorkspace(Number(e.code.slice(5)) - 1, config.value.shell.workspace_count);
-    }
+  }
+
+  // Releasing Alt confirms the window switcher; losing focus cancels it (Alt may never be seen released).
+  function onkeyup(e: KeyboardEvent) {
+    if (e.key === 'Alt' && wm.switcher) wm.cycleCommit();
+  }
+  const onblur = () => wm.switcher && wm.cycleCancel();
+
+  function deskMenu(e: MouseEvent) {
+    if (e.target !== e.currentTarget && !(e.target as HTMLElement).classList.contains('hint')) return;
+    ctx.openFrom(e, desktopMenu(), 'Desktop');
   }
 </script>
 
-<svelte:window onkeydown={onkey} />
+<svelte:window onkeydown={onkey} onkeyup={onkeyup} onblur={onblur} />
 
 <div class="shell" class:ready data-dock={config.value.dock.position}>
   <Wallpaper id={config.value.appearance.wallpaper} />
   <TopBar />
   <div class="body">
     <Dock />
-    <main class="work" bind:this={work} aria-label="Desktop">
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <main class="work" bind:this={work} aria-label="Desktop" oncontextmenu={deskMenu}>
       {#each wm.windows as win (win.id)}
         <WindowFrame {win}><AppHost appId={win.appId} /></WindowFrame>
       {/each}
@@ -134,7 +198,7 @@
         <Welcome ondismiss={dismissWelcome} />
       {:else if wm.visible.length === 0}
         <div class="hint" aria-hidden="true">
-          <span class="mono">Alt+F1</span> applications · <span class="mono">Alt+Shift+Q</span> power &amp; exit
+          <span class="mono">Alt+F1</span> applications · <span class="mono">Alt+Shift+F1</span> shortcuts · <span class="mono">Alt+Shift+Q</span> power &amp; exit
         </div>
       {/if}
     </main>
@@ -143,7 +207,12 @@
   {#if ui.overlay === 'launcher'}<Launcher />{/if}
   {#if ui.overlay === 'status'}<StatusPanel />{/if}
   {#if ui.overlay === 'power'}<PowerMenu />{/if}
+  {#if ui.overlay === 'notifications'}<NotificationCenter />{/if}
+  {#if ui.overlay === 'distro'}<DistroPopover />{/if}
+  {#if ui.overlay === 'shortcuts'}<ShortcutOverlay />{/if}
+  <WindowSwitcher />
   <CloseConfirm />
+  <ContextMenu />
   <Toasts />
 </div>
 
@@ -154,7 +223,8 @@
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column-reverse; align-items: stretch; padding: var(--gap); gap: var(--gap); position: relative; }
   .body :global(.dock) { align-self: center; }
   [data-dock='left'] .body { flex-direction: row; align-items: center; }
-  [data-dock='left'] .body :global(.dock) { align-self: center; }
+  [data-dock='right'] .body { flex-direction: row-reverse; align-items: center; }
+  [data-dock='left'] .body :global(.dock), [data-dock='right'] .body :global(.dock) { align-self: center; }
   .work { position: relative; flex: 1; min-width: 0; min-height: 0; align-self: stretch; }
   .hint { position: absolute; inset: auto 0 12px 0; text-align: center; color: rgb(255 255 255 / 0.35); font-size: 0.8rem; pointer-events: none; }
   .hint .mono { padding: 1px 6px; border-radius: 5px; background: rgb(255 255 255 / 0.08); }
