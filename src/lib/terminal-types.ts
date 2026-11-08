@@ -135,7 +135,7 @@ export class AckBatcher {
  * has focus, xterm.js must leave these alone so the desktop still receives them — and so they are
  * not also typed into the shell.
  */
-export function isShellShortcut(e: Pick<KeyboardEvent, 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey' | 'code'>): boolean {
+export function isShellShortcut(e: Pick<KeyboardEvent, 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey' | 'code'> & { key?: string }): boolean {
   return desktopAction(e) !== null;
 }
 

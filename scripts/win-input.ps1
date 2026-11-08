@@ -72,7 +72,9 @@ function Get-Vk([string]$k) {
 }
 function Send-Key([int]$vk, [bool]$down) {
   $scan = [byte][VlxWin]::MapVirtualKey([uint32]$vk, 0)
-  [VlxWin]::keybd_event([byte]$vk, $scan, $(if ($down) { 0 } else { 2 }), [UIntPtr]::Zero)
+  # Arrow keys are 'extended' keys: without KEYEVENTF_EXTENDEDKEY (1) Windows delivers them as numpad keys.
+  $ext = if ($vk -ge 0x25 -and $vk -le 0x28) { 1 } else { 0 }
+  [VlxWin]::keybd_event([byte]$vk, $scan, ($ext -bor $(if ($down) { 0 } else { 2 })), [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 25
 }
 # "Ctrl+Alt+Q" -> hold Ctrl, hold Alt, tap Q, release in reverse order. Several chords: space-separated.

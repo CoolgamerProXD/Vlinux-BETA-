@@ -17,6 +17,12 @@ describe('desktopAction', () => {
     expect(desktopAction(k('KeyQ', { ctrlKey: true, altKey: true }))).toEqual({ type: 'return-to-windows' });
     expect(desktopAction(k('F11'))).toEqual({ type: 'fullscreen' });
   });
+  it('accepts the arrows typed on a numpad with Shift held (code NumpadN, key ArrowX)', () => {
+    expect(desktopAction({ ...k('Numpad4', altShift), key: 'ArrowLeft' })).toEqual({ type: 'snap', target: 'left' });
+    expect(desktopAction({ ...k('Numpad8', altShift), key: 'ArrowUp' })).toEqual({ type: 'snap', target: 'maximize' });
+    // a numpad digit that is really a digit is not an arrow
+    expect(desktopAction({ ...k('Numpad4', altShift), key: '4' })).toBeNull();
+  });
   it('maps the M7 window shortcuts', () => {
     expect(desktopAction(k('Backquote', alt))).toEqual({ type: 'cycle', dir: 1 });
     expect(desktopAction(k('Backquote', altShift))).toEqual({ type: 'cycle', dir: -1 });

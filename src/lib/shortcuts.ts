@@ -20,7 +20,10 @@ export type DesktopAction =
   | { type: 'lower' }
   | { type: 'cycle'; dir: 1 | -1 };
 
-type Keys = { ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean; code: string };
+type Keys = { ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean; code: string; key?: string };
+
+/** The arrow a key event means. With Shift held and NumLock on, the numpad arrows report code `NumpadN` but key `ArrowX`. */
+const arrowOf = (e: Keys): string => (e.code.startsWith('Arrow') ? e.code : e.key?.startsWith('Arrow') ? e.key : '');
 
 const DIGIT = /^Digit([1-9])$/;
 
@@ -34,10 +37,10 @@ export function desktopAction(e: Keys): DesktopAction | null {
   if (e.shiftKey) {
     if (e.code === 'KeyQ') return { type: 'power' };
     if (e.code === 'KeyN') return { type: 'notifications' };
-    if (e.code === 'ArrowLeft') return { type: 'snap', target: 'left' };
-    if (e.code === 'ArrowRight') return { type: 'snap', target: 'right' };
-    if (e.code === 'ArrowUp') return { type: 'snap', target: 'maximize' };
-    if (e.code === 'ArrowDown') return { type: 'lower' };
+    if (arrowOf(e) === 'ArrowLeft') return { type: 'snap', target: 'left' };
+    if (arrowOf(e) === 'ArrowRight') return { type: 'snap', target: 'right' };
+    if (arrowOf(e) === 'ArrowUp') return { type: 'snap', target: 'maximize' };
+    if (arrowOf(e) === 'ArrowDown') return { type: 'lower' };
     if (digit) return { type: 'move-to-workspace', n: Number(digit[1]) - 1 };
     return null;
   }
