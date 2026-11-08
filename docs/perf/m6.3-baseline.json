@@ -1,0 +1,21 @@
+{
+  "label": "2a9071f (M6.3 baseline)",
+  "repeats": 3,
+  "note": "Linux headless Chromium, software rendering, preview back end: relative only",
+  "modes": {
+    "default": {
+      "domNodes": 1135,
+      "jsHeapMiB": 4.51,
+      "eventListeners": 162,
+      "idleMainThreadBusyPct": 0.01,
+      "dragFrameMedianMs": 16.7,
+      "dragFrameP95Ms": 16.8,
+      "dragFrames": 90
+    }
+  },
+  "bundle": {
+    "distBytes": 1052402,
+    "indexJsBytes": 260180,
+    "cssBytes": 69458
+  }
+}

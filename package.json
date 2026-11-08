@@ -1,7 +1,7 @@
 {
   "name": "vlinux",
   "private": true,
-  "version": "0.6.3",
+  "version": "0.7.0",
   "type": "module",
   "description": "VLINUX — a Linux desktop experience for Windows, powered by WSL2",
   "scripts": {

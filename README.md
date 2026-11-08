@@ -6,7 +6,7 @@ A Windows application that gives you the experience of a Linux desktop without m
 
 ## Quick start (Windows 11 or 10 1809+, x64)
 
-**Install** — download `VLINUX_0.6.3_x64-setup.exe` from the newest **pre-release** on the repository's *Releases* page (one is published by CI for every pushed commit, tagged `installer-<commit>`; the same file is also in the workflow artifact `vlinux-windows`). Run it: it installs for the current user only (no administrator rights) into `%LOCALAPPDATA%\VLINUX` and adds a **Start Menu** entry (and, in the interactive installer, a Desktop shortcut). The installer is **not code-signed**, so Windows SmartScreen will say "unknown publisher": choose *More info → Run anyway*. Uninstalling removes the program only; it never touches WSL distributions or your files.
+**Install** — download `VLINUX_0.7.0_x64-setup.exe` from the newest **pre-release** on the repository's *Releases* page (one is published by CI for every pushed commit, tagged `installer-<commit>`; the same file is also in the workflow artifact `vlinux-windows`). Run it: it installs for the current user only (no administrator rights) into `%LOCALAPPDATA%\VLINUX` and adds a **Start Menu** entry (and, in the interactive installer, a Desktop shortcut). The installer is **not code-signed**, so Windows SmartScreen will say "unknown publisher": choose *More info → Run anyway*. Uninstalling removes the program only; it never touches WSL distributions or your files.
 
 **Launch** — Start Menu → *VLINUX* (or the Desktop shortcut). It opens full screen on the desktop. `Ctrl+Alt+Q` goes back to Windows at any time, `F11` toggles full screen.
 
@@ -55,7 +55,25 @@ Full-screen desktop shell, original VLINUX branding and four generated wallpaper
 * **Performance/security:** nothing starts a distribution or runs a Linux process at start-up; no polling (the Distribution Manager registers its two event listeners only while its window is open); discovery is cached with an explicit Refresh; every command validates the distribution name against the registered list and never takes a path, file text or command line from the frontend.
 
 ### Shortcuts
-`Alt+F1` launcher · `Alt+1…9` workspace · `Alt+W` close window · `F11` full screen · `Alt+Shift+Q` power menu · `Ctrl+Alt+Q` return to Windows immediately. In the Terminal: `Ctrl+Shift+T` new tab · `Ctrl+Shift+W` close tab · `Ctrl+Shift+C/V` copy/paste (plain `Ctrl+C` is the shell's interrupt). The shell shortcuts above still work while the terminal has focus.
+The full, always-current list is in **Settings → Shortcuts** and on screen with **Alt+Shift+F1** (both come from one table, `src/lib/shortcuts.ts`).
+
+| Keys | Action |
+|---|---|
+| `Alt+F1` | application launcher |
+| `Alt+Shift+F1` | shortcut list |
+| `Alt+Shift+N` | notification centre |
+| ``Alt+` `` / ``Alt+Shift+` `` | switch window (hold Alt: a switcher shows; release to confirm, `Esc` to cancel). `Alt+Tab` is reserved by Windows |
+| `Alt+W` | close the focused window |
+| `Alt+Shift+←` / `→` | tile the window to the left / right half |
+| `Alt+Shift+↑` / `↓` | maximise / restore, then minimise |
+| `Alt+1…9` | go to workspace · `Alt+Shift+1…9` send the window there |
+| `F11` | full screen |
+| `Alt+Shift+Q` | power menu |
+| `Ctrl+Alt+Q` | return to Windows immediately (Linux keeps running) |
+| Terminal | `Ctrl+Shift+T` new tab · `Ctrl+Shift+W` close tab · `Ctrl+Shift+C/V` copy/paste (plain `Ctrl+C` is the shell's interrupt) |
+| Files | `Ctrl+L` path · `F2` rename · `Delete` · `Ctrl+C/X/V/A` |
+
+The desktop shortcuts keep working while the terminal has focus. Plain `Alt+arrows`, `Alt+B/F/D`, `Alt+N`, `Alt+M` and `Alt+/` are deliberately **left to the shell** (readline and editors use them). Right-click opens a context menu on the desktop, dock icons, window title bars and the top-bar window list (`Menu` key or `Shift+F10` on a focused item).
 
 ## Build & run (Windows 10 1809+/11, x64)
 Prerequisites: [Rust](https://rustup.rs) (stable, MSVC toolchain + VS Build Tools "Desktop development with C++"), Node.js 20+, WebView2 runtime (preinstalled on Windows 11).
@@ -75,6 +93,20 @@ cd src-tauri && cargo test -p vlinux-runtime   # runtime crate (no Tauri needed;
 cd src-tauri && cargo test --workspace         # + the Tauri app crate (needs the Tauri build prerequisites)
 ```
 `.github/workflows/ci.yml` has a fast Ubuntu job for the runtime crate, and a `windows-latest` job that runs everything, builds the installer and smoke-launches the real app. The browser e2e uses *simulated* WSL data (`?wsl=missing|empty|ready|reboot|multi`, clearly labelled in the UI); real detection only exists in the desktop app.
+
+### New in M7 — Desktop experience and product polish
+* **Launcher** lists the VLINUX apps and the **installed Linux desktop applications of the selected distribution** (read from the standard freedesktop *Desktop Entry* files, so it is distribution-agnostic; Arch needs no special case). Search ranks exact > prefix > word > substring and also matches generic name, keywords and categories; recents (per distribution) are remembered locally; duplicates are shown with a qualifier; entries that cannot launch (terminal programs, missing binary, hidden) stay visible with the reason and are skipped by the keyboard. Only a desktop-file id leaves the frontend; the backend rebuilds the command line itself. Discovery needs the distribution to be **already running** (it never starts one for you; the launcher offers a *Start* button).
+* **Honest window model.** VLINUX windows (Terminal, Files, Settings…) are managed by VLINUX's own window manager. A **Linux GUI application is a separate WSLg window, owned and managed by Windows** (it needs WSLg; VLINUX says so when WSLg is missing). VLINUX can start it, report whether it started or failed, but cannot tile, move, or workspace-manage it, and it **keeps running if you close VLINUX**. This is not a Wayland compositor or a Hyprland session.
+* **Window management:** snap left/right/maximise, restore, minimise, a window switcher, move window to workspace, top-bar window list with active/minimised indication, title-bar context menu.
+* **Notifications:** one system for launch failures, file errors, distribution start results, package results and settings errors — short toasts plus a history (the bell in the top bar, unread count, `Alt+Shift+N`); repeated identical messages merge; errors stay until seen; nothing reports success it did not verify.
+* **Top bar:** distribution chip (selected distribution, state as already known, popover to start it or open Terminal/Files; it never switches distributions or changes the Windows default), bell, window list.
+* **Settings:** theme (Midnight, Graphite, OLED), **backdrop blur on/off** and a one-click *Light look* for integrated graphics, dock on the bottom/left/**right**, dock labels and magnification, top-bar parts, terminal font size / cursor / blink / scrollback (applied to open tabs live), start-up app (Nothing, Distributions or Settings — never Terminal or Files, because those start the distribution).
+* **Config schema 3**, loaded leniently section by section: a damaged or out-of-range section is reset **alone**, the original file is copied aside, and the shell shows a warning; older files keep every value; unknown keys are preserved.
+* **Performance:** the window pauses its clock and animations while hidden; blur can be switched off. Measured numbers are in [docs/VALIDATION.md §14](docs/VALIDATION.md#14-m7--desktop-experience-and-product-polish) (relative only).
+* **Not done / future:** recursive file search and a folder filter in Files, Linux-GUI-window management (WSLg windows are Windows'), app-launch from stopped distributions, per-app icons from icon themes beyond the PNG/SVG found in the standard icon folders, installer signing. See *Known limitations* in the validation doc.
+
+## Verification status (M7)
+CI verifies this milestone on Linux and Windows (see the final report and `docs/VALIDATION.md §14` for the run). The installer has **not been run on your PC**. The browser end-to-end test uses *simulated* distributions and a *simulated* app list (labelled in the UI); real Linux application discovery and WSLg launching were exercised only by unit tests against fake file trees and by the Windows build compiling, **not against a real distribution's app list**.
 
 ## Verification status (M6.3)
 M6.3 reproduced your failures on a **real Arch under real WSL 3.0.3.0 on a disposable CI VM** (not your PC): the M6.1 behaviour fails exactly as you saw, the fixed behaviour passes, and Windows really cannot be trusted to delete WSL links (some deletes *report success and do nothing*). Links are now removed with `unlink` inside the distribution first and every removal is verified. Your report text matched **M6.1's** wording, so you may have run an older installer: this build is **0.6.3** (`VLINUX_0.6.3_x64-setup.exe`) and every diagnostics report starts with a `Build:` line. Details: [docs/VALIDATION.md §13](docs/VALIDATION.md#13-m63--root-cause-investigation-on-a-real-arch-disposable-ci-vm).

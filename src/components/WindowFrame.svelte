@@ -63,7 +63,7 @@
     position: absolute; left: 0; top: 0; width: var(--w); height: var(--h);
     transform: translate3d(var(--x), var(--y), 0);
     border-radius: 16px; display: flex; flex-direction: column; overflow: hidden;
-    background: rgb(var(--win-rgb) / calc(var(--glass-a) + 0.3));
+    background: rgb(var(--win-rgb) / min(0.97, calc(var(--glass-a) + 0.4)));
     animation: win-in 260ms var(--ease) both;
     transition: border-color var(--dur), box-shadow var(--dur);
   }

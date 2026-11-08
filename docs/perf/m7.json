@@ -1,0 +1,30 @@
+{
+  "label": "M7 working tree",
+  "repeats": 3,
+  "note": "Linux headless Chromium, software rendering, preview back end: relative only",
+  "modes": {
+    "default": {
+      "domNodes": 1186,
+      "jsHeapMiB": 4.65,
+      "eventListeners": 167,
+      "idleMainThreadBusyPct": 0.01,
+      "dragFrameMedianMs": 16.7,
+      "dragFrameP95Ms": 16.7,
+      "dragFrames": 91
+    },
+    "noblur": {
+      "domNodes": 1186,
+      "jsHeapMiB": 4.65,
+      "eventListeners": 167,
+      "idleMainThreadBusyPct": 0.02,
+      "dragFrameMedianMs": 16.7,
+      "dragFrameP95Ms": 16.7,
+      "dragFrames": 90
+    }
+  },
+  "bundle": {
+    "distBytes": 1115159,
+    "indexJsBytes": 305196,
+    "cssBytes": 83878
+  }
+}

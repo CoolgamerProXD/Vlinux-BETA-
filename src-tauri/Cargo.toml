@@ -1,6 +1,6 @@
 [package]
 name = "vlinux"
-version = "0.6.3"
+version = "0.7.0"
 description = "VLINUX — a Linux desktop experience for Windows, powered by WSL2"
 authors = ["VLINUX contributors"]
 edition = "2021"

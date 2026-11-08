@@ -35,7 +35,7 @@
     </li>
   </ol>
 
-  <p class="keys"><span class="mono">Alt+F1</span> applications · <span class="mono">F11</span> full screen · <span class="mono">Ctrl+Alt+Q</span> return to Windows · <span class="mono">Alt+Shift+Q</span> power &amp; exit</p>
+  <p class="keys"><span class="mono">Alt+F1</span> applications · <span class="mono">Alt+Shift+F1</span> all shortcuts · <span class="mono">F11</span> full screen · <span class="mono">Ctrl+Alt+Q</span> return to Windows · <span class="mono">Alt+Shift+Q</span> power &amp; exit</p>
   <div class="foot">
     <button onclick={ondismiss} data-testid="welcome-dismiss">Don't show this again</button>
   </div>

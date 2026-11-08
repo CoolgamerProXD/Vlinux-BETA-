@@ -1,4 +1,4 @@
-# VLINUX architecture (M0 – M5)
+# VLINUX architecture (M0 – M7)
 
 ## Principles
 * **Honest framing.** The VLINUX desktop is a *Windows-rendered shell* (a Tauri/WebView2 window). It is not a Wayland compositor and not a bare-metal Linux install. Linux will run through WSL2, which is virtualised.
@@ -34,7 +34,7 @@ Planned (later milestones): `pty` (ConPTY/`wsl.exe` terminal sessions), `fs`, `d
 
 ## Config schema (TOML)
 ```toml
-schema_version = 2   # 2 adds [runtime] and [storage]; version-1 files load unchanged
+schema_version = 3   # 3 adds theme/blur, dock labels/magnify/right, [topbar], [terminal], [startup]; older files load unchanged (see M7)
 [shell]      # start_fullscreen, clock_24h, show_seconds, show_date, workspace_count (2-9)
 [appearance] # wallpaper = nebula|dusk|peaks|grid, accent = violet|cyan|rose|amber|mint, glass 0-100, animations
 [dock]       # position = bottom|left, icon_size 32-72
@@ -256,3 +256,29 @@ M6 adds no feature; it checks that what exists survives contact with a real Wind
 * **Shared folders:** Apply always goes through a review panel; verdicts for OneDrive-synchronised paths are `Warning` (usable, with a stated caveat).
 * **Full screen:** `host.toggleFullscreen()` reads the window's real state; the cached flag is only a display value, refreshed on the change event and (debounced) on resize.
 * **Real-window smoke:** `scripts/desktop-smoke.mjs` drives the CDP-enabled build and `scripts/win-input.ps1` sends hardware-scan-code key events, moves/restores the window and reads `IsIconic`. The VLINUX window is found by title (`Process.MainWindowHandle` can return a WebView2 helper window).
+
+
+## M7: desktop experience and product polish
+
+### Window architecture (investigated first)
+* VLINUX is one Tauri window hosting a Svelte shell. The shell's windows (Terminal, Files, Settings, System, Distributions, Linux Setup) are **in-page** windows managed by `lib/wm.svelte.ts`: z-order, focus (MRU), workspaces, minimise, maximise, snap, move-to-workspace. This is real window management of VLINUX's own apps, unit-tested, with no fake pieces.
+* A Linux GUI program started from the launcher is a **WSLg** client. WSLg gives it its own native Windows window, which Windows (not VLINUX) places, focuses and closes; it cannot be embedded in the Tauri window and VLINUX cannot move it between VLINUX workspaces. The launcher runs `wsl.exe -d <distro> --exec <argv>` (argv rebuilt by the backend from the *Desktop Entry*, never from frontend text), reports how the process ends (a non-zero exit is a failure, shown with up to 4 KiB of its error output; a clean exit is just 'exited'; one idle thread per launched program waits for it), and the program **outlives VLINUX**. The code is split so a future compositor-style integration could replace only `src-tauri/src/apps.rs`.
+
+### Application discovery
+`crates/runtime/src/apps.rs` (Tauri-free): reads `.desktop` files from the standard XDG locations (`/usr/share/applications`, `/usr/local/share/applications`, the user's `~/.local/share/applications`, Flatpak and Snap export directories; at most 1500 entries, 64 KiB per file, an 8 s time budget) through the distribution's `\\wsl.localhost` share, parses the *Desktop Entry* spec subset (name/generic name/comment/keywords/categories, `Exec` with field-code stripping, `NoDisplay`, `Hidden`, `OnlyShowIn`, `TryExec`, `Terminal`), de-duplicates by desktop-file id with the standard precedence, and marks entries that cannot launch with the reason. Icons are read only for the ids listed (PNG/SVG, at most 256 KiB each, returned as data URLs). It requires a *Running* distribution: reading a stopped distribution's share may start it, and VLINUX never starts one implicitly. Nothing is Arch-specific.
+
+### Shell frontend
+* `lib/shortcuts.ts` is the single source of truth for key bindings (a pure `desktopAction(event)`), the Settings list, the overlay and the terminal's pass-through set, so they cannot drift apart.
+* `lib/notify.svelte.ts`: history (100), toast queue (3 visible), merge of identical messages within 5 s, unread tracking; `ui.toast()` remains as a thin wrapper so existing call sites feed the same history.
+* `lib/ctx.svelte.ts` + `components/ContextMenu.svelte`, `lib/menus.ts`: one menu component, content per surface; every entry calls an existing action.
+* Theme = CSS custom properties (`lib/theme.ts`): three surface palettes, accent, glass alpha, `no-blur`/`no-anim` classes. With blur off panels are made mostly solid, which is the main saving on integrated graphics.
+* Visibility: on `visibilitychange` the clock stops and animations are paused while the window is hidden.
+
+### Config schema 3 (`src-tauri/src/config.rs`)
+`[appearance] theme, blur`; `[dock] position = bottom|left|right, labels, magnify`; `[topbar] show_workspaces/show_windows/show_title/show_battery`; `[terminal] font_size 10–24, cursor, cursor_blink, scrollback 500–50000`; `[startup] open_app = none|distros|settings`. Loading is per section: a section that fails to parse is reset on its own, the file is copied to `config.toml.invalid-<timestamp>` and the shell shows a warning; a file that is not TOML at all is renamed aside and defaults are used. Saving round-trips unknown keys. Upgrading never overwrites existing values (new fields default on first read, and are written only when the user saves).
+
+### Security (unchanged boundaries)
+Launch takes a desktop-file id validated against `^[A-Za-z0-9._+-]{1,200}\.desktop$`; the backend re-reads the entry and builds argv itself (no shell, no frontend command strings). The start-up app can never be Terminal or Files. Nothing in M7 runs `wsl --shutdown|--unregister|--set-default|--import|--export|--mount`, edits `/etc/wsl.conf`, or touches files.
+
+### Known limitations (M7)
+Linux GUI apps are Windows-managed WSLg windows (see above); no recursive search in Files; app discovery needs a running distribution and does not read icon themes beyond the standard directories; the top-bar clock/status are Windows-reported; installer is unsigned.

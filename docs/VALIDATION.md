@@ -212,3 +212,49 @@ M6.2 was reported to fail the same way as M6.1. Instead of guessing again, a **W
 ### Still not verified
 
 On **your** PC: that the new installer's diagnostics pass (they should, given the lab, but the lab is a different machine), your login shell/dotfiles, and the Windows Explorer file-association check. Run **Distributions → Diagnostics** with both boxes ticked, and check the first line of the report says `Build: VLINUX 0.6.3 (…)`.
+
+## 14. M7 — desktop experience and product polish
+
+Baseline: `2a9071f` (v0.6.3, run `41993091046`). This milestone changes the shell and adds Linux application discovery; it does not touch the terminal/ConPTY code, the file-operation code or the diagnostics engine (the M6.3 fixes are unchanged, and the same CI checks still run).
+
+### What was run, and where
+
+| Layer | Tests | Where it ran |
+|---|---|---|
+| Frontend unit (vitest) | 106 (was 71): window manager (snap, switcher, move-to-workspace), notifications, shortcut mapping (incl. the terminal pass-through set), launcher search/recents/id validation, config schema 3 sanitising | Linux sandbox |
+| Type check (`svelte-check`) | 0 errors, 0 warnings | Linux sandbox |
+| Browser end-to-end | 301 (was 264). New: Linux apps in the launcher (**simulated discovery**), launch + failed launch via notifications, bell/unread, shortcut overlay, window switcher (Alt+\` hold/release/Esc), snapping, move to workspace, desktop/dock/window context menus, theme/blur/dock edge/labels/top-bar toggles, terminal & start-up settings, invalid saved values, distribution chip | Headless Chromium, **simulated WSL data** |
+| Rust unit | runtime crate (`apps.rs`: 10 new tests on a fake distribution tree) and the Tauri crate (config schema 3, lenient load) | Ubuntu and Windows CI (see the run in the final report) |
+| Windows build, installer, installer e2e, WebView2 smoke, desktop keyboard/window smoke | unchanged scripts, extended with Alt+Shift+F1 / Alt+Shift+N / Alt+Shift+← / Alt+Shift+↑ | Windows CI (real WebView2, real OS keystrokes when the session allows) |
+| Real WSL | M6.3 lab workflow, unchanged | disposable CI VM (not your PC) |
+| **Your PC** | **not run** | — |
+
+### Performance (measured; relative only)
+
+Method (`scripts/perf.mjs`): headless Chromium on a Linux sandbox with **software rendering** and the browser-preview back end; all six apps open; median of 3 runs; same machine, same session for both builds. These are **not** frame rates or CPU figures for a Windows laptop. Raw output: `docs/perf/m6.3-baseline.json`, `docs/perf/m7.json`.
+
+| Metric | `2a9071f` (M6.3) | M7 | Change |
+|---|---|---|---|
+| DOM nodes, 6 windows open | 1135 | 1186 | +51 (+4.5 %) — top-bar window list, distro chip, bell |
+| JS heap after GC | 4.51 MiB | 4.65 MiB | +0.14 MiB |
+| Event listeners | 162 | 167 | +5 |
+| Idle main-thread busy | 0.01 % | 0.01 % (blur off: 0.02 %) | none measurable |
+| Window-drag frame time, median / p95 | 16.7 / 16.8 ms | 16.7 / 16.7 ms (blur off: 16.7 / 16.7) | none — capped at the 60 Hz vsync, so this **cannot** show the benefit of switching blur off; that needs real GPU hardware and is not measured |
+| `index.js` | 260,180 B | 305,196 B | **+45,016 B (+17 %)** — the launcher, notification centre, menus, switcher, shortcut table and settings pages |
+| `index.css` | 69,458 B | 83,878 B | +14,420 B (+21 %) |
+| whole `dist` | 1,052,402 B | 1,115,159 B | +62,757 B (+6 %) |
+| xterm chunk (lazy) | 330,931 B | 330,931 B | unchanged |
+
+Honest reading: the shell is a little bigger and does a little more, and idle cost is unchanged in this environment (and on the CI Windows runner idle CPU has been 0–0.47 % in every measured run since M6; the M7 run is reported with the final report). **There is no measured improvement** in this milestone, only no measured regression; the *Light look* and *Backdrop blur* options are there for GPU-limited machines, but their effect on a real integrated GPU is **unmeasured**. Per-activity cost that *was* reduced by design rather than measured: the clock and animations pause while the window is hidden; discovery runs only when the launcher opens (cached for 60 s, no polling); one global launch listener instead of one per launch.
+
+### What is simulated or not verified
+
+* The launcher's Linux app list in the browser e2e is **fake data**, labelled as such. Real discovery is covered by unit tests on a fake file tree and was **not run against a real distribution**, including your Arch. `wsl.exe --exec <program>` runs the program name as written in the `.desktop` file (no login shell, so no profile scripts); bare names are resolved on the non-login PATH, which was confirmed only for `whoami`/`echo` in M6.3. Programs that live in directories outside that PATH (for example `~/.local/bin`, `/snap/bin`, Flatpak exports) may fail to start; VLINUX would show that failure with the error text, not hide it. Discovery only checks that the program exists in a standard directory.
+* WSLg itself: whether a given GUI program shows a window depends on your WSL/WSLg version and GPU drivers. VLINUX reports a failed start and a missing `/mnt/wslg`, but cannot see the window.
+* Snap/tile/switcher behaviour is verified in the browser and with OS keystrokes in the Windows smoke; **not** on a different DPI/monitor layout.
+* Alt+Shift can be bound by Windows to switching keyboard layouts on machines with several layouts; Alt+Shift shortcuts still reach the app but Windows may also change the layout. This is a Windows setting (*Advanced keyboard settings*).
+* Contrast: text colours were chosen for readable contrast on all three themes, but no automated contrast audit or screen-reader pass was run.
+
+### Known limitations
+
+No recursive file search (Files lists, sorts, renames, copies, moves and deletes in the open folder only); no management of WSLg windows (they belong to Windows); discovery needs a running distribution; start-up app limited to Nothing/Distributions/Settings; installer unsigned; single-instance is still not enforced.

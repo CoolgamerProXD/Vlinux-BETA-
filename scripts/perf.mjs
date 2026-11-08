@@ -56,6 +56,7 @@ async function once(blur) {
   await cdp.send('HeapProfiler.collectGarbage');
   const m = async (n) => (await cdp.send('Performance.getMetrics')).metrics.find((x) => x.name === n)?.value ?? 0;
   const nodes = await page.evaluate(() => document.getElementsByTagName('*').length);
+  const wins = await page.$$eval('section.win', (w) => w.length);
   const heapMiB = (await m('JSHeapUsedSize')) / 1048576;
   const listeners = await m('JSEventListeners');
 
@@ -78,7 +79,7 @@ async function once(blur) {
   await page.mouse.up();
   const deltas = await page.evaluate(() => { window.__run = false; return window.__d.slice(2); });
   await page.close();
-  return { nodes, heapMiB, listeners, idlePct, dragMedianMs: median(deltas), dragP95Ms: pct(deltas, 0.95), frames: deltas.length };
+  return { wins, nodes, heapMiB, listeners, idlePct, dragMedianMs: median(deltas), dragP95Ms: pct(deltas, 0.95), frames: deltas.length };
 }
 
 const report = { label, repeats: REPEATS, note: 'Linux headless Chromium, software rendering, preview back end: relative only', modes: {} };
@@ -88,7 +89,7 @@ for (const mode of modes) {
   for (let i = 0; i < REPEATS; i++) runs.push(await once(mode === 'noblur' ? false : undefined));
   const med = (k) => Number(median(runs.map((r) => r[k])).toFixed(2));
   report.modes[mode] = {
-    domNodes: med('nodes'), jsHeapMiB: med('heapMiB'), eventListeners: med('listeners'),
+    windowsOpen: med('wins'), domNodes: med('nodes'), jsHeapMiB: med('heapMiB'), eventListeners: med('listeners'),
     idleMainThreadBusyPct: med('idlePct'), dragFrameMedianMs: med('dragMedianMs'), dragFrameP95Ms: med('dragP95Ms'), dragFrames: med('frames'),
   };
 }
