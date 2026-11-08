@@ -185,7 +185,21 @@ jobs:
         continue-on-error: true
 
       - name: Build app and NSIS installer
-        run: npx tauri build
+        shell: pwsh
+        env:
+          CARGO_TERM_COLOR: never
+          NO_COLOR: '1'
+        run: |
+          npx tauri build 2>&1 | Tee-Object -FilePath tauri-build.log | Out-Host
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            # Annotations are the only way to read a failed log from outside, so surface the cause.
+            $lines = Get-Content tauri-build.log | Where-Object { $_ -match 'error|Error|failed|panicked' } | Select-Object -First 25
+            Write-Host "::warning title=Build failure lines::$(($lines -join ' || ') -replace '[\r\n%]',' ')"
+            $tail = Get-Content tauri-build.log | Select-Object -Last 15
+            Write-Host "::warning title=Build log tail::$(($tail -join ' || ') -replace '[\r\n%]',' ')"
+            exit $code
+          }
 
       - name: Smoke test - launch the real application
         shell: pwsh
