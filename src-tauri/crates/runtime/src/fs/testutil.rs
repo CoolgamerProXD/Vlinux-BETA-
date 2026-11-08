@@ -47,6 +47,16 @@ impl TempDir {
         p
     }
 
+    /// Create a binary file (and its parents).
+    pub fn bytes(&self, rel: &str, content: &[u8]) -> PathBuf {
+        let p = self.join(rel);
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&p, content).unwrap();
+        p
+    }
+
     pub fn dir(&self, rel: &str) -> PathBuf {
         let p = self.join(rel);
         fs::create_dir_all(&p).unwrap();

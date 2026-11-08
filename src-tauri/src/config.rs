@@ -6,8 +6,11 @@
 //!   resetting or reinstalling a distro can never touch it, and uninstalling
 //!   VLINUX never touches distros.
 //! * Every value is validated: enums reject unknown strings, numbers are clamped.
-//! * A corrupt file is never deleted: it is renamed to `config.toml.invalid-<unix-ts>`
+//! * An unparseable file is never deleted: it is renamed to `config.toml.invalid-<unix-ts>`
 //!   and defaults are used.
+//! * A file that parses but has a bad value in one section (for example an unknown theme name)
+//!   keeps every other section: only the broken section falls back to its defaults, and the
+//!   original file is copied to `config.toml.invalid-<unix-ts>` before it can be overwritten.
 //! * Writes are atomic (temp file + rename).
 
 use std::fs;
@@ -22,8 +25,10 @@ use vlinux_runtime::storage::StorageConfig;
 use crate::error::AppError;
 
 pub const CONFIG_FILE: &str = "config.toml";
-/// 2: adds `[runtime]` and `[storage]` (additive; version-1 files load unchanged).
-pub const SCHEMA_VERSION: u32 = 2;
+/// 3: adds appearance theme/blur, dock labels/magnify/right edge, `[topbar]`, `[terminal]` and
+/// `[startup]` (additive; version-1 and version-2 files load unchanged).
+/// 2: adds `[runtime]` and `[storage]`.
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -49,6 +54,36 @@ pub enum Accent {
 pub enum DockPosition {
     Bottom,
     Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Midnight,
+    Graphite,
+    Oled,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorStyle {
+    #[default]
+    Block,
+    Bar,
+    Underline,
+}
+
+/// What opens by itself when VLINUX starts. Never the terminal: no Linux process starts at launch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartupApp {
+    #[default]
+    None,
+    Distros,
+    Files,
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,6 +106,9 @@ pub struct AppearanceConfig {
     /// Panel translucency, 0 (opaque) ..= 100 (very glassy).
     pub glass: u8,
     pub animations: bool,
+    pub theme: Theme,
+    /// Backdrop blur behind panels. Turning it off is the biggest GPU saving on integrated graphics.
+    pub blur: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -79,6 +117,36 @@ pub struct DockConfig {
     pub position: DockPosition,
     /// Icon size in CSS pixels (32..=72).
     pub icon_size: u8,
+    /// Show app names under the dock icons.
+    pub labels: bool,
+    /// Enlarge the icon under the pointer.
+    pub magnify: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TopbarConfig {
+    pub show_workspaces: bool,
+    pub show_title: bool,
+    pub show_windows: bool,
+    pub show_battery: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TerminalConfig {
+    /// Font size in CSS pixels (10..=24).
+    pub font_size: u8,
+    pub cursor: CursorStyle,
+    pub cursor_blink: bool,
+    /// Lines kept in the scrollback buffer (500..=50000).
+    pub scrollback: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StartupConfig {
+    pub open_app: StartupApp,
 }
 
 /// Linux runtime preferences. Only stores a *choice*; nothing here starts or changes a distro.
@@ -98,6 +166,9 @@ pub struct Config {
     pub shell: ShellConfig,
     pub appearance: AppearanceConfig,
     pub dock: DockConfig,
+    pub topbar: TopbarConfig,
+    pub terminal: TerminalConfig,
+    pub startup: StartupConfig,
     pub runtime: RuntimeConfig,
     pub storage: StorageConfig,
 }
@@ -121,6 +192,8 @@ impl Default for AppearanceConfig {
             accent: Accent::Violet,
             glass: 60,
             animations: true,
+            theme: Theme::Midnight,
+            blur: true,
         }
     }
 }
@@ -130,6 +203,30 @@ impl Default for DockConfig {
         Self {
             position: DockPosition::Bottom,
             icon_size: 48,
+            labels: false,
+            magnify: true,
+        }
+    }
+}
+
+impl Default for TopbarConfig {
+    fn default() -> Self {
+        Self {
+            show_workspaces: true,
+            show_title: true,
+            show_windows: true,
+            show_battery: true,
+        }
+    }
+}
+
+impl Default for TerminalConfig {
+    fn default() -> Self {
+        Self {
+            font_size: 13,
+            cursor: CursorStyle::Block,
+            cursor_blink: true,
+            scrollback: 5000,
         }
     }
 }
@@ -141,6 +238,9 @@ impl Default for Config {
             shell: ShellConfig::default(),
             appearance: AppearanceConfig::default(),
             dock: DockConfig::default(),
+            topbar: TopbarConfig::default(),
+            terminal: TerminalConfig::default(),
+            startup: StartupConfig::default(),
             runtime: RuntimeConfig::default(),
             storage: StorageConfig::default(),
         }
@@ -154,6 +254,8 @@ impl Config {
         self.shell.workspace_count = self.shell.workspace_count.clamp(2, 9);
         self.appearance.glass = self.appearance.glass.min(100);
         self.dock.icon_size = self.dock.icon_size.clamp(32, 72);
+        self.terminal.font_size = self.terminal.font_size.clamp(10, 24);
+        self.terminal.scrollback = self.terminal.scrollback.clamp(500, 50_000);
         self.runtime.selected_distro = self
             .runtime
             .selected_distro
@@ -190,28 +292,82 @@ pub fn load(path: &Path) -> Loaded {
         }
     };
 
-    match toml::from_str::<Config>(&text) {
-        Ok(cfg) => Loaded {
+    // Anything that is not even valid TOML cannot be partly used: keep it and use defaults.
+    let table = match text.parse::<toml::Table>() {
+        Ok(t) => t,
+        Err(parse_err) => return unusable(path, &parse_err.to_string()),
+    };
+    // Fast path: the whole file is valid.
+    if let Ok(cfg) = toml::from_str::<Config>(&text) {
+        return Loaded {
             config: cfg.sanitized(),
             warning: None,
-        },
-        Err(parse_err) => {
-            let note = match preserve_invalid(path) {
-                Ok(p) => format!(
-                    "Your configuration file was invalid ({}). It was kept as {} and defaults are in use.",
-                    first_line(&parse_err.to_string()),
-                    p.display()
-                ),
-                Err(e) => format!(
-                    "Your configuration file was invalid ({}) and could not be backed up ({e}); defaults are in use and the file was left untouched.",
-                    first_line(&parse_err.to_string())
-                ),
-            };
-            Loaded {
-                config: Config::default(),
-                warning: Some(note),
-            }
+        };
+    }
+    // Something in the file is not valid for this version. Read each section on its own so that
+    // one bad value cannot reset the user's other settings.
+    let mut cfg = Config::default();
+    let mut bad: Vec<String> = Vec::new();
+    if let Some(v) = table.get("schema_version") {
+        if v.as_integer().is_none() {
+            bad.push("schema_version".into());
         }
+    }
+    section(&table, "shell", &mut cfg.shell, &mut bad);
+    section(&table, "appearance", &mut cfg.appearance, &mut bad);
+    section(&table, "dock", &mut cfg.dock, &mut bad);
+    section(&table, "topbar", &mut cfg.topbar, &mut bad);
+    section(&table, "terminal", &mut cfg.terminal, &mut bad);
+    section(&table, "startup", &mut cfg.startup, &mut bad);
+    section(&table, "runtime", &mut cfg.runtime, &mut bad);
+    section(&table, "storage", &mut cfg.storage, &mut bad);
+    let list = bad.join(", ");
+    let note = match copy_invalid(path) {
+        Ok(p) => format!(
+            "Some saved settings were not valid ({list}) and were reset to defaults. Everything else was kept. The original file was copied to {}.",
+            p.display()
+        ),
+        Err(e) => format!(
+            "Some saved settings were not valid ({list}) and were reset to defaults; everything else was kept. The original could not be copied aside ({e})."
+        ),
+    };
+    Loaded {
+        config: cfg.sanitized(),
+        warning: Some(note),
+    }
+}
+
+/// Read one `[name]` table into `slot`; on failure leave the default and record the name.
+fn section<T: serde::de::DeserializeOwned>(
+    table: &toml::Table,
+    name: &str,
+    slot: &mut T,
+    bad: &mut Vec<String>,
+) {
+    let Some(v) = table.get(name) else {
+        return;
+    };
+    match v.clone().try_into::<T>() {
+        Ok(parsed) => *slot = parsed,
+        Err(_) => bad.push(format!("[{name}]")),
+    }
+}
+
+fn unusable(path: &Path, why: &str) -> Loaded {
+    let note = match preserve_invalid(path) {
+        Ok(p) => format!(
+            "Your configuration file was invalid ({}). It was kept as {} and defaults are in use.",
+            first_line(why),
+            p.display()
+        ),
+        Err(e) => format!(
+            "Your configuration file was invalid ({}) and could not be backed up ({e}); defaults are in use and the file was left untouched.",
+            first_line(why)
+        ),
+    };
+    Loaded {
+        config: Config::default(),
+        warning: Some(note),
     }
 }
 
@@ -219,8 +375,7 @@ fn first_line(s: &str) -> String {
     s.lines().next().unwrap_or("").to_string()
 }
 
-/// Rename a broken config out of the way (never delete it).
-fn preserve_invalid(path: &Path) -> std::io::Result<PathBuf> {
+fn invalid_name(path: &Path) -> PathBuf {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -231,8 +386,20 @@ fn preserve_invalid(path: &Path) -> std::io::Result<PathBuf> {
             .and_then(|n| n.to_str())
             .unwrap_or(CONFIG_FILE)
     );
-    let dest = path.with_file_name(name);
+    path.with_file_name(name)
+}
+
+/// Rename a broken config out of the way (never delete it).
+fn preserve_invalid(path: &Path) -> std::io::Result<PathBuf> {
+    let dest = invalid_name(path);
     fs::rename(path, &dest)?;
+    Ok(dest)
+}
+
+/// Copy a partly invalid config aside; the file itself stays, so nothing is lost when it is saved over.
+fn copy_invalid(path: &Path) -> std::io::Result<PathBuf> {
+    let dest = invalid_name(path);
+    fs::copy(path, &dest)?;
     Ok(dest)
 }
 
@@ -432,7 +599,7 @@ mod tests {
         assert_eq!(l.config.appearance.accent, Accent::Cyan);
         assert_eq!(l.config.storage, StorageConfig::default());
         assert_eq!(l.config.runtime, RuntimeConfig::default());
-        assert_eq!(l.config.schema_version, 2);
+        assert_eq!(l.config.schema_version, 3);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -528,5 +695,102 @@ mod tests {
         assert_eq!(first, fs::read_to_string(&path).unwrap());
         assert_eq!(first, toml::to_string_pretty(&cfg).unwrap());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_bad_section_does_not_reset_the_other_settings() {
+        let dir = temp_dir("lenient");
+        let path = dir.join(CONFIG_FILE);
+        let original = "schema_version = 3\n[shell]\nworkspace_count = 7\n[appearance]\naccent = \"mint\"\ntheme = \"neon-pink\"\n[dock]\nposition = \"right\"\nlabels = true\n[terminal]\nfont_size = 16\n";
+        fs::write(&path, original).unwrap();
+        let l = load(&path);
+        // The broken [appearance] is reset; the rest survives.
+        assert_eq!(l.config.appearance, AppearanceConfig::default());
+        assert_eq!(l.config.shell.workspace_count, 7);
+        assert_eq!(l.config.dock.position, DockPosition::Right);
+        assert!(l.config.dock.labels);
+        assert_eq!(l.config.terminal.font_size, 16);
+        let w = l.warning.expect("the user is told");
+        assert!(w.contains("[appearance]") && !w.contains("[dock]"), "{w}");
+        // The file itself is untouched and a copy was kept.
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        let copies: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".invalid-"))
+            .collect();
+        assert_eq!(copies.len(), 1);
+        assert_eq!(fs::read_to_string(copies[0].path()).unwrap(), original);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_unparseable_file_is_renamed_and_defaults_are_used() {
+        let dir = temp_dir("garbage");
+        let path = dir.join(CONFIG_FILE);
+        fs::write(&path, "[shell\nthis is = = not toml").unwrap();
+        let l = load(&path);
+        assert_eq!(l.config, Config::default());
+        assert!(l.warning.is_some());
+        assert!(!path.exists(), "moved aside");
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains(".invalid-")).count(),
+            1
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn version_2_files_gain_the_new_settings_with_defaults_and_keep_their_values() {
+        let dir = temp_dir("v2");
+        let path = dir.join(CONFIG_FILE);
+        fs::write(
+            &path,
+            "schema_version = 2\n[appearance]\nwallpaper = \"peaks\"\nglass = 20\n[dock]\nposition = \"left\"\nicon_size = 40\n[runtime]\nselected_distro = \"archlinux\"\n",
+        )
+        .unwrap();
+        let l = load(&path);
+        assert!(l.warning.is_none(), "{:?}", l.warning);
+        let c = l.config;
+        assert_eq!(c.appearance.wallpaper, Wallpaper::Peaks);
+        assert_eq!(c.appearance.glass, 20);
+        assert_eq!(c.appearance.theme, Theme::Midnight);
+        assert!(c.appearance.blur);
+        assert_eq!(c.dock.position, DockPosition::Left);
+        assert!(c.dock.magnify && !c.dock.labels);
+        assert_eq!(c.topbar, TopbarConfig::default());
+        assert_eq!(c.terminal, TerminalConfig::default());
+        assert_eq!(c.startup.open_app, StartupApp::None);
+        assert_eq!(c.runtime.selected_distro.as_deref(), Some("archlinux"));
+        // Loading never rewrites the file.
+        assert!(fs::read_to_string(&path).unwrap().contains("schema_version = 2"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn terminal_and_new_appearance_values_are_validated_and_roundtrip() {
+        let dir = temp_dir("m7");
+        let path = dir.join(CONFIG_FILE);
+        let mut cfg = Config::default();
+        cfg.appearance.theme = Theme::Oled;
+        cfg.appearance.blur = false;
+        cfg.topbar.show_title = false;
+        cfg.terminal.cursor = CursorStyle::Bar;
+        cfg.terminal.font_size = 18;
+        cfg.terminal.scrollback = 20_000;
+        cfg.startup.open_app = StartupApp::Files;
+        save(&path, &cfg).unwrap();
+        let l = load(&path);
+        assert!(l.warning.is_none());
+        assert_eq!(l.config, cfg);
+        let mut wild = Config::default();
+        wild.terminal.font_size = 200;
+        wild.terminal.scrollback = 5;
+        let wild = wild.sanitized();
+        assert_eq!(wild.terminal.font_size, 24);
+        assert_eq!(wild.terminal.scrollback, 500);
+        // The terminal can never be a start-up app (no Linux process starts at launch).
+        assert!(toml::from_str::<Config>("[startup]\nopen_app = \"terminal\"\n").is_err());
+        let _ = fs::remove_dir_all(dir);
     }
 }

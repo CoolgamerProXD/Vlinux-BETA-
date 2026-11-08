@@ -14,6 +14,7 @@
 //! Later milestones add full distro
 //! management, behind a backend trait so that non-WSL execution backends can be added.
 
+mod apps;
 mod config;
 mod distros;
 mod error;
@@ -110,9 +111,12 @@ pub fn run() {
             // until the user asks.
             app.manage(Arc::new(distros::DistroMgmt::new(
                 app.handle().clone(),
-                rt,
+                rt.clone(),
                 &dir,
             )));
+            // Launcher: constructs state only; applications are read when the launcher asks and
+            // the distribution is already running.
+            app.manage(Arc::new(apps::AppsState::new(app.handle().clone(), rt)));
             // Likewise: no PTY and no Linux process exists until the user opens a terminal.
             app.manage(Arc::new(terminal::TerminalState::new(app.handle().clone())));
 
@@ -145,6 +149,10 @@ pub fn run() {
             window::is_fullscreen,
             window::exit_to_windows,
             window::quit_app,
+            apps::apps_discover,
+            apps::apps_icons,
+            apps::apps_launch,
+            apps::apps_launched,
             runtime::wsl_detect,
             runtime::wsl_catalog,
             runtime::install_prepare,

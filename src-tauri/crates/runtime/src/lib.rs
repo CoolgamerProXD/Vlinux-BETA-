@@ -27,6 +27,7 @@
 //! * [`testing`]   — fake process runner and helpers for tests
 
 pub mod adapters;
+pub mod apps;
 pub mod detect;
 pub mod diag;
 pub mod distroconf;
