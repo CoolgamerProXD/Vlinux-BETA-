@@ -226,7 +226,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           $bmp.Save("artifacts/launch.png")
           # Measure idle CPU over 10s
-          $c0 = (Get-Process -Id $p.Id).CPU; Start-Sleep -Seconds 30
+          $c0 = (Get-Process -Id $p.Id).CPU; Start-Sleep -Seconds 10
           $c1 = (Get-Process -Id $p.Id).CPU
           $cpu = [math]::Round(($c1-$c0)/10*100,2)
           Write-Host "::notice title=Smoke launch::vlinux.exe still running after 15s (PID $($p.Id)); main-process working set $ws MiB; idle CPU $cpu % of one core over 10s (main process only, excludes WebView2 child processes)"
@@ -354,7 +354,7 @@ jobs:
           Note "Startup: process start to the main window being shown = $startMs ms (window handle $($p.MainWindowHandle)); the desktop inside it appears later - see Launch to desktop"
           Write-Host "::notice title=Window shown (runner)::$startMs ms from process start to the main window being shown (an empty dark window; the desktop is drawn after the web content loads). Installed app on a GitHub runner, not the user's PC"
 
-          Start-Sleep -Seconds 30
+          Start-Sleep -Seconds 10
           $ids = Measure-Tree $p.Id 'idle, after launch'
           $c0 = Cpu-Seconds $ids; Start-Sleep -Seconds 10; $c1 = Cpu-Seconds $ids
           $cpu = [math]::Round(($c1-$c0)/10*100,2)
