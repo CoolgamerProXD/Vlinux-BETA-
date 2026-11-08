@@ -135,7 +135,8 @@ fn running_context(
     // `wsl -l -v` reports state without starting anything; force a fresh answer because the
     // distribution may have stopped since the last check.
     let report = st.rt.detect(true);
-    if let Err(e) = ensure_wsl_ready(&report).and_then(|()| require_regular_distro(&report, distro)) {
+    if let Err(e) = ensure_wsl_ready(&report).and_then(|()| require_regular_distro(&report, distro))
+    {
         return Err(Box::new(empty_report(distro, "unavailable", e.to_string())));
     }
     let running = report
@@ -149,8 +150,8 @@ fn running_context(
             format!("'{distro}' is not running. Start it to see and launch its applications."),
         )));
     }
-    let root = linux_root(distro)
-        .map_err(|e| Box::new(empty_report(distro, "unavailable", e.message)))?;
+    let root =
+        linux_root(distro).map_err(|e| Box::new(empty_report(distro, "unavailable", e.message)))?;
     let home = WslDistroOps::new(Arc::new(SystemRunner), st.rt.programs.wsl.clone(), distro)
         .ok()
         .and_then(|ops| ops.home_dir().ok());
@@ -271,7 +272,9 @@ pub async fn apps_launch(
     let st = st.inner().clone();
     blocking(move || {
         if !apps::valid_app_id(&id) {
-            return Err(AppError::Runtime("That is not a valid application id.".into()));
+            return Err(AppError::Runtime(
+                "That is not a valid application id.".into(),
+            ));
         }
         let (root, home) = match running_context(&st, &distro) {
             Ok(v) => v,
@@ -341,7 +344,10 @@ pub async fn apps_launch(
                         done.state = "failed".into();
                         done.code = s.code();
                         done.message = Some(if text.is_empty() {
-                            format!("It stopped with exit code {}.", s.code().map_or_else(|| "?".to_string(), |c| c.to_string()))
+                            format!(
+                                "It stopped with exit code {}.",
+                                s.code().map_or_else(|| "?".to_string(), |c| c.to_string())
+                            )
                         } else {
                             text
                         });

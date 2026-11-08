@@ -154,15 +154,16 @@ pub fn exec_argv(exec: &str) -> Result<Vec<String>, String> {
     let mut only_code = true;
     let mut in_quote = false;
     let mut chars = exec.chars().peekable();
-    let flush = |cur: &mut String, started: &mut bool, only_code: &mut bool, args: &mut Vec<String>| {
-        if *started && !(*only_code && cur.is_empty()) {
-            args.push(std::mem::take(cur));
-        } else {
-            cur.clear();
-        }
-        *started = false;
-        *only_code = true;
-    };
+    let flush =
+        |cur: &mut String, started: &mut bool, only_code: &mut bool, args: &mut Vec<String>| {
+            if *started && !(*only_code && cur.is_empty()) {
+                args.push(std::mem::take(cur));
+            } else {
+                cur.clear();
+            }
+            *started = false;
+            *only_code = true;
+        };
     while let Some(c) = chars.next() {
         match c {
             '"' => {
@@ -191,7 +192,9 @@ pub fn exec_argv(exec: &str) -> Result<Vec<String>, String> {
                     started = true;
                     only_code = false;
                 }
-                Some('f' | 'F' | 'u' | 'U' | 'd' | 'D' | 'n' | 'N' | 'i' | 'c' | 'k' | 'v' | 'm') => {
+                Some(
+                    'f' | 'F' | 'u' | 'U' | 'd' | 'D' | 'n' | 'N' | 'i' | 'c' | 'k' | 'v' | 'm',
+                ) => {
                     started = true;
                 }
                 Some(o) => return Err(format!("unknown field code %{o}")),
@@ -282,9 +285,15 @@ fn app_dirs(home: Option<&str>) -> Vec<(String, &'static str)> {
     if let Some(h) = home {
         let h = h.trim_end_matches('/');
         v.push((format!("{h}/.local/share/applications"), "user"));
-        v.push((format!("{h}/.local/share/flatpak/exports/share/applications"), "flatpak"));
+        v.push((
+            format!("{h}/.local/share/flatpak/exports/share/applications"),
+            "flatpak",
+        ));
     }
-    v.push(("/var/lib/flatpak/exports/share/applications".into(), "flatpak"));
+    v.push((
+        "/var/lib/flatpak/exports/share/applications".into(),
+        "flatpak",
+    ));
     v.push(("/var/lib/snapd/desktop/applications".into(), "snap"));
     v.push(("/usr/local/share/applications".into(), "system"));
     v.push(("/usr/share/applications".into(), "system"));
@@ -351,11 +360,16 @@ pub fn scan(root: &Path, home: Option<&str>) -> Scan {
         files.sort();
         for (id, path) in files {
             if started.elapsed() > TIME_BUDGET {
-                s.warnings.push("Reading the application folders took too long; the list may be incomplete.".into());
+                s.warnings.push(
+                    "Reading the application folders took too long; the list may be incomplete."
+                        .into(),
+                );
                 break 'dirs;
             }
             if s.found.len() >= MAX_ENTRIES {
-                s.warnings.push(format!("Only the first {MAX_ENTRIES} applications are shown."));
+                s.warnings.push(format!(
+                    "Only the first {MAX_ENTRIES} applications are shown."
+                ));
                 break 'dirs;
             }
             if !valid_app_id(&id) {
@@ -428,23 +442,38 @@ fn judge(root: &Path, home: Option<&str>, e: &DesktopEntry) -> (bool, Option<Str
     }
     let argv = match exec_argv(&e.exec) {
         Ok(a) => a,
-        Err(m) => return (false, Some(format!("Its launch command is not valid ({m})."))),
+        Err(m) => {
+            return (
+                false,
+                Some(format!("Its launch command is not valid ({m}).")),
+            )
+        }
     };
     if let Some(t) = &e.try_exec {
         if !program_found(root, home, t) {
-            return (false, Some(format!("'{t}' is not installed in this distribution.")));
+            return (
+                false,
+                Some(format!("'{t}' is not installed in this distribution.")),
+            );
         }
     }
     if let Some(first) = argv.first() {
         if first.starts_with('/') && !entry_exists(root, first) {
-            return (false, Some(format!("'{first}' does not exist in this distribution.")));
+            return (
+                false,
+                Some(format!("'{first}' does not exist in this distribution.")),
+            );
         }
     }
     (true, None)
 }
 
 /// Re-read the entry with this id and build the argument vector to run it (never through a shell).
-pub fn launch_argv(root: &Path, home: Option<&str>, id: &str) -> Result<(LinuxApp, Vec<String>), String> {
+pub fn launch_argv(
+    root: &Path,
+    home: Option<&str>,
+    id: &str,
+) -> Result<(LinuxApp, Vec<String>), String> {
     if !valid_app_id(id) {
         return Err("That is not a valid application id.".into());
     }
@@ -482,7 +511,8 @@ const ICON_ROOTS: [&str; 6] = [
 
 fn path_icon_allowed(p: &str, home: Option<&str>) -> bool {
     ICON_ROOTS.iter().any(|r| p.starts_with(r))
-        || home.is_some_and(|h| p.starts_with(&format!("{}/.local/share/", h.trim_end_matches('/'))))
+        || home
+            .is_some_and(|h| p.starts_with(&format!("{}/.local/share/", h.trim_end_matches('/'))))
 }
 
 /// `image/png` or `image/svg+xml` when the bytes look like one, else `None`.
@@ -514,7 +544,9 @@ pub fn find_icon(root: &Path, home: Option<&str>, icon: &str) -> Option<(&'stati
         }
         bases.push("/var/lib/flatpak/exports/share".into());
         for b in &bases {
-            for size in ["scalable", "256x256", "128x128", "96x96", "64x64", "48x48", "512x512", "32x32"] {
+            for size in [
+                "scalable", "256x256", "128x128", "96x96", "64x64", "48x48", "512x512", "32x32",
+            ] {
                 for ext in ["svg", "png"] {
                     candidates.push(format!("{b}/icons/hicolor/{size}/apps/{icon}.{ext}"));
                 }
@@ -570,22 +602,37 @@ mod tests {
         assert_eq!(e.categories, ["System", "FileManager"]);
         assert_eq!(e.keywords, ["folder", "browse"]);
         assert!(!e.terminal);
-        assert!(parse_desktop("Name=x\nExec=y\n").is_none(), "no [Desktop Entry] group");
+        assert!(
+            parse_desktop("Name=x\nExec=y\n").is_none(),
+            "no [Desktop Entry] group"
+        );
     }
 
     #[test]
     fn exec_quoting_and_field_codes() {
         assert_eq!(exec_argv("firefox %u").unwrap(), ["firefox"]);
-        assert_eq!(exec_argv("env FOO=1 app --flag %F").unwrap(), ["env", "FOO=1", "app", "--flag"]);
+        assert_eq!(
+            exec_argv("env FOO=1 app --flag %F").unwrap(),
+            ["env", "FOO=1", "app", "--flag"]
+        );
         assert_eq!(
             exec_argv(r#""/opt/My App/run" --name "a b" %U"#).unwrap(),
             ["/opt/My App/run", "--name", "a b"]
         );
         assert_eq!(exec_argv("app --file=%f").unwrap(), ["app", "--file="]);
-        assert_eq!(exec_argv("app 100%% done").unwrap(), ["app", "100%", "done"]);
-        assert_eq!(exec_argv(r#"app "say \"hi\" \$HOME""#).unwrap(), ["app", r#"say "hi" $HOME"#]);
+        assert_eq!(
+            exec_argv("app 100%% done").unwrap(),
+            ["app", "100%", "done"]
+        );
+        assert_eq!(
+            exec_argv(r#"app "say \"hi\" \$HOME""#).unwrap(),
+            ["app", r#"say "hi" $HOME"#]
+        );
         // No shell: metacharacters are just text.
-        assert_eq!(exec_argv("app a;b $(x) `y` &").unwrap(), ["app", "a;b", "$(x)", "`y`", "&"]);
+        assert_eq!(
+            exec_argv("app a;b $(x) `y` &").unwrap(),
+            ["app", "a;b", "$(x)", "`y`", "&"]
+        );
         assert!(exec_argv("").is_err());
         assert!(exec_argv("%U").is_err());
         assert!(exec_argv("app \"open").is_err());
@@ -596,11 +643,23 @@ mod tests {
     fn ids_and_paths_are_validated() {
         assert!(valid_app_id("org.gnome.Nautilus.desktop"));
         assert!(valid_app_id("foo-bar_1+2.desktop"));
-        for bad in ["", ".desktop", "a/b.desktop", "a b.desktop", "x.txt", "../x.desktop", ".hidden.desktop", "a;b.desktop"] {
+        for bad in [
+            "",
+            ".desktop",
+            "a/b.desktop",
+            "a b.desktop",
+            "x.txt",
+            "../x.desktop",
+            ".hidden.desktop",
+            "a;b.desktop",
+        ] {
             assert!(!valid_app_id(bad), "{bad}");
         }
         let r = Path::new("/r");
-        assert_eq!(host_path(r, "/usr/bin/x"), Some(PathBuf::from("/r/usr/bin/x")));
+        assert_eq!(
+            host_path(r, "/usr/bin/x"),
+            Some(PathBuf::from("/r/usr/bin/x"))
+        );
         assert_eq!(host_path(r, "/usr/../etc"), None);
         assert_eq!(host_path(r, "usr/bin"), None);
         assert_eq!(host_path(r, "/a\\b"), None);
@@ -610,36 +669,113 @@ mod tests {
     #[test]
     fn discovers_applications_across_the_standard_folders_without_assuming_a_distribution() {
         let root = TempDir::new("apps");
-        put(&root, "usr/share/applications/editor.desktop", &desk("Text Editor", "/usr/bin/editor %F", "Icon=editor\nCategories=Utility;\n"));
+        put(
+            &root,
+            "usr/share/applications/editor.desktop",
+            &desk(
+                "Text Editor",
+                "/usr/bin/editor %F",
+                "Icon=editor\nCategories=Utility;\n",
+            ),
+        );
         root.file("usr/bin/editor", "#!/bin/sh");
-        put(&root, "usr/share/applications/hidden.desktop", &desk("Hidden", "/usr/bin/editor", "NoDisplay=true\n"));
-        put(&root, "usr/share/applications/gnome-only.desktop", &desk("Gnome Only", "/usr/bin/editor", "OnlyShowIn=GNOME;\n"));
-        put(&root, "usr/share/applications/term.desktop", &desk("Htop", "htop", "Terminal=true\n"));
-        put(&root, "usr/share/applications/missing.desktop", &desk("Ghost", "/usr/bin/ghost", ""));
-        put(&root, "usr/share/applications/tryexec.desktop", &desk("TryIt", "/usr/bin/editor", "TryExec=nothere\n"));
-        put(&root, "var/lib/flatpak/exports/share/applications/org.x.Fly.desktop", &desk("Flat App", "/usr/bin/editor --fly", ""));
-        put(&root, "home/me/.local/share/applications/editor.desktop", &desk("My Editor", "/usr/bin/editor --mine", ""));
-        put(&root, "usr/share/applications/dup-a.desktop", &desk("Same Thing", "/usr/bin/editor --same", ""));
-        put(&root, "usr/share/applications/dup-b.desktop", &desk("same thing", "/usr/bin/editor --same", ""));
-        put(&root, "usr/share/applications/bad.desktop", "not a desktop file");
-        put(&root, "usr/share/applications/kind.desktop", "[Desktop Entry]\nType=Link\nName=Web\nURL=x\n");
+        put(
+            &root,
+            "usr/share/applications/hidden.desktop",
+            &desk("Hidden", "/usr/bin/editor", "NoDisplay=true\n"),
+        );
+        put(
+            &root,
+            "usr/share/applications/gnome-only.desktop",
+            &desk("Gnome Only", "/usr/bin/editor", "OnlyShowIn=GNOME;\n"),
+        );
+        put(
+            &root,
+            "usr/share/applications/term.desktop",
+            &desk("Htop", "htop", "Terminal=true\n"),
+        );
+        put(
+            &root,
+            "usr/share/applications/missing.desktop",
+            &desk("Ghost", "/usr/bin/ghost", ""),
+        );
+        put(
+            &root,
+            "usr/share/applications/tryexec.desktop",
+            &desk("TryIt", "/usr/bin/editor", "TryExec=nothere\n"),
+        );
+        put(
+            &root,
+            "var/lib/flatpak/exports/share/applications/org.x.Fly.desktop",
+            &desk("Flat App", "/usr/bin/editor --fly", ""),
+        );
+        put(
+            &root,
+            "home/me/.local/share/applications/editor.desktop",
+            &desk("My Editor", "/usr/bin/editor --mine", ""),
+        );
+        put(
+            &root,
+            "usr/share/applications/dup-a.desktop",
+            &desk("Same Thing", "/usr/bin/editor --same", ""),
+        );
+        put(
+            &root,
+            "usr/share/applications/dup-b.desktop",
+            &desk("same thing", "/usr/bin/editor --same", ""),
+        );
+        put(
+            &root,
+            "usr/share/applications/bad.desktop",
+            "not a desktop file",
+        );
+        put(
+            &root,
+            "usr/share/applications/kind.desktop",
+            "[Desktop Entry]\nType=Link\nName=Web\nURL=x\n",
+        );
         let s = scan(root.path(), Some("/home/me"));
         let names: Vec<&str> = s.found.iter().map(|f| f.app.name.as_str()).collect();
         // The user's editor.desktop masks the system one with the same id.
-        assert!(names.contains(&"My Editor") && !names.contains(&"Text Editor"), "{names:?}");
+        assert!(
+            names.contains(&"My Editor") && !names.contains(&"Text Editor"),
+            "{names:?}"
+        );
         assert!(names.contains(&"Flat App"));
         for gone in ["Hidden", "Gnome Only", "Web"] {
             assert!(!names.contains(&gone), "{gone}");
         }
         let get = |n: &str| s.found.iter().find(|f| f.app.name == n).unwrap();
-        assert!(!get("Htop").app.launchable && get("Htop").app.reason.as_deref().unwrap().contains("Terminal"));
-        assert!(!get("Ghost").app.launchable && get("Ghost").app.reason.as_deref().unwrap().contains("does not exist"));
+        assert!(
+            !get("Htop").app.launchable
+                && get("Htop")
+                    .app
+                    .reason
+                    .as_deref()
+                    .unwrap()
+                    .contains("Terminal")
+        );
+        assert!(
+            !get("Ghost").app.launchable
+                && get("Ghost")
+                    .app
+                    .reason
+                    .as_deref()
+                    .unwrap()
+                    .contains("does not exist")
+        );
         assert!(!get("TryIt").app.launchable);
         assert!(get("Flat App").app.launchable);
         assert_eq!(get("Flat App").app.source, "flatpak");
         assert_eq!(get("My Editor").app.source, "user");
         // The same program under two ids appears once.
-        assert_eq!(names.iter().filter(|n| n.eq_ignore_ascii_case("same thing")).count(), 1);
+        assert_eq!(
+            names
+                .iter()
+                .filter(|n| n.eq_ignore_ascii_case("same thing"))
+                .count(),
+            1
+        );
         assert_eq!(s.skipped, 1, "only the malformed file counts as skipped");
         assert!(s.scanned.iter().any(|d| d == "/usr/share/applications"));
         // Sorted by name, case-insensitively.
@@ -659,15 +795,26 @@ mod tests {
     fn a_hidden_entry_in_a_higher_priority_folder_masks_the_system_one() {
         let root = TempDir::new("mask");
         root.file("usr/bin/a", "x");
-        put(&root, "usr/share/applications/a.desktop", &desk("Visible", "/usr/bin/a", ""));
-        put(&root, "home/me/.local/share/applications/a.desktop", &desk("Visible", "/usr/bin/a", "Hidden=true\n"));
+        put(
+            &root,
+            "usr/share/applications/a.desktop",
+            &desk("Visible", "/usr/bin/a", ""),
+        );
+        put(
+            &root,
+            "home/me/.local/share/applications/a.desktop",
+            &desk("Visible", "/usr/bin/a", "Hidden=true\n"),
+        );
         assert!(scan(root.path(), Some("/home/me")).found.is_empty());
     }
 
     #[test]
     fn oversized_files_are_skipped_and_counted() {
         let root = TempDir::new("big");
-        let big = format!("[Desktop Entry]\nType=Application\nName=Big\nExec=/usr/bin/x\n#{}\n", "x".repeat(70_000));
+        let big = format!(
+            "[Desktop Entry]\nType=Application\nName=Big\nExec=/usr/bin/x\n#{}\n",
+            "x".repeat(70_000)
+        );
         put(&root, "usr/share/applications/big.desktop", &big);
         let s = scan(root.path(), None);
         assert!(s.found.is_empty());
@@ -678,13 +825,25 @@ mod tests {
     fn launching_rebuilds_the_command_from_the_entry_and_refuses_what_is_not_launchable() {
         let root = TempDir::new("launch");
         root.file("usr/bin/editor", "x");
-        put(&root, "usr/share/applications/editor.desktop", &desk("Editor", "/usr/bin/editor --new-window %F", ""));
-        put(&root, "usr/share/applications/term.desktop", &desk("Htop", "htop", "Terminal=true\n"));
+        put(
+            &root,
+            "usr/share/applications/editor.desktop",
+            &desk("Editor", "/usr/bin/editor --new-window %F", ""),
+        );
+        put(
+            &root,
+            "usr/share/applications/term.desktop",
+            &desk("Htop", "htop", "Terminal=true\n"),
+        );
         let (app, argv) = launch_argv(root.path(), None, "editor.desktop").unwrap();
         assert_eq!(app.name, "Editor");
         assert_eq!(argv, ["/usr/bin/editor", "--new-window"]);
-        assert!(launch_argv(root.path(), None, "term.desktop").unwrap_err().contains("Terminal"));
-        assert!(launch_argv(root.path(), None, "nothere.desktop").unwrap_err().contains("no longer installed"));
+        assert!(launch_argv(root.path(), None, "term.desktop")
+            .unwrap_err()
+            .contains("Terminal"));
+        assert!(launch_argv(root.path(), None, "nothere.desktop")
+            .unwrap_err()
+            .contains("no longer installed"));
         assert!(launch_argv(root.path(), None, "../etc/passwd").is_err());
         assert!(launch_argv(root.path(), None, "a b.desktop").is_err());
     }
@@ -699,17 +858,29 @@ mod tests {
     fn icons_are_found_by_name_or_path_and_only_as_images_inside_known_folders() {
         let root = TempDir::new("icons");
         root.bytes("usr/share/icons/hicolor/48x48/apps/editor.png", &png());
-        root.file("usr/share/pixmaps/vec.svg", "<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>");
+        root.file(
+            "usr/share/pixmaps/vec.svg",
+            "<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+        );
         root.file("usr/share/pixmaps/fake.png", "this is not an image");
         root.file("etc/secret.png", "x");
         root.bytes("opt/app/icon.png", &png());
         let (mime, b) = find_icon(root.path(), None, "editor").unwrap();
         assert_eq!(mime, "image/png");
         assert!(b.len() > 8);
-        assert_eq!(find_icon(root.path(), None, "vec").unwrap().0, "image/svg+xml");
-        assert!(find_icon(root.path(), None, "fake").is_none(), "content must be an image");
+        assert_eq!(
+            find_icon(root.path(), None, "vec").unwrap().0,
+            "image/svg+xml"
+        );
+        assert!(
+            find_icon(root.path(), None, "fake").is_none(),
+            "content must be an image"
+        );
         assert!(find_icon(root.path(), None, "/opt/app/icon.png").is_some());
-        assert!(find_icon(root.path(), None, "/etc/secret.png").is_none(), "outside the icon folders");
+        assert!(
+            find_icon(root.path(), None, "/etc/secret.png").is_none(),
+            "outside the icon folders"
+        );
         assert!(find_icon(root.path(), None, "../../etc/secret").is_none());
         assert!(find_icon(root.path(), None, "/usr/share/../../etc/secret.png").is_none());
         assert!(find_icon(root.path(), None, "nothing").is_none());

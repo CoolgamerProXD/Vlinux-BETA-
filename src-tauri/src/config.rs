@@ -734,7 +734,11 @@ mod tests {
         assert!(l.warning.is_some());
         assert!(!path.exists(), "moved aside");
         assert_eq!(
-            fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains(".invalid-")).count(),
+            fs::read_dir(&dir)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().contains(".invalid-"))
+                .count(),
             1
         );
         let _ = fs::remove_dir_all(dir);
@@ -763,7 +767,9 @@ mod tests {
         assert_eq!(c.startup.open_app, StartupApp::None);
         assert_eq!(c.runtime.selected_distro.as_deref(), Some("archlinux"));
         // Loading never rewrites the file.
-        assert!(fs::read_to_string(&path).unwrap().contains("schema_version = 2"));
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("schema_version = 2"));
         let _ = fs::remove_dir_all(dir);
     }
 
