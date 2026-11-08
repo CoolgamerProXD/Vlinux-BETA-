@@ -190,8 +190,15 @@ jobs:
           CARGO_TERM_COLOR: never
           NO_COLOR: '1'
         run: |
-          npx tauri build 2>&1 | Tee-Object -FilePath tauri-build.log | Out-Host
-          $code = $LASTEXITCODE
+          # The NSIS bundler downloads tools from GitHub; a transient HTTP error there (it happened once, a 504)
+          # is retried. A compile error or any other failure is not retried.
+          for ($try = 1; $try -le 3; $try++) {
+            npx tauri build 2>&1 | Tee-Object -FilePath tauri-build.log | Out-Host
+            $code = $LASTEXITCODE
+            if ($code -eq 0 -or -not (Select-String -Path tauri-build.log -Pattern 'http status: 5\d\d' -Quiet)) { break }
+            Write-Host "::warning title=Retrying installer build::attempt $try failed with a download error"
+            Start-Sleep -Seconds 10
+          }
           if ($code -ne 0) {
             # Annotations are the only way to read a failed log from outside, so surface the cause.
             $lines = Get-Content tauri-build.log | Where-Object { $_ -match 'error|Error|failed|panicked' } | Select-Object -First 25
