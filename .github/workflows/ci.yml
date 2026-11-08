@@ -184,6 +184,14 @@ jobs:
           Write-Host ("::notice title=clippy workspace ($n warning/error lines)::" + ($det -replace "`r","" -replace "`n","%0A"))
         continue-on-error: true
 
+      # Tauri downloads the NSIS tools from GitHub releases on every fresh runner; those downloads have
+      # been returning intermittent 504s. Once one build succeeds the tools are cached here.
+      - name: Cache Tauri bundler tools (NSIS)
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-bundler-tools-${{ runner.os }}-nsis-3.13
+
       - name: Build app and NSIS installer
         shell: pwsh
         env:
@@ -192,12 +200,12 @@ jobs:
         run: |
           # The NSIS bundler downloads tools from GitHub; a transient HTTP error there (it happened once, a 504)
           # is retried. A compile error or any other failure is not retried.
-          for ($try = 1; $try -le 6; $try++) {
+          for ($try = 1; $try -le 10; $try++) {
             npx tauri build 2>&1 | Tee-Object -FilePath tauri-build.log | Out-Host
             $code = $LASTEXITCODE
             if ($code -eq 0 -or -not (Select-String -Path tauri-build.log -Pattern 'http status: 5\d\d' -Quiet)) { break }
             Write-Host "::warning title=Retrying installer build::attempt $try failed with a download error"
-            Start-Sleep -Seconds 30
+            Start-Sleep -Seconds 20
           }
           if ($code -ne 0) {
             # Annotations are the only way to read a failed log from outside, so surface the cause.
