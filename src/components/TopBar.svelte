@@ -78,7 +78,7 @@
         {#each here as w (w.id)}
           {@const app = appById(w.appId)}
           <li>
-            <button class="win" class:active={wm.focusedId === w.id && !w.minimized} class:min={w.minimized}
+            <button class="wbtn" class:active={wm.focusedId === w.id && !w.minimized} class:min={w.minimized}
                     aria-label={`${w.title}${w.minimized ? ' (minimised)' : ''}`} aria-pressed={wm.focusedId === w.id && !w.minimized}
                     title={`${w.title}${w.minimized ? ' — minimised' : ''}`}
                     onclick={() => winClick(w)} oncontextmenu={(e) => winMenu(e, w)}
@@ -101,7 +101,7 @@
   </div>
 
   <div class="right">
-    <button class="chip distro" aria-label={`Linux distribution: ${distroName ?? 'none selected'}, ${distroLabel}`} title="Linux distribution"
+    <button class="chip dchip" aria-label={`Linux distribution: ${distroName ?? 'none selected'}, ${distroLabel}`} title="Linux distribution"
             aria-expanded={ui.overlay === 'distro'} onclick={() => ui.toggle('distro')}>
       <span class="sdot {distroTone}" aria-hidden="true"></span>
       <span class="dname">{distroName ?? 'No distro'}</span>
@@ -167,13 +167,13 @@
   }
 
   .wins { list-style: none; margin: 0; padding: 0 2px; display: flex; gap: 2px; min-width: 0; }
-  .win { width: 28px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); position: relative; transition: background var(--dur), color var(--dur); }
-  .win:hover { background: rgb(255 255 255 / 0.1); color: var(--text); }
-  .win.min { opacity: 0.55; }
-  .win.active { color: var(--text); background: rgb(var(--accent-rgb) / 0.2); }
-  .win.active::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 1px; height: 2px; border-radius: 2px; background: var(--accent); }
+  .wbtn { width: 28px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); position: relative; transition: background var(--dur), color var(--dur); }
+  .wbtn:hover { background: rgb(255 255 255 / 0.1); color: var(--text); }
+  .wbtn.min { opacity: 0.55; }
+  .wbtn.active { color: var(--text); background: rgb(var(--accent-rgb) / 0.2); }
+  .wbtn.active::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 1px; height: 2px; border-radius: 2px; background: var(--accent); }
 
-  .distro { max-width: 170px; }
+  .dchip { max-width: 170px; }
   .dname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
   .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
   .sdot.good { background: #5ff0b0; box-shadow: 0 0 7px #5ff0b0; }

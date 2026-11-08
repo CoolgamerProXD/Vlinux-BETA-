@@ -63,7 +63,7 @@ function Set-Focus {
   Start-Sleep -Milliseconds 250
 }
 
-$VK = @{ 'ctrl' = 0x11; 'alt' = 0x12; 'shift' = 0x10; 'esc' = 0x1B; 'enter' = 0x0D; 'space' = 0x20 }
+$VK = @{ 'ctrl' = 0x11; 'alt' = 0x12; 'shift' = 0x10; 'esc' = 0x1B; 'enter' = 0x0D; 'space' = 0x20; 'grave' = 0xC0; 'left' = 0x25; 'up' = 0x26; 'right' = 0x27; 'down' = 0x28 }
 function Get-Vk([string]$k) {
   if ($VK.ContainsKey($k)) { return [int]$VK[$k] }
   if ($k -match '^f(\d{1,2})$') { return 0x6F + [int]$Matches[1] }

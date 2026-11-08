@@ -58,6 +58,10 @@ const state = () => page.evaluate(async () => ({
   w: innerWidth, h: innerHeight,
   launcher: !!document.querySelector('[role="dialog"][aria-label="Application launcher"]'),
   power: !!document.querySelector('[role="dialog"][aria-label="Power and exit"]'),
+  keys: !!document.querySelector('[role="dialog"][aria-label="Keyboard shortcuts"]'),
+  notes: !!document.querySelector('[role="dialog"][aria-label="Notifications"]'),
+  winw: Math.round(document.querySelector('section.win:not(.hidden)')?.getBoundingClientRect().width ?? 0),
+  workw: Math.round(document.querySelector('main.work')?.getBoundingClientRect().width ?? 0),
   ws: document.querySelector('nav.ws [aria-current="true"]')?.textContent?.trim() ?? null,
   wins: document.querySelectorAll('section.win:not(.hidden)').length,
 }));
@@ -101,8 +105,8 @@ await page.evaluate(() => (document.activeElement instanceof HTMLElement) && doc
 const kind = os ? '[OS key]' : '[CDP key]';
 console.log(`::notice title=Desktop smoke input::${os ? 'real operating-system keystrokes (keybd_event with scan codes) reach the page' : 'real OS keystrokes did NOT reach the page in this CI session (' + info + '); shortcuts are tested with keys injected over CDP, which proves the app\'s key handling but not Windows\' delivery'}`);
 
-const CDP = { 'F11': ['F11'], 'ESC': ['Escape'], 'ALTF1': ['Alt', 'F1'], 'ALT2': ['Alt', 'Digit2'], 'ALT1': ['Alt', 'Digit1'], 'ALTW': ['Alt', 'KeyW'], 'POWER': ['Alt', 'Shift', 'KeyQ'], 'CAQ': ['Control', 'Alt', 'KeyQ'] };
-const SEND = { 'F11': 'F11', 'ESC': 'Esc', 'ALTF1': 'Alt+F1', 'ALT2': 'Alt+2', 'ALT1': 'Alt+1', 'ALTW': 'Alt+W', 'POWER': 'Alt+Shift+Q', 'CAQ': 'Ctrl+Alt+Q' };
+const CDP = { 'F11': ['F11'], 'ESC': ['Escape'], 'ALTF1': ['Alt', 'F1'], 'ALT2': ['Alt', 'Digit2'], 'ALT1': ['Alt', 'Digit1'], 'ALTW': ['Alt', 'KeyW'], 'POWER': ['Alt', 'Shift', 'KeyQ'], 'KEYS': ['Alt', 'Shift', 'F1'], 'NOTES': ['Alt', 'Shift', 'KeyN'], 'TILE': ['Alt', 'Shift', 'ArrowLeft'], 'MAX': ['Alt', 'Shift', 'ArrowUp'], 'CAQ': ['Control', 'Alt', 'KeyQ'] };
+const SEND = { 'F11': 'F11', 'ESC': 'Esc', 'ALTF1': 'Alt+F1', 'ALT2': 'Alt+2', 'ALT1': 'Alt+1', 'ALTW': 'Alt+W', 'POWER': 'Alt+Shift+Q', 'KEYS': 'Alt+Shift+F1', 'NOTES': 'Alt+Shift+N', 'TILE': 'Alt+Shift+Left', 'MAX': 'Alt+Shift+Up', 'CAQ': 'Ctrl+Alt+Q' };
 async function press(id) {
   if (os) { await page.evaluate(() => { window.__keys.length = 0; }); try { ps('keys', SEND[id]); } catch (e) { console.log(`  OS key helper failed for ${id}: ${String(e).slice(0, 120)}`); } await sleep(150); console.log(`  sent ${id}: page saw [${(await keysSeen()).join(', ')}]`); return; }
   const keys = CDP[id];
@@ -158,6 +162,21 @@ await press('ESC');
 s = await until((x) => !x.power);
 check(`${kind} Esc closes the power menu`, pOpen && !s.power);
 
+await press('KEYS');
+s = await until((x) => x.keys);
+const kOpen = s.keys;
+check(`${kind} Alt+Shift+F1 opens the shortcut list`, s.keys);
+await press('ESC');
+s = await until((x) => !x.keys);
+check(`${kind} Esc closes the shortcut list`, kOpen && !s.keys);
+await press('NOTES');
+s = await until((x) => x.notes);
+const nOpen = s.notes;
+check(`${kind} Alt+Shift+N opens the notification centre`, s.notes);
+await press('ESC');
+s = await until((x) => !x.notes);
+check(`${kind} Esc closes the notification centre`, nOpen && !s.notes);
+
 // window close and reopen (Settings: needs no distribution)
 const openSettings = async () => {
   const labels = await page.$$eval('.dock button', (bs) => bs.map((b) => b.getAttribute('aria-label') ?? ''));
@@ -174,6 +193,16 @@ await press('ALTW');
 s = await until((x) => x.wins === before);
 const closedOk = s.wins === before;
 check(`${kind} Alt+W closes the focused window`, closedOk, `${s.wins} visible`);
+await openSettings();
+s = await until((x) => x.wins === before + 1);
+await press('TILE');
+s = await until((x) => x.workw > 0 && Math.abs(x.winw - x.workw / 2) < x.workw * 0.05);
+check(`${kind} Alt+Shift+Left tiles the window to half the work area`, Math.abs(s.winw - s.workw / 2) < s.workw * 0.05, `window ${s.winw}px of ${s.workw}px`);
+await press('MAX');
+s = await until((x) => x.winw > x.workw * 0.95);
+check(`${kind} Alt+Shift+Up maximises the window`, s.winw > s.workw * 0.95, `window ${s.winw}px of ${s.workw}px`);
+await press('ALTW');
+await until((x) => x.wins === before);
 await openSettings();
 s = await until((x) => x.wins === before + 1);
 check('the same window opens again after being closed', closedOk && s.wins === before + 1);
